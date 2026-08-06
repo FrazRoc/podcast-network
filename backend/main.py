@@ -1,3 +1,8 @@
+# TO RUN LOCALLY
+# switch to bsh in the /podcast-network/backend/ folder
+# source ~/.bash_profile
+# uvicorn main:app --reload
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import psycopg2

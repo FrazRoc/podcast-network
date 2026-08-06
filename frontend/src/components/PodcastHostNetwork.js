@@ -120,23 +120,47 @@ const ConnectionDetails = ({ connection, onClose }) => {
   );
 };
 
-const PodcastLegend = ({ podcasts }) => {
+const PodcastLegend = ({ podcasts, filteredPodcasts }) => {
+  const [isExpanded, setIsExpanded] = useState(true);
+
   return (
-    <div className="absolute bottom-4 right-4 bg-white p-4 rounded-lg shadow-lg max-w-xs">
-      <h3 className="text-sm font-semibold mb-2">Podcast Clusters</h3>
-      <div className="space-y-1">
-        {podcasts.map((podcast, i) => (
-          <div key={podcast} className="flex items-center text-xs">
-            <div 
-              className="w-3 h-3 rounded-full mr-2" 
-              style={{ 
-                backgroundColor: `hsla(${podcast.length * 7}, 70%, 70%, 0.6)`
-              }} 
-            />
-            <span className="truncate">{podcast}</span>
-          </div>
-        ))}
+    <div className="absolute bottom-4 right-4 bg-white rounded-lg shadow-lg">
+      {/* Header with toggle */}
+      <div 
+        className="p-3 flex justify-between items-center cursor-pointer hover:bg-gray-50"
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
+        <h3 className="text-sm font-semibold">
+          Podcast Clusters ({filteredPodcasts.length})
+        </h3>
+        <svg 
+          className={`w-4 h-4 text-gray-500 transform transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+          fill="none" 
+          stroke="currentColor" 
+          viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
       </div>
+
+      {/* Content */}
+      {isExpanded && (
+        <div className="p-3 pt-0 max-h-[50vh] overflow-y-auto">
+          <div className="space-y-1">
+            {filteredPodcasts.map((podcast, i) => (
+              <div key={podcast} className="flex items-center text-xs">
+                <div 
+                  className="w-3 h-3 rounded-full mr-2" 
+                  style={{ 
+                    backgroundColor: `hsla(${podcast.length * 7}, 70%, 70%, 0.6)`
+                  }} 
+                />
+                <span className="truncate">{podcast}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -679,7 +703,7 @@ useEffect(() => {
     };
 
     const simulation = forceSimulation(graphData.nodes)
-      .force('link', forceLink(graphData.links).id(d => d.id).distance(100))
+      .force('link', forceLink(graphData.links).id(d => d.id).distance(80))
       .force('charge', forceManyBody().strength(-1000))
       .force('center', forceCenter(dimensions.width/2, dimensions.height/2))
       .force('collide', forceCollide().radius(d => Math.sqrt(d.val * 100) + 20))
@@ -916,7 +940,8 @@ return (
         />
       </div>
       <PodcastLegend 
-        podcasts={Array.from(new Set(graphData.nodes.flatMap(n => n.podcasts)))} 
+        podcasts={Array.from(new Set(graphData.nodes.flatMap(n => n.podcasts)))}
+        filteredPodcasts={Array.from(new Set(filteredGraphData.nodes.flatMap(n => n.podcasts)))}
       />
     </div>
   );
