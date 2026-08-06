@@ -302,20 +302,22 @@ if __name__ == "__main__":
     ]
 
     try:
-        manager.add_podcasts(CLEAN_ENERGY_PODCASTS)
+        # Podcasts are seeded via podcast-schema.sql.
+        # Only uncomment add_podcasts() if adding new shows not in the schema.
+        # manager.add_podcasts(CLEAN_ENERGY_PODCASTS)
 
         status = manager.get_status_summary()
         print("\nPodcast Tracking Summary:")
         print(json.dumps(status, indent=2, default=str))
 
-        # Uncomment to run the scrape:
-        # manager.process_all_pending(max_podcasts=5)
+        # Run the full scrape (Apple RSS -> episodes table)
+        #manager.process_all_pending()
 
         # Uncomment to run Podchaser enrichment on hosts:
         # client.enrich_all_hosts(batch_size=5)
 
         # Uncomment to look up missing Podchaser IDs for podcasts:
-        # client.find_podcast_podchaser_ids(batch_size=10)
+        client.find_podcast_podchaser_ids(batch_size=10)
 
         # Uncomment to sync episode credits via Podchaser:
         # client.sync_episode_credits(batch_size=10)
