@@ -13,10 +13,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class PodcastScraper:
-    def __init__(self, db_connection_string):
+    def __init__(self, db_connection_string, episode_limit: int = 50):
         self.conn = psycopg2.connect(db_connection_string)
         self.cursor = self.conn.cursor()
         self.base_url = "https://itunes.apple.com"
+        self.episode_limit = episode_limit
 
     def fetch_itunes_data(self, podcast_id: str) -> Optional[Dict]:
         """Fetch podcast and episode data from iTunes API"""
@@ -42,7 +43,7 @@ class PodcastScraper:
             
         # Get episodes
         params['entity'] = 'podcastEpisode'
-        params['limit'] = 50 # EF temp changed to 50, normally 10
+        params['limit'] = self.episode_limit
         
         #logger.info("Fetching episode data from iTunes API")
         response = requests.get(url, params=params)
