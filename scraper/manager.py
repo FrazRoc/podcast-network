@@ -77,21 +77,29 @@ class PodcastManager:
     # QUERYING
     # ------------------------------------------------------------------
 
-    def get_podcasts_to_update(self, min_interval_hours: int = 0) -> List[Dict]:
+    def get_podcasts_to_update(self, min_interval_hours: int = 0, new_only: bool = False) -> List[Dict]:
         """
         Return tracking rows that need scraping, ordered by last_scraped_at ASC.
         Each row is a dict with apple_podcast_id, podchaser_id, podcast_title.
+        If new_only=True, only return podcasts with no episodes in the DB yet.
         """
         conn = self._get_connection()
         cur = conn.cursor()
         try:
+            new_only_filter = """
+                AND NOT EXISTS (
+                    SELECT 1 FROM podcasts p
+                    JOIN episodes e ON e.podcast_id = p.podcast_id
+                    WHERE p.apple_podcast_id = podcast_tracking.apple_podcast_id
+                )""" if new_only else ""
             cur.execute(
-                """
+                f"""
                 SELECT apple_podcast_id, podchaser_id, podcast_title
                 FROM podcast_tracking
                 WHERE (last_scraped_at IS NULL OR
                        last_scraped_at < NOW() - INTERVAL '%s hours')
                   AND status != 'in_progress'
+                  {new_only_filter}
                 ORDER BY last_scraped_at ASC NULLS FIRST
                 """,
                 (min_interval_hours,),
@@ -149,14 +157,14 @@ class PodcastManager:
     # PROCESSING
     # ------------------------------------------------------------------
 
-    def process_all_pending(self, max_podcasts: int = None):
+    def process_all_pending(self, max_podcasts: int = None, new_only: bool = False):
         """
         Main scrape loop.
         Uses apple_podcast_id as the primary driver; falls back to podchaser_id
         where apple_podcast_id is NULL (those rows will only be enriched via
         the Podchaser client path, not the Apple RSS path).
         """
-        podcasts = self.get_podcasts_to_update()
+        podcasts = self.get_podcasts_to_update(new_only=new_only)
         if max_podcasts:
             podcasts = podcasts[:max_podcasts]
 
@@ -230,97 +238,106 @@ class PodcastManager:
 # ENTRY POINT
 # ------------------------------------------------------------------
 if __name__ == "__main__":
-    DB = "postgresql://localhost/podcast_db"
+    import argparse
 
-    PODCHASER_CLIENT_ID = "9dfc83b0-5c27-4620-9f4f-59e285c3a371"
-    PODCHASER_API_KEY   = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJhdWQiOiI5ZGZjODNiMC01YzI3LTQ2MjAtOWY0Zi01OWUyODVjM2EzNzEiLCJqdGkiOiI0NDJlYzJjNzFlMWUzMzA4NjFlYTM3NWQzMzc1M2IzZDljM2JlYmM2MTNmMjFkMGZhZmRhNGQxNzFlYmNiMzZiZGVhN2U4YmEyYmEwNDE2OSIsImlhdCI6MTczNzA3ODY2OC43MTEwNjgsIm5iZiI6MTczNzA3ODY2OC43MTEwNzEsImV4cCI6MTc2ODYxNDY2OC42OTgwMSwic3ViIjoiIiwic2NvcGVzIjpbIioiXX0.frj6WSFDTE8cuscjXu89gXaIZGWDWXI2ooGd2wVgR7fglltdb2Ch0LF7iFnU3M8TZ8ey5Ld0hJad3FPx_a6vIqfr_ywrl6r-1i4dIAnliyLaYgaHFgJAGuuthUCVdZmOXBveQDHqzvrvgJUHnhvxAoNJMIHTI1nwCkR5QGxqlSO4YEuoGzQMT0y2GuV8KHmFiaBUdNR2DXLSiM57TPJS7BJsf6T3n94DkzKMQjKThJyruM-GfooN5ltJolaEBKig6p4lQxrg_EP1sTE7N2T1-p763p_7TbDbl0pOjbO4Qv-fUJkxHbmUrJonhzwO4inRBYl05KvsDLA3QZ62nKX58KCG78xXz62S073C1t5f7otZm1sBpdfWW961afS_4aOjcCl_BLqG2WScveEgr45JKrT1GuNtd0ZDEgAcrwyO0CyKuNuPTdxc88Lb1IcRaNGuxTNchxxn4Gw17s-18YlWW3uQVw5fXFjF1IDKHjZpC7Sp5S1ITHp5d5uLOppPvuOQDq8lnS6HEMp7pJnw8OibU2ZWn7FDGw8mgDzMjvsYl9lNr-Lr2-safrANygA6-pMeuGE7H1Sj23NuPm-w2GVa1x9ZZLVM0zPD0cVZThhvRUfjhYk4vUbvcOUZfjt67ugJYVfZwoaTREEXuCXth3iobX-Zx1opZ712baBlEFBcd1c"
+    parser = argparse.ArgumentParser(
+        description='Podcast episode scraper and tracking manager',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+commands:
+  scrape      Scrape episodes for all pending podcasts (RSS via Apple API)
+  add         Add one or more podcasts by Apple ID
+  status      Print tracking summary
+  reset       Reset failed podcasts back to pending so they retry
 
-    manager = PodcastManager(DB)
-    client  = PodchaserClient(
-        client_id=PODCHASER_CLIENT_ID,
-        api_key=PODCHASER_API_KEY,
-        db_connection_string=DB,
+examples:
+  python3 manager.py scrape
+  python3 manager.py scrape --podcast "Volts"
+  python3 manager.py scrape --max 5
+  python3 manager.py add --apple-id 1805010154 --title "NET-0"
+  python3 manager.py add --apple-id 1321759767 --podchaser-id 595385 --title "Reversing Climate Change"
+  python3 manager.py status
+  python3 manager.py reset
+        """
     )
 
-    # ----------------------------------------------------------------
-    # Clean energy podcast seed list
-    # apple_podcast_id is primary; podchaser_id is optional enrichment.
-    # Fill in apple_podcast_id values as you look them up.
-    # ----------------------------------------------------------------
-    CLEAN_ENERGY_PODCASTS = [
-        {"apple_podcast_id": None,          "podchaser_id": "851883",  "podcast_title": "Inevitable (formerly My Climate Journey)"},
-        {"apple_podcast_id": "1593204897",  "podchaser_id": "2153206", "podcast_title": "Catalyst with Shayle Kann"},
-        {"apple_podcast_id": None,          "podchaser_id": "1359342", "podcast_title": "Cleaning Up"},
-        {"apple_podcast_id": "663379413",   "podchaser_id": "109600",  "podcast_title": "The Energy Gang"},
-        {"apple_podcast_id": None,          "podchaser_id": "3737431", "podcast_title": "Volts"},
-        {"apple_podcast_id": None,          "podchaser_id": "877656",  "podcast_title": "Switched On"},
-        {"apple_podcast_id": None,          "podchaser_id": "378051",  "podcast_title": "The Interchange"},
-        {"apple_podcast_id": None,          "podchaser_id": "541293",  "podcast_title": "The Interchange: Recharged"},
-        {"apple_podcast_id": None,          "podchaser_id": "854652",  "podcast_title": "Watt It Takes"},
-        {"apple_podcast_id": None,          "podchaser_id": "656398",  "podcast_title": "Political Climate"},
-        {"apple_podcast_id": None,          "podchaser_id": "2153207", "podcast_title": "The Carbon Copy"},
-        {"apple_podcast_id": None,          "podchaser_id": "4826131", "podcast_title": "Zero: The Climate Race"},
-        {"apple_podcast_id": None,          "podchaser_id": "742294",  "podcast_title": "Redefining Energy"},
-        {"apple_podcast_id": None,          "podchaser_id": "1979929", "podcast_title": "Climate Tech Cocktails"},
-        {"apple_podcast_id": None,          "podchaser_id": "934211",  "podcast_title": "Climate Rising"},
-        {"apple_podcast_id": None,          "podchaser_id": "197171",  "podcast_title": "The Energy Transition Show"},
-        {"apple_podcast_id": None,          "podchaser_id": "1501741", "podcast_title": "A Matter of Degrees"},
-        {"apple_podcast_id": None,          "podchaser_id": "873859",  "podcast_title": "Outrage + Optimism"},
-        {"apple_podcast_id": None,          "podchaser_id": "1544490", "podcast_title": "Leaders in Cleantech"},
-        {"apple_podcast_id": None,          "podchaser_id": "5769839", "podcast_title": "Supercool"},
-        {"apple_podcast_id": None,          "podchaser_id": "1531238", "podcast_title": "Climate Question"},
-        {"apple_podcast_id": None,          "podchaser_id": "805995",  "podcast_title": "Energy Unplugged"},
-        {"apple_podcast_id": None,          "podchaser_id": "5985497", "podcast_title": "Open Circuit"},
-        {"apple_podcast_id": None,          "podchaser_id": "4288186", "podcast_title": "Factor This!"},
-        {"apple_podcast_id": None,          "podchaser_id": None,      "podcast_title": "Critical Capital"},
-        {"apple_podcast_id": "1081481629",  "podchaser_id": "40484",   "podcast_title": "Columbia Energy Exchange"},
-        {"apple_podcast_id": None,          "podchaser_id": "463390",  "podcast_title": "CleanTech Talk"},
-        {"apple_podcast_id": None,          "podchaser_id": "1934775", "podcast_title": "The Big Switch"},
-        {"apple_podcast_id": None,          "podchaser_id": "1944634", "podcast_title": "How We Survive"},
-        {"apple_podcast_id": None,          "podchaser_id": "748053",  "podcast_title": "Drilled"},
-        {"apple_podcast_id": "1593203014",  "podchaser_id": "4007204", "podcast_title": "The Green Blueprint"},
-        {"apple_podcast_id": None,          "podchaser_id": "1257328", "podcast_title": "Build Repeat."},
-        {"apple_podcast_id": None,          "podchaser_id": "4752417", "podcast_title": "Hardware to Save a Planet"},
-        {"apple_podcast_id": None,          "podchaser_id": "5370888", "podcast_title": "With Great Power"},
-        {"apple_podcast_id": None,          "podchaser_id": "2020250", "podcast_title": "Energy Transition Solutions"},
-        {"apple_podcast_id": None,          "podchaser_id": "4147481", "podcast_title": "The Great Simplification"},
-        {"apple_podcast_id": None,          "podchaser_id": "2199181", "podcast_title": "Smart Energy Voices"},
-        {"apple_podcast_id": None,          "podchaser_id": None,      "podcast_title": "DER Task Force Podcast"},
-        {"apple_podcast_id": None,          "podchaser_id": None,      "podcast_title": "The Carbon Removal Show"},
-        {"apple_podcast_id": None,          "podchaser_id": None,      "podcast_title": "ClimateBiz"},
-        {"apple_podcast_id": None,          "podchaser_id": None,      "podcast_title": "Nuclear Barbarians"},
-        {"apple_podcast_id": None,          "podchaser_id": None,      "podcast_title": "Energy Central Power Perspectives"},
-        {"apple_podcast_id": None,          "podchaser_id": None,      "podcast_title": "Decarbonizing Commerce"},
-        {"apple_podcast_id": None,          "podchaser_id": None,      "podcast_title": "The Clean Energy Show"},
-        {"apple_podcast_id": None,          "podchaser_id": None,      "podcast_title": "Climate Capital Podcast"},
-        {"apple_podcast_id": "1561411048",  "podchaser_id": "2176818", "podcast_title": "Climate CEOs"},
-        {"apple_podcast_id": None,          "podchaser_id": "604598",  "podcast_title": "Titans of Nuclear"},
-        {"apple_podcast_id": "296762605",   "podchaser_id": "14444",   "podcast_title": "Climate One"},
-        {"apple_podcast_id": "1541394865",  "podchaser_id": "1569388", "podcast_title": "Where the Internet Lives"},
-        {"apple_podcast_id": None,          "podchaser_id": None,      "podcast_title": "Climate Insiders"},
-        {"apple_podcast_id": None,          "podchaser_id": None,      "podcast_title": "The Tech 4 Climate Podcast"},
-    ]
+    parser.add_argument('command', choices=['scrape', 'add', 'status', 'reset'],
+                        help='What to do')
+    parser.add_argument('--db', type=str, default='postgresql://localhost/podcast_db',
+                        help='Database connection string')
+    parser.add_argument('--new-only', action='store_true', default=False,
+                        help='Only scrape podcasts with no episodes yet')
+    parser.add_argument('--max', type=int, default=None,
+                        help='Max number of podcasts to scrape (default: all pending)')
+    parser.add_argument('--podcast', type=str, default=None,
+                        help='Only scrape this podcast title')
+    parser.add_argument('--apple-id', type=str, default=None,
+                        help='Apple Podcast ID for add command')
+    parser.add_argument('--podchaser-id', type=str, default=None,
+                        help='Podchaser ID for add command (optional)')
+    parser.add_argument('--title', type=str, default=None,
+                        help='Podcast title for add command')
 
-    try:
-        # Podcasts are seeded via podcast-schema.sql.
-        # Only uncomment add_podcasts() if adding new shows not in the schema.
-        # manager.add_podcasts(CLEAN_ENERGY_PODCASTS)
+    args = parser.parse_args()
+    manager = PodcastManager(args.db)
 
+    if args.command == 'status':
         status = manager.get_status_summary()
         print("\nPodcast Tracking Summary:")
         print(json.dumps(status, indent=2, default=str))
 
-        # Run the full scrape (Apple RSS -> episodes table)
-        #manager.process_all_pending()
+    elif args.command == 'add':
+        if not args.apple_id:
+            parser.error("--apple-id is required for the add command")
 
-        # Uncomment to run Podchaser enrichment on hosts:
-        # client.enrich_all_hosts(batch_size=5)
+        # Auto-fetch title from iTunes API if not provided
+        title = args.title
+        if not title:
+            import requests
+            resp = requests.get(
+                "https://itunes.apple.com/lookup",
+                params={"id": args.apple_id, "entity": "podcast", "country": "US"},
+                timeout=10
+            )
+            data = resp.json()
+            if data.get("resultCount", 0) > 0:
+                title = data["results"][0].get("collectionName", args.apple_id)
+            else:
+                title = args.apple_id
 
-        # Uncomment to look up missing Podchaser IDs for podcasts:
-        client.find_podcast_podchaser_ids(batch_size=10)
+        manager.add_podcasts([{
+            "apple_podcast_id": args.apple_id,
+            "podchaser_id": args.podchaser_id,
+            "podcast_title": title,
+        }])
+        print(f"Added: {title} ({args.apple_id})")
 
-        # Uncomment to sync episode credits via Podchaser:
-        # client.sync_episode_credits(batch_size=10)
+    elif args.command == 'reset':
+        conn = manager._get_connection()
+        cur = conn.cursor()
+        cur.execute("UPDATE podcast_tracking SET status = 'pending' WHERE status = 'failed'")
+        count = cur.rowcount
+        conn.commit()
+        cur.close()
+        conn.close()
+        print(f"Reset {count} failed podcast(s) to pending")
 
-    except Exception as e:
-        print(f"Error: {e}")
+    elif args.command == 'scrape':
+        status = manager.get_status_summary()
+        print("\nPodcast Tracking Summary:")
+        print(json.dumps(status, indent=2, default=str))
+        print()
+
+        if args.podcast:
+            # Filter to one specific show
+            conn = manager._get_connection()
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE podcast_tracking SET status = 'pending' WHERE podcast_title = %s AND status = 'success'",
+                (args.podcast,)
+            )
+            conn.commit()
+            cur.close()
+            conn.close()
+
+        manager.process_all_pending(max_podcasts=args.max, new_only=args.new_only)

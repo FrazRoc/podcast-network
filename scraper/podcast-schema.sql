@@ -259,5 +259,11 @@ INSERT INTO podcast_tracking (apple_podcast_id, podchaser_id, podcast_title, sta
     ('1561411048', '2176818', 'Climate CEOs',                             'pending'),
     ('1331598443', '604598',  'Titans of Nuclear',                        'pending'),
     ('296762605',  '14444',   'Climate One',                              'pending'),
-    ('1541394865', '1569388', 'Where the Internet Lives',                 'pending')
+    ('1541394865', '1569388', 'Where the Internet Lives',                 'pending'),
+    ('1805010154', NULL,      'NET-0 | Inside ClimateTech, Startups & Venture Capital', 'pending'),
+    ('1614789563', NULL,      'The Startup Tank',                                        'pending'),
+    ('1321759767', '595385',  'Reversing Climate Change',                                'pending'),
+    ('1523015060', NULL,      'Going Negative',                                          'pending'),
+    ('1167164482', NULL,      'Currents',                                                'pending'),
+    ('1480605295', NULL,      'Politico Energy',                                         'pending')
 ON CONFLICT (apple_podcast_id) DO NOTHING;
