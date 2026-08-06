@@ -99,11 +99,11 @@ class PodcastScraper:
         """Get genre ID or create new genre"""
         if not genre_name:
             return None
-            
+
         query = """
         INSERT INTO genres (name, apple_genre_id)
         VALUES (%s, %s)
-        ON CONFLICT (name) DO UPDATE 
+        ON CONFLICT (name) DO UPDATE
         SET apple_genre_id = COALESCE(EXCLUDED.apple_genre_id, genres.apple_genre_id)
         RETURNING genre_id
         """
