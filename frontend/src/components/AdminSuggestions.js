@@ -18,10 +18,20 @@ const SourceBadge = ({ source }) => {
 // ─── Credit pill ───────────────────────────────────────────────────────────────
 const CreditPill = ({ credit }) => {
   const isVerified = credit.data_source === 'apple_verified';
+  const color = credit.is_guest ? 'bg-blue-400' : 'bg-green-500';
   return (
     <div className="flex items-center gap-2 py-1.5 px-3 bg-gray-50 rounded-lg text-sm">
-      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${credit.is_guest ? 'bg-blue-400' : 'bg-green-500'}`} />
-      <span className="font-medium text-gray-800">{credit.name}</span>
+      {credit.profile_image_url ? (
+        <img
+          src={credit.profile_image_url}
+          alt={credit.name}
+          className="w-6 h-6 rounded-full object-cover flex-shrink-0"
+          onError={e => { e.target.style.display='none'; }}
+        />
+      ) : (
+        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${color}`} />
+      )}
+      <span className={`font-medium ${credit.is_guest ? 'text-blue-700' : 'text-green-700'}`}>{credit.name}</span>
       <span className="text-gray-400 text-xs">{credit.is_guest ? 'Guest' : 'Host'}</span>
       {isVerified && (
         <span className="ml-auto text-xs text-green-600 font-medium">✓ Apple</span>
@@ -39,9 +49,9 @@ export default function AdminSuggestions() {
   const [lastResult, setLastResult] = useState(null);
   const [done, setDone] = useState(false);
 
-  const fetchNext = useCallback(async () => {
+  const fetchNext = useCallback(async (clearResult = true) => {
     setLoading(true);
-    setLastResult(null);
+    if (clearResult) setLastResult(null);
     try {
       const res = await fetch(`${API}/suggestions/next`);
       const data = await res.json();
@@ -93,7 +103,7 @@ export default function AdminSuggestions() {
       const result = await res.json();
       setLastResult({ action, ...result });
       await fetchStats();
-      await fetchNext();
+      await fetchNext(false); // don't clear result when loading next
     } catch (e) {
       console.error(e);
     } finally {
@@ -101,16 +111,39 @@ export default function AdminSuggestions() {
     }
   };
 
-  // Highlight candidate name in description
-  const highlightName = (text, name) => {
-    if (!text || !name) return text;
-    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const parts = text.split(new RegExp(`(${escaped})`, 'gi'));
-    return parts.map((part, i) =>
-      part.toLowerCase() === name.toLowerCase()
-        ? <mark key={i} className="bg-yellow-200 rounded px-0.5">{part}</mark>
-        : part
-    );
+  // Highlight names in text with configurable style
+  const highlightNames = (text, highlights) => {
+    // highlights: [{name, className}]
+    if (!text || !highlights?.length) return text;
+    
+    // Build a combined regex for all names
+    const patterns = highlights.map(h => ({
+      re: new RegExp(h.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'),
+      className: h.className,
+    }));
+
+    // Find all matches with positions
+    const matches = [];
+    patterns.forEach(({ re, className }) => {
+      let m;
+      while ((m = re.exec(text)) !== null) {
+        matches.push({ start: m.index, end: m.index + m[0].length, text: m[0], className });
+      }
+    });
+
+    if (!matches.length) return text;
+
+    matches.sort((a, b) => a.start - b.start);
+
+    const parts = [];
+    let pos = 0;
+    matches.forEach((m, i) => {
+      if (m.start > pos) parts.push(text.slice(pos, m.start));
+      parts.push(<mark key={i} className={m.className}>{m.text}</mark>);
+      pos = m.end;
+    });
+    if (pos < text.length) parts.push(text.slice(pos));
+    return parts;
   };
 
   return (
@@ -133,18 +166,7 @@ export default function AdminSuggestions() {
         </div>
       </header>
 
-      {/* Last action result */}
-      {lastResult && (
-        <div className={`px-6 py-3 text-sm font-medium ${
-          lastResult.action === 'approve' ? 'bg-green-50 text-green-800 border-b border-green-200' :
-          lastResult.action === 'reject' ? 'bg-red-50 text-red-800 border-b border-red-200' :
-          'bg-blue-50 text-blue-800 border-b border-blue-200'
-        }`}>
-          {lastResult.action === 'approve' && `✅ ${lastResult.message}`}
-          {lastResult.action === 'reject' && `❌ Rejected "${lastResult.name}" — added to blocklist`}
-          {lastResult.action === 'skip' && `⏭ Skipped — moved to back of queue`}
-        </div>
-      )}
+
 
       {/* Loading */}
       {loading && (
@@ -218,8 +240,16 @@ export default function AdminSuggestions() {
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
                 Episode Description
               </p>
-              <div className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
-                {highlightName(suggestion.episode_description, suggestion.candidate_name)}
+              <div className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap text-left">
+                {highlightNames(suggestion.episode_description, [
+                  { name: suggestion.candidate_name, className: 'bg-yellow-200 rounded px-0.5 not-italic' },
+                  ...(suggestion.existing_credits || []).map(c => ({
+                    name: c.name,
+                    className: c.is_guest
+                      ? 'underline decoration-blue-400 decoration-2 bg-transparent not-italic'
+                      : 'underline decoration-green-500 decoration-2 bg-transparent not-italic',
+                  }))
+                ])}
               </div>
             </div>
           </div>
@@ -243,7 +273,9 @@ export default function AdminSuggestions() {
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-3 mb-4">
                 <p className="text-xs font-semibold text-yellow-700 mb-1">Matched text</p>
                 <p className="text-sm text-yellow-900 italic">
-                  "…{suggestion.matched_text}…"
+                  "…{highlightNames(suggestion.matched_text, [
+                    { name: suggestion.candidate_name, className: 'bg-yellow-300 rounded px-0.5 not-italic font-semibold' }
+                  ])}…"
                 </p>
               </div>
 
@@ -289,6 +321,49 @@ export default function AdminSuggestions() {
                   <span className="text-gray-400 text-sm font-normal">press S</span>
                 </button>
               </div>
+
+              {/* Last action result — persists until next action */}
+              {lastResult && (
+                <div className={`mt-6 p-4 rounded-xl text-sm ${
+                  lastResult.action === 'approve'
+                    ? 'bg-green-50 border border-green-200'
+                    : lastResult.action === 'reject'
+                    ? 'bg-red-50 border border-red-200'
+                    : 'bg-gray-100 border border-gray-200'
+                }`}>
+                  {lastResult.action === 'approve' && (
+                    <>
+                      <p className="font-semibold text-green-800 mb-1">
+                        ✅ Approved: {lastResult.name}
+                      </p>
+                      <p className="text-green-700">
+                        {lastResult.additional_episodes_linked > 0
+                          ? `Found ${lastResult.additional_episodes_linked} additional episode appearance(s):`
+                          : 'No additional appearances found in other episodes.'}
+                      </p>
+                      {lastResult.by_podcast && Object.keys(lastResult.by_podcast).length > 0 && (
+                        <ul className="mt-2 space-y-0.5">
+                          {Object.entries(lastResult.by_podcast).map(([show, count]) => (
+                            <li key={show} className="text-green-700">
+                              • {show} <span className="font-medium">({count} episode{count !== 1 ? 's' : ''})</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </>
+                  )}
+                  {lastResult.action === 'reject' && (
+                    <p className="font-semibold text-red-800">
+                      ❌ Rejected "{lastResult.name}" — added to permanent blocklist
+                    </p>
+                  )}
+                  {lastResult.action === 'skip' && (
+                    <p className="font-semibold text-gray-600">
+                      ⏭ Skipped — moved to back of queue
+                    </p>
+                  )}
+                </div>
+              )}
 
               {/* Progress */}
               <div className="mt-8 pt-6 border-t border-gray-200">
