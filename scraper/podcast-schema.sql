@@ -48,6 +48,7 @@ CREATE TABLE hosts (
     linkedin_url TEXT,
     wikipedia TEXT,
     website_url TEXT,
+    data_source VARCHAR(50) DEFAULT 'apple_verified',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (first_name, last_name)
 );
@@ -101,6 +102,7 @@ CREATE TABLE host_podcast (
     role VARCHAR(100),
     start_date DATE,
     end_date DATE,
+    data_source VARCHAR(50) DEFAULT 'apple_verified',
     PRIMARY KEY (host_id, podcast_id)
 );
 
@@ -112,6 +114,7 @@ CREATE TABLE episode_host (
     host_id INTEGER REFERENCES hosts(host_id),
     is_guest BOOLEAN DEFAULT FALSE,
     role VARCHAR(100),
+    data_source VARCHAR(50) DEFAULT 'apple_verified',
     PRIMARY KEY (episode_id, host_id)
 );
 

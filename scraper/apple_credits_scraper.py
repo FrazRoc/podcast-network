@@ -132,9 +132,11 @@ class AppleCreditsScraper:
     # DATABASE
     # ------------------------------------------------------------------
 
-    def get_or_create_host(self, conn, name: str, image_url: str = None) -> int:
+    def get_or_create_host(self, conn, name: str, image_url: str = None,
+                           data_source: str = 'apple_verified') -> int:
         """Get host_id by full name, or create a new host record.
         If image_url is provided and the host has no image yet, update it.
+        data_source tracks where this record came from.
         """
         cur = conn.cursor()
         # Split name into first/last — handle multi-word names like "Bridget van Dorsten"
@@ -162,29 +164,31 @@ class AppleCreditsScraper:
         # Create new
         cur.execute(
             """
-            INSERT INTO hosts (first_name, last_name, profile_image_url, created_at)
-            VALUES (%s, %s, %s, NOW())
+            INSERT INTO hosts (first_name, last_name, profile_image_url, data_source, created_at)
+            VALUES (%s, %s, %s, %s, NOW())
             ON CONFLICT (first_name, last_name) DO UPDATE
                 SET profile_image_url = COALESCE(EXCLUDED.profile_image_url, hosts.profile_image_url)
             RETURNING host_id
             """,
-            (first_name, last_name, image_url)
+            (first_name, last_name, image_url, data_source)
         )
         return cur.fetchone()[0]
 
     def insert_episode_credit(self, conn, episode_id: int, host_id: int,
-                               is_guest: bool, role: str):
+                               is_guest: bool, role: str,
+                               data_source: str = 'apple_verified'):
         """Insert a credit into episode_host, ignoring duplicates."""
         cur = conn.cursor()
         cur.execute(
             """
-            INSERT INTO episode_host (episode_id, host_id, is_guest, role)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO episode_host (episode_id, host_id, is_guest, role, data_source)
+            VALUES (%s, %s, %s, %s, %s)
             ON CONFLICT (episode_id, host_id) DO UPDATE
                 SET role = EXCLUDED.role,
-                    is_guest = EXCLUDED.is_guest
+                    is_guest = EXCLUDED.is_guest,
+                    data_source = EXCLUDED.data_source
             """,
-            (episode_id, host_id, is_guest, role)
+            (episode_id, host_id, is_guest, role, data_source)
         )
 
     # ------------------------------------------------------------------
@@ -280,11 +284,12 @@ class AppleCreditsScraper:
                     # Insert into host_podcast
                     cur2 = conn.cursor()
                     cur2.execute("""
-                        INSERT INTO host_podcast (host_id, podcast_id, role)
-                        VALUES (%s, %s, %s)
+                        INSERT INTO host_podcast (host_id, podcast_id, role, data_source)
+                        VALUES (%s, %s, %s, %s)
                         ON CONFLICT (host_id, podcast_id) DO UPDATE
-                            SET role = EXCLUDED.role
-                    """, (host_id, podcast_id, 'Host'))
+                            SET role = EXCLUDED.role,
+                                data_source = EXCLUDED.data_source
+                    """, (host_id, podcast_id, 'Host', 'apple_verified'))
                     cur2.close()
                     hosts_found += 1
 
