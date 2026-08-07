@@ -393,7 +393,9 @@ class AppleCreditsScraper:
             params.append(podcast_title)
         if hosts_only:
             host_filter = """AND EXISTS (
-                  SELECT 1 FROM host_podcast hp WHERE hp.podcast_id = p.podcast_id
+                  SELECT 1 FROM host_podcast hp
+                  WHERE hp.podcast_id = p.podcast_id
+                    AND hp.data_source = 'apple_verified'
               )"""
 
         cur.execute(
@@ -514,7 +516,7 @@ examples:
     parser.add_argument('--db', type=str, default='postgresql://localhost/podcast_db',
                         help='Database connection string')
     parser.add_argument('--hosts-only', action='store_true', default=False,
-                        help='Only scrape episodes from shows that have host data')
+                        help='Only scrape episodes from shows with Apple-verified host data (excludes itunes_artist sources)')
 
     args = parser.parse_args()
     scraper = AppleCreditsScraper(args.db)

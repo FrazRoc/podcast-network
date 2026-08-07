@@ -277,6 +277,84 @@ class PodcastManager:
             except Exception as e:
                 logger.error(f"  Error backfilling {title}: {e}")
 
+
+    # ------------------------------------------------------------------
+    # REFRESH DESCRIPTIONS
+    # ------------------------------------------------------------------
+
+    def refresh_descriptions(self):
+        """
+        Re-fetch RSS feed for all podcasts to populate missing show descriptions.
+        Only updates the description field, does not re-scrape episodes.
+        """
+        import requests as req
+        import feedparser
+
+        conn = self._get_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT p.podcast_id, p.apple_podcast_id, p.title, p.rss_feed_url
+            FROM podcasts p
+            WHERE (p.description IS NULL OR p.description = '')
+              AND p.rss_feed_url IS NOT NULL
+            ORDER BY p.title
+        """)
+        shows = cur.fetchall()
+        cur.close()
+
+        logger.info(f"Refreshing descriptions for {len(shows)} shows...")
+        updated = 0
+
+        for podcast_id, apple_id, title, rss_url in shows:
+            try:
+                description = ''
+
+                # Try RSS feed first
+                if rss_url:
+                    feed = feedparser.parse(rss_url)
+                    description = (
+                        getattr(feed.feed, 'description', '') or
+                        getattr(feed.feed, 'subtitle', '') or
+                        getattr(feed.feed, 'summary', '') or
+                        ''
+                    )
+
+                # Fallback: iTunes API lookup
+                if not description and apple_id:
+                    try:
+                        resp = req.get(
+                            'https://itunes.apple.com/lookup',
+                            params={'id': apple_id, 'entity': 'podcast', 'country': 'US'},
+                            timeout=10
+                        )
+                        data = resp.json()
+                        if data.get('resultCount', 0) > 0:
+                            description = data['results'][0].get('description', '')
+                        time.sleep(0.5)
+                    except Exception as e2:
+                        logger.warning(f"iTunes fallback failed for {title}: {e2}")
+
+                if description:
+                    cur2 = conn.cursor()
+                    cur2.execute(
+                        "UPDATE podcasts SET description = %s WHERE podcast_id = %s",
+                        (description, podcast_id)
+                    )
+                    cur2.close()
+                    conn.commit()
+                    logger.info(f"✅ {title}")
+                    updated += 1
+                else:
+                    logger.info(f"⚪ {title} — no description found in RSS or iTunes")
+                time.sleep(1)
+            except Exception as e:
+                logger.error(f"Error fetching description for {title}: {e}")
+
+        conn.close()
+        logger.info(f"\nDone: {updated}/{len(shows)} descriptions updated")
+        return updated
+
     # ------------------------------------------------------------------
     # REPORTING
     # ------------------------------------------------------------------
@@ -333,10 +411,11 @@ examples:
   python3 manager.py reset
   python3 manager.py backfill
   python3 manager.py backfill --min-gap 50 --limit 200
+  python3 manager.py refresh-descriptions
         """
     )
 
-    parser.add_argument('command', choices=['scrape', 'add', 'status', 'reset', 'backfill'],
+    parser.add_argument('command', choices=['scrape', 'add', 'status', 'reset', 'backfill', 'refresh-descriptions'],
                         help='What to do')
     parser.add_argument('--db', type=str, default='postgresql://localhost/podcast_db',
                         help='Database connection string')
@@ -393,6 +472,9 @@ examples:
 
     elif args.command == 'backfill':
         manager.backfill_episodes(min_gap=args.min_gap, limit=args.limit)
+
+    elif args.command == 'refresh-descriptions':
+        manager.refresh_descriptions()
 
     elif args.command == 'reset':
         conn = manager._get_connection()

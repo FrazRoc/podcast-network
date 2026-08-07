@@ -59,7 +59,17 @@ class PodcastScraper:
         logger.info(f"PARSING RSS EPISODE FEED: {feed_url}")
         
         feed = feedparser.parse(feed_url)
+
+        # Extract show-level description from RSS channel
+        show_description = (
+            getattr(feed.feed, 'description', '') or
+            getattr(feed.feed, 'subtitle', '') or
+            getattr(feed.feed, 'summary', '') or
+            ''
+        )
+
         feed_data = {
+            'description': show_description,
             'episodes': []
         }
 
@@ -145,7 +155,7 @@ class PodcastScraper:
                     ON CONFLICT (podcast_id, genre_id) DO NOTHING
                 """, (podcast_id, genre_db_id))
 
-    def insert_podcast(self, podcast_data: Dict) -> int:
+    def insert_podcast(self, podcast_data: Dict, rss_description: str = '') -> int:
         """Insert podcast data into database"""
         try:
             # First, get or create channel
@@ -173,7 +183,7 @@ class PodcastScraper:
             
             values = (
                 podcast_data.get('collectionName'),
-                podcast_data.get('description', ''),
+                podcast_data.get('description', '') or rss_description,
                 podcast_data.get('artworkUrl600'),
                 podcast_data.get('collectionViewUrl'),
                 podcast_data.get('languageCode', 'en'),
@@ -267,7 +277,7 @@ class PodcastScraper:
             rss_data = self.parse_rss_feed(feed_url)
             
             # Insert podcast
-            podcast_id = self.insert_podcast(itunes_data['podcast'])
+            podcast_id = self.insert_podcast(itunes_data['podcast'], rss_description=rss_data.get('description', ''))
 
             # Process episodes
             processed = 0
