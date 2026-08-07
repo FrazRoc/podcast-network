@@ -1,74 +1,62 @@
 """
 episode_name_scanner.py
 
-Scans episode titles and descriptions for names of people already in our hosts table.
-Only matches known people — never creates new host records.
-Excludes matches where the person is already the host of that show.
-Strips boilerplate credits/footer text from descriptions before scanning.
+Scans episode titles and descriptions for person names.
 
-Data source: 'parsed_title' or 'parsed_desc'
+Two modes:
+  run     — matches against known hosts table, inserts episode_host links
+  suggest — finds NEW names not in hosts table, writes to suggestions queue
+             for human review via the admin UI
 
 Usage:
-    python3 episode_name_scanner.py dry-run              # preview all matches
-    python3 episode_name_scanner.py dry-run --title-only # titles only (safer)
-    python3 episode_name_scanner.py run --title-only     # insert title matches
-    python3 episode_name_scanner.py run                  # insert all matches
-
-modes:
-  --title-only    Scan episode titles only (high confidence, run first)
-  (no flag)       Scan both titles AND descriptions (broader, more matches)
-
-recommended workflow:
-  1. python3 episode_name_scanner.py dry-run --title-only
-  2. python3 episode_name_scanner.py run --title-only
-  3. python3 episode_name_scanner.py dry-run
-  4. python3 episode_name_scanner.py run
+    python3 episode_name_scanner.py dry-run              # preview known-name matches
+    python3 episode_name_scanner.py dry-run --title-only
+    python3 episode_name_scanner.py run --title-only
+    python3 episode_name_scanner.py run
+    python3 episode_name_scanner.py suggest              # populate suggestions queue
+    python3 episode_name_scanner.py suggest --title-only
 """
 
 import psycopg2
 import re
 import argparse
 import logging
+from collections import defaultdict
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
 
 DB = 'postgresql://localhost/podcast_db'
 
-# Shows to skip for description scanning — their descriptions contain
-# news reporting, staff bios, or other non-guest name mentions
+# Shows to skip for description scanning
 DESC_SCAN_SKIP_SHOWS = {
-    'POLITICO Energy',  # journalist bylines and politician news coverage
+    'POLITICO Energy',
 }
 
+# Minimum word length to consider as a name candidate in suggest mode
+MIN_NAME_LENGTH = 8
 
 # ------------------------------------------------------------------
 # DESCRIPTION CLEANING
-# Strip boilerplate footers before scanning so we don't match
-# production staff names (credits, POLITICO staff bios, etc.)
 # ------------------------------------------------------------------
 
 STRIP_AFTER_PATTERNS = [
-    r'\nCredits:',                                      # Latitude Media credits footer
-    r'\n[A-Z][a-z]+ [A-Z][a-z]+ is the co-host',      # POLITICO co-host bio
-    r'\n[A-Z][a-z]+ [A-Z][a-z]+ is the host',          # show host bio
-    r'\n[A-Z][a-z]+ [A-Z][a-z]+ is the .{0,30} editor',    # editor bios
-    r'\n[A-Z][a-z]+ [A-Z][a-z]+ is the .{0,30} producer',  # producer bios
-    r'\nFollow the show on',                            # POLITICO follow footer
-    r'\nFor more reporting',                            # POLITICO newsletter footer
-    r'\nOur theme music',                               # POLITICO music credit
-    r'\nSubscribe to',                                  # subscription CTAs
-    r'Follow our co-hosts and production team',         # Post Script Audio / A Matter of Degrees
-    r'\nSee Privacy Policy',                            # Art19 / Wood Mackenzie footer
-    r'is produced by Columbia University',              # The Big Switch producer credit
+    r'\nCredits:',
+    r'\n[A-Z][a-z]+ [A-Z][a-z]+ is the co-host',
+    r'\n[A-Z][a-z]+ [A-Z][a-z]+ is the host',
+    r'\n[A-Z][a-z]+ [A-Z][a-z]+ is the .{0,30} editor',
+    r'\n[A-Z][a-z]+ [A-Z][a-z]+ is the .{0,30} producer',
+    r'\nFollow the show on',
+    r'\nFor more reporting',
+    r'\nOur theme music',
+    r'\nSubscribe to',
+    r'Follow our co-hosts and production team',
+    r'\nSee Privacy Policy',
+    r'is produced by Columbia University',
 ]
 
 
 def clean_description(text: str) -> str:
-    """
-    Strip boilerplate credits/staff bio footers from episode descriptions
-    before scanning for guest names.
-    """
     if not text:
         return ''
     for pattern in STRIP_AFTER_PATTERNS:
@@ -83,7 +71,7 @@ def clean_description(text: str) -> str:
 # ------------------------------------------------------------------
 
 def get_hosts(conn) -> list[dict]:
-    """Load all hosts from DB, longest names first to avoid partial matches."""
+    """Load all known hosts, longest names first."""
     cur = conn.cursor()
     cur.execute("""
         SELECT host_id, first_name, last_name,
@@ -99,8 +87,66 @@ def get_hosts(conn) -> list[dict]:
     ]
 
 
+def get_known_names(conn) -> set[str]:
+    """Return lowercase set of all known host full names."""
+    cur = conn.cursor()
+    cur.execute("SELECT first_name || ' ' || last_name FROM hosts")
+    names = {r[0].lower() for r in cur.fetchall()}
+    cur.close()
+    return names
+
+
+def get_rejected_names(conn) -> set[str]:
+    """Return lowercase set of all permanently rejected candidate names."""
+    cur = conn.cursor()
+    cur.execute("SELECT candidate_name FROM rejected_names")
+    names = {r[0].lower() for r in cur.fetchall()}
+    cur.close()
+    return names
+
+
+def get_pending_suggestions(conn) -> set[str]:
+    """Return set of (candidate_name.lower(), episode_id) already in suggestions."""
+    cur = conn.cursor()
+    cur.execute("SELECT LOWER(candidate_name), episode_id FROM suggestions WHERE status = 'pending'")
+    pairs = {(r[0], r[1]) for r in cur.fetchall()}
+    cur.close()
+    return pairs
+
+
+def get_all_episodes(conn, show: str = None) -> list[dict]:
+    """Load all episodes with podcast context, optionally filtered by show title."""
+    cur = conn.cursor()
+    if show:
+        cur.execute("""
+            SELECT e.episode_id, e.title, e.description,
+                   p.podcast_id, p.title AS podcast_title
+            FROM episodes e
+            JOIN podcasts p ON e.podcast_id = p.podcast_id
+            WHERE p.title ILIKE %s
+            ORDER BY e.published_date DESC
+        """, (f'%{show}%',))
+    else:
+        cur.execute("""
+            SELECT e.episode_id, e.title, e.description,
+                   p.podcast_id, p.title AS podcast_title
+            FROM episodes e
+            JOIN podcasts p ON e.podcast_id = p.podcast_id
+            ORDER BY p.title, e.published_date DESC
+        """)
+    rows = cur.fetchall()
+    cur.close()
+    return [
+        {
+            'episode_id': r[0], 'title': r[1], 'description': r[2],
+            'podcast_id': r[3], 'podcast_title': r[4]
+        }
+        for r in rows
+    ]
+
+
 def get_uncredited_episodes(conn) -> list[dict]:
-    """Load all episodes without any credits."""
+    """Load episodes without any credits yet."""
     cur = conn.cursor()
     cur.execute("""
         SELECT e.episode_id, e.title, e.description,
@@ -124,7 +170,7 @@ def get_uncredited_episodes(conn) -> list[dict]:
 
 
 def get_show_hosts(conn) -> dict:
-    """Return dict of podcast_id -> set of host_ids to exclude own-show matches."""
+    """Return dict of podcast_id -> set of host_ids."""
     cur = conn.cursor()
     cur.execute("SELECT podcast_id, host_id FROM host_podcast")
     result = {}
@@ -135,18 +181,128 @@ def get_show_hosts(conn) -> dict:
 
 
 # ------------------------------------------------------------------
-# SCANNING
+# NAME EXTRACTION (for suggest mode)
+# ------------------------------------------------------------------
+
+# ------------------------------------------------------------------
+# NAME EXTRACTION (for suggest mode)
+# ------------------------------------------------------------------
+
+# Intro phrases that signal a guest is being introduced
+_INTRO_RE = re.compile(
+    r"""(?:with|joined by|featuring|speaks?\s+with|talks?\s+(?:to|with)|
+        interviews?|welcomes?|sits?\s+down\s+with|chats?\s+with|
+        talk(?:s|ed)?\s+(?:to|with)|I\s+(?:talk|chat|speak)s?\s+with)
+        \s+
+        # Optional title prefix
+        (?:(?:Dr|Prof|Mr|Ms|Mrs|Senator|Sen|Rep|CEO|CTO|CFO|COO|Governor|Gov|
+           Secretary|Director|Mayor|President)\.?\s+)*
+        # The actual name: exactly 2 capitalized words (first + last only)
+        ([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})
+        # Stop before: " of", " at", " from", ",", possessive, title words
+        (?=\s+(?:of|at|from|about|for|on|to)|,|'s|\s+(?:CEO|CTO|CFO|COO|Director|Founder)|$)
+    """,
+    re.VERBOSE | re.IGNORECASE
+)
+
+# "Name joins me/us"
+_JOINS_RE = re.compile(
+    r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\s+joins?\s+(?:me|us|host|the\s+show)',
+    re.IGNORECASE
+)
+
+# Possessive org then name: "Rewiring America's Ari Matusiak"
+_POSSESSIVE_RE = re.compile(
+    r"[A-Z][A-Za-z&\s,.\-]+?'s\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})"
+    r"(?=\s+(?:of|at|from|about|for|,|and)|$)",
+)
+
+_FALSE_POSITIVE_WORDS = {
+    'how', 'why', 'what', 'when', 'where', 'which', 'who', 'will',
+    'clean', 'green', 'solar', 'wind', 'grid', 'power', 'energy',
+    'climate', 'carbon', 'hydrogen', 'nuclear', 'fusion', 'battery',
+    'electric', 'renewable', 'data', 'center', 'tech', 'policy',
+    'market', 'supply', 'chain', 'global', 'local', 'state', 'federal',
+    'new', 'old', 'big', 'small', 'best', 'next', 'last', 'first',
+    'american', 'united', 'states', 'world', 'north', 'south', 'east', 'west',
+    'inside', 'beyond', 'me', 'us', 'him', 'her', 'the', 'this', 'that',
+    'tell', 'know', 'think', 'make', 'take', 'come', 'look',
+    'wall', 'street', 'main', 'back', 'front', 'high', 'low', 'virtual',
+    'taming', 'rewiring',
+}
+
+
+def _valid_name(name: str) -> bool:
+    if not name or len(name) < 7: return False
+    words = name.split()
+    if len(words) < 2 or len(words) > 3: return False
+    if words[0].lower() in _FALSE_POSITIVE_WORDS: return False
+    for w in words:
+        if not (w[0].isupper() or ord(w[0]) > 127): return False
+    return True
+
+
+def extract_candidate_names(text: str) -> list[tuple[str, str]]:
+    """
+    Extract candidate person names from text.
+    Returns list of (name, matched_context) tuples.
+    """
+    found = []
+    seen = set()
+
+    def add(name, pos):
+        name = name.strip()
+        if _valid_name(name) and name.lower() not in seen:
+            seen.add(name.lower())
+            start = max(0, pos - 60)
+            end = min(len(text), pos + 80)
+            context = text[start:end].strip()
+            found.append((name, context))
+
+    _AND_RE = re.compile(
+        r'\s+and\s+'
+        r'(?:(?:Dr|Prof|Mr|Ms|Mrs|Senator|Sen|Rep|CEO|CTO|CFO|COO|Governor|'
+        r'Director|Mayor|President)\.?\s+)*'
+        r'([A-Z][A-Za-z\u00C0-\u017E-]+\s+[A-Z][A-Za-z\u00C0-\u017E-]+)',
+        re.IGNORECASE
+    )
+
+    def find_and_names(text, after_pos):
+        rest = text[after_pos:]
+        for and_m in _AND_RE.finditer(rest):
+            if and_m.start() > 40:
+                break
+            yield and_m.group(1), after_pos + and_m.start()
+
+    for m in _INTRO_RE.finditer(text):
+        add(m.group(1), m.start())
+        for name, pos in find_and_names(text, m.end()):
+            add(name, pos)
+
+    for m in _JOINS_RE.finditer(text):
+        add(m.group(1), m.start())
+        for name, pos in find_and_names(text, m.end()):
+            add(name, pos)
+
+    for m in _POSSESSIVE_RE.finditer(text):
+        add(m.group(1), m.start())
+        for name, pos in find_and_names(text, m.end()):
+            add(name, pos)
+
+    return found
+
+
+# ------------------------------------------------------------------
+# SCANNING — known names (run mode)
 # ------------------------------------------------------------------
 
 def name_in_text(full_name: str, text: str) -> bool:
-    """Case-insensitive whole-name match."""
     return full_name.lower() in text.lower()
 
 
 def run(dry_run: bool = True, title_only: bool = False, min_length: int = 7):
     conn = psycopg2.connect(DB)
-
-    hosts    = get_hosts(conn)
+    hosts = get_hosts(conn)
     episodes = get_uncredited_episodes(conn)
     show_hosts = get_show_hosts(conn)
 
@@ -161,34 +317,27 @@ def run(dry_run: bool = True, title_only: bool = False, min_length: int = 7):
         title         = episode['title'] or ''
         description   = episode['description'] or ''
         show_host_ids = show_hosts.get(podcast_id, set())
-
-        # Clean description once per episode
-        clean_desc = clean_description(description) if not title_only else ''
+        clean_desc    = clean_description(description) if not title_only else ''
 
         for host in hosts:
             host_id   = host['host_id']
             full_name = host['full_name']
 
-            # Skip show's own hosts
             if host_id in show_host_ids:
                 continue
-
-            # Skip very short names
             if len(full_name) < min_length:
                 continue
 
-            # Title check (high confidence)
             if name_in_text(full_name, title):
                 matches.append({
                     'episode_id': episode_id, 'host_id': host_id,
                     'full_name': full_name, 'podcast_title': podcast_title,
                     'episode_title': title, 'source': 'parsed_title',
                 })
-                continue  # don't double-match from description
+                continue
 
-            # Description check (lower confidence, cleaned)
-            # Skip shows where descriptions contain news reporting rather than guest info
-            if not title_only and clean_desc and podcast_title not in DESC_SCAN_SKIP_SHOWS and name_in_text(full_name, clean_desc):
+            if not title_only and clean_desc and podcast_title not in DESC_SCAN_SKIP_SHOWS \
+                    and name_in_text(full_name, clean_desc):
                 matches.append({
                     'episode_id': episode_id, 'host_id': host_id,
                     'full_name': full_name, 'podcast_title': podcast_title,
@@ -202,8 +351,6 @@ def run(dry_run: bool = True, title_only: bool = False, min_length: int = 7):
         conn.close()
         return
 
-    # Print summary grouped by person
-    from collections import defaultdict
     by_person = defaultdict(list)
     for m in matches:
         by_person[m['full_name']].append(m)
@@ -223,10 +370,8 @@ def run(dry_run: bool = True, title_only: bool = False, min_length: int = 7):
         conn.close()
         return
 
-    # Insert
     cur = conn.cursor()
-    inserted = 0
-    skipped  = 0
+    inserted = skipped = 0
 
     for m in matches:
         try:
@@ -253,34 +398,312 @@ def run(dry_run: bool = True, title_only: bool = False, min_length: int = 7):
 
 
 # ------------------------------------------------------------------
+# SUGGEST — find new names, write to suggestions queue
+# ------------------------------------------------------------------
+
+def suggest(title_only: bool = False, limit: int = None, show: str = None):
+    """
+    Scan all episodes for candidate names NOT already in the hosts table.
+    Writes new candidates to the suggestions table for human review.
+    Skips names that have already been rejected or are already pending.
+    """
+    conn = psycopg2.connect(DB)
+
+    known_names     = get_known_names(conn)
+    rejected_names  = get_rejected_names(conn)
+    pending         = get_pending_suggestions(conn)
+    episodes        = get_all_episodes(conn, show=show)
+    show_hosts      = get_show_hosts(conn)
+
+    if limit:
+        episodes = episodes[:limit]
+
+    logger.info(f"Scanning {len(episodes)} episodes for new candidate names...")
+    logger.info(f"Known hosts: {len(known_names)} | Rejected: {len(rejected_names)} | Already pending: {len(pending)}")
+
+    cur = conn.cursor()
+    added = skipped_known = skipped_rejected = skipped_pending = 0
+
+    for episode in episodes:
+        episode_id    = episode['episode_id']
+        podcast_title = episode['podcast_title']
+        title         = episode['title'] or ''
+        description   = episode['description'] or ''
+
+        # Gather text sources to scan
+        sources = [('parsed_title', title)]
+        if not title_only and podcast_title not in DESC_SCAN_SKIP_SHOWS:
+            clean_desc = clean_description(description)
+            if clean_desc:
+                sources.append(('parsed_desc', clean_desc))
+
+        for source, text in sources:
+            candidates = extract_candidate_names(text)
+
+            for name, context in candidates:
+                name_lower = name.lower()
+
+                # Skip if already known
+                if name_lower in known_names:
+                    skipped_known += 1
+                    continue
+
+                # Skip if previously rejected
+                if name_lower in rejected_names:
+                    skipped_rejected += 1
+                    continue
+
+                # Skip if already pending for this episode
+                if (name_lower, episode_id) in pending:
+                    skipped_pending += 1
+                    continue
+
+                # Split name
+                parts = name.strip().split(' ')
+                first_name = ' '.join(parts[:-1]) if len(parts) > 1 else name
+                last_name  = parts[-1] if len(parts) > 1 else ''
+
+                try:
+                    cur.execute(
+                        """
+                        INSERT INTO suggestions
+                            (candidate_name, first_name, last_name, episode_id, source, matched_text, status)
+                        VALUES (%s, %s, %s, %s, %s, %s, 'pending')
+                        ON CONFLICT (candidate_name, episode_id) DO NOTHING
+                        """,
+                        (name, first_name, last_name, episode_id, source, context)
+                    )
+                    if cur.rowcount > 0:
+                        added += 1
+                        pending.add((name_lower, episode_id))
+                except Exception as e:
+                    logger.error(f"Error inserting suggestion '{name}': {e}")
+                    conn.rollback()
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    print(f"\nSuggestion scan complete:")
+    print(f"  ✅ Added to queue:     {added}")
+    print(f"  ⏭  Already known:      {skipped_known}")
+    print(f"  ❌ Previously rejected: {skipped_rejected}")
+    print(f"  ⚪ Already pending:     {skipped_pending}")
+
+    # Show pending count
+    conn2 = psycopg2.connect(DB)
+    cur2 = conn2.cursor()
+    cur2.execute("SELECT COUNT(*) FROM suggestions WHERE status = 'pending'")
+    total_pending = cur2.fetchone()[0]
+    cur2.close()
+    conn2.close()
+    print(f"\n  Total pending review: {total_pending}")
+
+
+# ------------------------------------------------------------------
 # ENTRY POINT
 # ------------------------------------------------------------------
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        description='Scan episode titles/descriptions for known host/guest names',
+        description='Scan episode titles/descriptions for person names',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-modes:
-  --title-only    Scan episode titles only (high confidence, run first)
-  (no flag)       Scan both titles AND descriptions (broader, more matches)
+commands:
+  dry-run     Preview known-name matches without inserting
+  run         Insert known-name matches into episode_host
+  suggest     Find NEW names and add to suggestions queue for review
 
 examples:
   python3 episode_name_scanner.py dry-run --title-only
-  python3 episode_name_scanner.py dry-run --title-only --min-length 10
   python3 episode_name_scanner.py run --title-only
-  python3 episode_name_scanner.py dry-run
   python3 episode_name_scanner.py run
+  python3 episode_name_scanner.py suggest
+  python3 episode_name_scanner.py suggest --title-only
+  python3 episode_name_scanner.py suggest --limit 100
         """
     )
-    parser.add_argument('command', choices=['dry-run', 'run'])
-    parser.add_argument('--title-only', action='store_true', default=False,
-                        help='Only scan episode titles, not descriptions')
-    parser.add_argument('--min-length', type=int, default=7,
-                        help='Minimum full name length to match (default: 7)')
+    parser.add_argument('command', choices=['dry-run', 'run', 'suggest'])
+    parser.add_argument('--title-only', action='store_true', default=False)
+    parser.add_argument('--min-length', type=int, default=7)
+    parser.add_argument('--limit', type=int, default=None,
+                        help='Limit number of episodes to scan (suggest mode)')
+    parser.add_argument('--show', type=str, default=None,
+                        help='Only scan episodes from this podcast title (suggest mode)')
     args = parser.parse_args()
 
-    run(
-        dry_run=(args.command == 'dry-run'),
-        title_only=args.title_only,
-        min_length=args.min_length,
-    )
+    if args.command == 'suggest':
+        suggest(title_only=args.title_only, limit=args.limit, show=args.show)
+    else:
+        run(
+            dry_run=(args.command == 'dry-run'),
+            title_only=args.title_only,
+            min_length=args.min_length,
+        )# ------------------------------------------------------------------
+# NAME EXTRACTION (for suggest mode)
+# ------------------------------------------------------------------
+
+_TITLE_WORDS = {
+    'dr', 'prof', 'mr', 'ms', 'mrs', 'senator', 'sen', 'rep', 'representative',
+    'ceo', 'cto', 'cfo', 'coo', 'governor', 'gov', 'secretary', 'director',
+    'mayor', 'president', 'hawaii', 'california', 'zero', 'energyhub', 'homes',
+    'camus', 'google', 'amazon', 'microsoft', 'apple', 'meta',
+}
+
+_FALSE_POSITIVE_WORDS = {
+    'how', 'why', 'what', 'when', 'where', 'clean', 'green', 'solar', 'wind',
+    'grid', 'power', 'energy', 'climate', 'carbon', 'hydrogen', 'nuclear',
+    'data', 'center', 'tech', 'market', 'global', 'local', 'state', 'federal',
+    'new', 'old', 'big', 'small', 'me', 'us', 'the', 'this', 'that', 'an', 'a',
+    'taming', 'virtual', 'rewiring', 'electric', 'renewable', 'battery',
+}
+
+_INTRO_RE = re.compile(
+    r'(?:with|joined by|featuring|speaks?\s+with|talks?\s+(?:to|with)|'
+    r'interviews?|welcomes?|sits?\s+down\s+with|chats?\s+with|'
+    r'talk(?:s|ed)?\s+(?:to|with))\s+'
+    r'((?:[A-Z][A-Za-z\u00C0-\u017E-]+\s+){1,5}[A-Z][A-Za-z\u00C0-\u017E-]+)',
+    re.IGNORECASE
+)
+
+
+
+_JOINS_RE = re.compile(
+    # Exactly 2 words (First Last) — orgs tend to be 3+ words like "Good Food Institute"
+    r'([A-Z][a-z]+\s+[A-Z][a-z]+(?:-[A-Z][a-z]+)?)\s+joins?\s+(?:me|us|host|the\s+show)',
+    re.IGNORECASE
+)
+
+
+
+
+def _extract_name(raw: str):
+    """Strip title prefixes and trailing noise, return clean 2-3 word name or None."""
+    words = raw.strip().split()
+    # Strip leading title words
+    while words and words[0].lower().rstrip('.') in _TITLE_WORDS:
+        words = words[1:]
+    if not words:
+        return None
+    # Take words until we hit a stop condition
+    name_words = []
+    for w in words[:4]:
+        clean = w.rstrip('.,').lower()
+        if clean in _FALSE_POSITIVE_WORDS or clean in _TITLE_WORDS or clean == 'of':
+            break
+        if not (w[0].isupper() or ord(w[0]) > 127):
+            break
+        name_words.append(w.rstrip('.,'))
+    if len(name_words) < 2:
+        return None
+    return ' '.join(name_words[:3])
+
+
+# ------------------------------------------------------------------
+# SCANNING — known names (run mode)
+# ------------------------------------------------------------------
+
+def name_in_text(full_name: str, text: str) -> bool:
+    return full_name.lower() in text.lower()
+
+
+def run(dry_run: bool = True, title_only: bool = False, min_length: int = 7):
+    conn = psycopg2.connect(DB)
+    hosts = get_hosts(conn)
+    episodes = get_uncredited_episodes(conn)
+    show_hosts = get_show_hosts(conn)
+
+    logger.info(f"Scanning {len(episodes)} uncredited episodes against {len(hosts)} known people...")
+
+    matches = []
+
+    for episode in episodes:
+        episode_id    = episode['episode_id']
+        podcast_id    = episode['podcast_id']
+        podcast_title = episode['podcast_title']
+        title         = episode['title'] or ''
+        description   = episode['description'] or ''
+        show_host_ids = show_hosts.get(podcast_id, set())
+        clean_desc    = clean_description(description) if not title_only else ''
+
+        for host in hosts:
+            host_id   = host['host_id']
+            full_name = host['full_name']
+
+            if host_id in show_host_ids:
+                continue
+            if len(full_name) < min_length:
+                continue
+
+            if name_in_text(full_name, title):
+                matches.append({
+                    'episode_id': episode_id, 'host_id': host_id,
+                    'full_name': full_name, 'podcast_title': podcast_title,
+                    'episode_title': title, 'source': 'parsed_title',
+                })
+                continue
+
+            if not title_only and clean_desc and podcast_title not in DESC_SCAN_SKIP_SHOWS \
+                    and name_in_text(full_name, clean_desc):
+                matches.append({
+                    'episode_id': episode_id, 'host_id': host_id,
+                    'full_name': full_name, 'podcast_title': podcast_title,
+                    'episode_title': title, 'source': 'parsed_desc',
+                })
+
+    logger.info(f"Found {len(matches)} matches")
+
+    if not matches:
+        print("No matches found.")
+        conn.close()
+        return
+
+    by_person = defaultdict(list)
+    for m in matches:
+        by_person[m['full_name']].append(m)
+
+    print(f"\n{'DRY RUN — ' if dry_run else ''}Found {len(matches)} matches across {len(by_person)} people:\n")
+
+    for name, person_matches in sorted(by_person.items(), key=lambda x: -len(x[1])):
+        shows = set(m['podcast_title'] for m in person_matches)
+        print(f"\n  {name} ({len(person_matches)} episodes across {len(shows)} show(s)):")
+        for m in person_matches[:5]:
+            print(f"    [{m['source']}] {m['podcast_title']}: {m['episode_title'][:70]}")
+        if len(person_matches) > 5:
+            print(f"    ... and {len(person_matches) - 5} more")
+
+    if dry_run:
+        print(f"\nDry run complete. Run with 'run' to insert {len(matches)} credits into DB.")
+        conn.close()
+        return
+
+    cur = conn.cursor()
+    inserted = skipped = 0
+
+    for m in matches:
+        try:
+            cur.execute(
+                """
+                INSERT INTO episode_host (episode_id, host_id, is_guest, role, data_source)
+                VALUES (%s, %s, true, 'Guest', %s)
+                ON CONFLICT (episode_id, host_id) DO NOTHING
+                """,
+                (m['episode_id'], m['host_id'], m['source'])
+            )
+            if cur.rowcount > 0:
+                inserted += 1
+            else:
+                skipped += 1
+        except Exception as e:
+            logger.error(f"Error inserting {m['full_name']} on episode {m['episode_id']}: {e}")
+            conn.rollback()
+
+    conn.commit()
+    cur.close()
+    conn.close()
+    print(f"\nDone: {inserted} credits inserted, {skipped} already existed")
+
+
+# ------------------------------------------------------------------
+# SUGGEST — find new names, write to suggestions queue
+# ------------------------------------------------------------------
