@@ -86,6 +86,7 @@ export default function AdminSuggestions() {
     const handler = (e) => {
       if (actionLoading || !suggestion) return;
       if (e.key === 'a') handleAction('approve');
+      if (e.key === 'p') handleAction('approve_only');
       if (e.key === 'r') handleAction('reject');
       if (e.key === 's') handleAction('skip');
     };
@@ -304,6 +305,15 @@ export default function AdminSuggestions() {
                 </button>
 
                 <button
+                  onClick={() => handleAction('approve_only')}
+                  disabled={actionLoading}
+                  className="w-full py-4 px-6 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold rounded-xl text-lg transition-colors flex items-center justify-between"
+                >
+                  <span>👤 Approve Person Only</span>
+                  <span className="text-blue-300 text-sm font-normal">press P</span>
+                </button>
+
+                <button
                   onClick={() => handleAction('reject')}
                   disabled={actionLoading}
                   className="w-full py-4 px-6 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-semibold rounded-xl text-lg transition-colors flex items-center justify-between"
@@ -325,16 +335,16 @@ export default function AdminSuggestions() {
               {/* Last action result — persists until next action */}
               {lastResult && (
                 <div className={`mt-6 p-4 rounded-xl text-sm ${
-                  lastResult.action === 'approve'
+                  lastResult.action === 'approve' || lastResult.action === 'approve_only'
                     ? 'bg-green-50 border border-green-200'
                     : lastResult.action === 'reject'
                     ? 'bg-red-50 border border-red-200'
                     : 'bg-gray-100 border border-gray-200'
                 }`}>
-                  {lastResult.action === 'approve' && (
+                  {(lastResult.action === 'approve' || lastResult.action === 'approve_only') && (
                     <>
                       <p className="font-semibold text-green-800 mb-1">
-                        ✅ Approved: {lastResult.name}
+                        {lastResult.action === 'approve_only' ? '👤 Person created (not linked to this episode):' : '✅ Approved:'} {lastResult.name}
                       </p>
                       <p className="text-green-700">
                         {lastResult.additional_episodes_linked > 0
