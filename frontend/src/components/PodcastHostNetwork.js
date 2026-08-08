@@ -132,12 +132,18 @@ const useImageCache = (nodes) => {
 
   useEffect(() => {
     nodes.forEach(node => {
-      if (!node.image) return;  // only cache real Apple images
-      if (!cache.current[node.image]) {
+      if (!node.image) return;
+      // Proxy external images (unavatar, etc.) to avoid CORS in canvas
+      const src = node.image.startsWith('http') && !node.image.includes('mzstatic.com')
+        ? `http://localhost:8000/api/proxy/image?url=${encodeURIComponent(node.image)}`
+        : node.image;
+      if (!cache.current[src]) {
         const img = new Image();
         img.crossOrigin = 'anonymous';
-        img.src = node.image;
-        img.onload = () => { cache.current[node.image] = img; };
+        img.src = src;
+        img.onload = () => { cache.current[src] = img; };
+        cache.current[src] = img;
+        // Also store under original URL so nodeCanvasObject can find it
         cache.current[node.image] = img;
       }
     });
@@ -584,7 +590,10 @@ const PodcastHostNetwork = () => {
     ctx.arc(node.x, node.y, size, 0, 2 * Math.PI);
     ctx.clip();
 
-    const img = node.image ? imageCache.current[node.image] : null;
+    const proxiedSrc = node.image && !node.image.includes('mzstatic.com')
+      ? `http://localhost:8000/api/proxy/image?url=${encodeURIComponent(node.image)}`
+      : node.image;
+    const img = node.image ? (imageCache.current[proxiedSrc] || imageCache.current[node.image]) : null;
     if (img?.complete && img.naturalWidth > 0) {
       // Real Apple profile photo
       ctx.drawImage(img, node.x - size, node.y - size, size * 2, size * 2);
@@ -722,7 +731,7 @@ const PodcastHostNetwork = () => {
 
           // Forces
           d3ForceStrength={-180}
-          d3AlphaDecay={0.05}
+          d3AlphaDecay={0.01}
           d3VelocityDecay={0.4}
           linkDistance={70}
           linkStrength={0.2}
@@ -735,15 +744,12 @@ const PodcastHostNetwork = () => {
           enablePanInteraction
           minZoom={0.05}
           maxZoom={4}
-          onEngineStop={() => {
-            // zoomToFit disabled — zoom(1.0) on first tick keeps everything on screen
-          }}
           onEngineTick={() => {
+            // Set centering forces on first tick — onEngineStart doesn't exist in v1.46
             if (!graphRef.current) return;
             if (!graphRef.current._forcesSet) {
-              graphRef.current.d3Force('x', forceX(0).strength(0.05));
-              graphRef.current.d3Force('y', forceY(0).strength(0.05));
-              graphRef.current.zoom(1.0, 0);
+              graphRef.current.d3Force('x', forceX(0).strength(0.08));
+              graphRef.current.d3Force('y', forceY(0).strength(0.08));
               graphRef.current._forcesSet = true;
             }
           }}
