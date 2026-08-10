@@ -802,12 +802,31 @@ async def create_person(body: CreatePersonRequest):
 
 
 @app.get("/api/admin/people")
-async def list_people(q: str = ""):
-    """Search people by name."""
+async def list_people(q: str = "", filter: str = "all", sort: str = "appearances_desc"):
+    """List/search people with filtering and sorting."""
     try:
         conn = get_db_connection()
         cur  = conn.cursor()
-        cur.execute("""
+
+        sort_map = {
+            "appearances_desc": "appearances DESC, h.last_name ASC",
+            "appearances_asc":  "appearances ASC, h.last_name ASC",
+            "name_asc":         "h.last_name ASC, h.first_name ASC",
+            "name_desc":        "h.last_name DESC, h.first_name DESC",
+            "newest":           "h.created_at DESC",
+        }
+        order = sort_map.get(sort, "appearances DESC, h.last_name ASC")
+
+        extra_where  = ""
+        having_clause = ""
+        if filter == "zero":
+            having_clause = "HAVING COUNT(DISTINCT eh.episode_id) = 0"
+        elif filter == "parsed":
+            extra_where = "AND h.data_source IN ('parsed_desc','parsed_title','approved_suggestion')"
+        elif filter == "no_image":
+            extra_where = "AND h.profile_image_url IS NULL"
+
+        cur.execute(f"""
             SELECT h.host_id,
                    h.first_name || ' ' || h.last_name AS full_name,
                    h.first_name, h.last_name,
@@ -819,17 +838,144 @@ async def list_people(q: str = ""):
             FROM hosts h
             LEFT JOIN episode_host eh ON eh.host_id = h.host_id
             LEFT JOIN episodes e ON e.episode_id = eh.episode_id
-            WHERE (%s = '' OR (h.first_name || ' ' || h.last_name) ILIKE '%%' || %s || '%%')
+            WHERE (%(q)s = '' OR (h.first_name || ' ' || h.last_name) ILIKE '%%' || %(q)s || '%%')
+            {extra_where}
             GROUP BY h.host_id, h.first_name, h.last_name, h.profile_image_url,
-                     h.twitter_handle, h.bluesky_handle, h.data_source
-            ORDER BY appearances DESC, h.last_name
-            LIMIT 50
-        """, (q, q))
+                     h.twitter_handle, h.bluesky_handle, h.data_source, h.created_at
+            {having_clause}
+            ORDER BY {order}
+            LIMIT 100
+        """, {"q": q})
         rows = cur.fetchall()
+
+        cur.execute("""
+            SELECT COUNT(*) FROM hosts
+            WHERE (%(q)s = '' OR (first_name || ' ' || last_name) ILIKE '%%' || %(q)s || '%%')
+        """, {"q": q})
+        total = cur.fetchone()['count']
+
         cur.close()
         conn.close()
-        return list(rows)
+        return {"items": list(rows), "total": total}
     except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/admin/people/{host_id}")
+async def update_person(host_id: int, body: CreatePersonRequest):
+    """
+    Update a person's name and/or social handles.
+    If name changed: deletes all parsed episode links then re-scans.
+    Always re-fetches profile image if a new handle is provided.
+    """
+    try:
+        import re
+        import httpx
+
+        conn = get_db_connection()
+        cur  = conn.cursor()
+
+        cur.execute("SELECT first_name, last_name FROM hosts WHERE host_id = %s", (host_id,))
+        existing = cur.fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Person not found")
+
+        first_name = body.first_name.strip()
+        last_name  = body.last_name.strip()
+        full_name  = f"{first_name} {last_name}"
+        name_changed = (first_name != existing['first_name'] or last_name != existing['last_name'])
+
+        # Fetch new image if handle provided
+        image_url      = None
+        twitter_handle = None
+        bluesky_handle = None
+
+        if body.bluesky_url:
+            m = re.search(r'bsky\.app/profile/([A-Za-z0-9._-]+)', body.bluesky_url)
+            if m:
+                bluesky_handle = m.group(1)
+                async with httpx.AsyncClient(timeout=10) as client:
+                    resp = await client.get(
+                        'https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile',
+                        params={'actor': bluesky_handle}
+                    )
+                    if resp.status_code == 200:
+                        image_url = resp.json().get('avatar')
+
+        if not image_url and body.twitter_url:
+            m = re.search(r'(?:x\.com|twitter\.com)/([A-Za-z0-9_]+)', body.twitter_url)
+            if m:
+                twitter_handle = m.group(1)
+                image_url = f'https://unavatar.io/twitter/{twitter_handle}'
+
+        # Update host record
+        cur.execute("""
+            UPDATE hosts SET
+                first_name     = %s,
+                last_name      = %s,
+                twitter_handle = COALESCE(%s, twitter_handle),
+                bluesky_handle = COALESCE(%s, bluesky_handle),
+                profile_image_url = COALESCE(%s, profile_image_url)
+            WHERE host_id = %s
+        """, (first_name, last_name, twitter_handle, bluesky_handle, image_url, host_id))
+
+        # If name changed: clear parsed links, then re-scan with new name
+        if name_changed:
+            cur.execute("""
+                DELETE FROM episode_host
+                WHERE host_id = %s AND data_source IN ('parsed_desc', 'parsed_title', 'approved_suggestion')
+            """, (host_id,))
+
+        conn.commit()
+
+        # Re-scan with new name
+        cur.execute("""
+            SELECT e.episode_id, e.title, e.description, p.title AS podcast_title
+            FROM episodes e JOIN podcasts p ON e.podcast_id = p.podcast_id
+        """)
+        all_episodes = cur.fetchall()
+
+        name_lower = full_name.lower()
+        links = []
+        for ep in all_episodes:
+            matched_source = None
+            if name_lower in (ep['title'] or '').lower():
+                matched_source = 'parsed_title'
+            elif name_lower in (ep['description'] or '').lower():
+                matched_source = 'parsed_desc'
+            if matched_source:
+                cur.execute("""
+                    INSERT INTO episode_host (episode_id, host_id, is_guest, role, data_source)
+                    VALUES (%s, %s, true, 'Guest', %s)
+                    ON CONFLICT (episode_id, host_id) DO NOTHING
+                """, (ep['episode_id'], host_id, matched_source))
+                if cur.rowcount > 0:
+                    links.append({'podcast': ep['podcast_title']})
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        from collections import defaultdict
+        by_podcast = defaultdict(int)
+        for l in links:
+            by_podcast[l['podcast']] += 1
+
+        return {
+            "success": True,
+            "host_id": host_id,
+            "name": full_name,
+            "image_url": image_url,
+            "episodes_linked": len(links),
+            "by_podcast": dict(by_podcast),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -923,5 +1069,56 @@ async def scan_person_episodes(host_id: int):
 
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/people/{host_id}/episodes")
+async def get_person_episodes(host_id: int):
+    """Get all episodes a person appears in, grouped by podcast."""
+    try:
+        conn = get_db_connection()
+        cur  = conn.cursor()
+        cur.execute("""
+            SELECT p.title AS podcast_title,
+                   p.cover_art_url,
+                   e.episode_id,
+                   e.title AS episode_title,
+                   e.published_date,
+                   eh.is_guest,
+                   eh.data_source
+            FROM episode_host eh
+            JOIN episodes e ON e.episode_id = eh.episode_id
+            JOIN podcasts p ON e.podcast_id = p.podcast_id
+            WHERE eh.host_id = %s
+            ORDER BY p.title, e.published_date DESC
+        """, (host_id,))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        # Group by podcast
+        from collections import defaultdict
+        by_podcast = defaultdict(list)
+        covers = {}
+        for r in rows:
+            by_podcast[r['podcast_title']].append({
+                'episode_id':    r['episode_id'],
+                'episode_title': r['episode_title'],
+                'published_date': str(r['published_date']) if r['published_date'] else None,
+                'is_guest':      r['is_guest'],
+                'data_source':   r['data_source'],
+            })
+            covers[r['podcast_title']] = r['cover_art_url']
+
+        return [
+            {
+                'podcast': show,
+                'cover_art_url': covers[show],
+                'episodes': eps,
+                'count': len(eps),
+            }
+            for show, eps in sorted(by_podcast.items())
+        ]
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
