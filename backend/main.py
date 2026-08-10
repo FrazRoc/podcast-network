@@ -404,6 +404,116 @@ async def approve_suggestion(suggestion_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/admin/suggestions/{suggestion_id}/approve_only")
+async def approve_suggestion_only(suggestion_id: int):
+    """
+    Approve a suggestion as a person but don't link to the source episode.
+    Scans ALL OTHER episodes for this name and links any matches.
+    Use when the person is referenced/mentioned but not actually a guest on this episode.
+    """
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT s.*, e.podcast_id
+            FROM suggestions s
+            JOIN episodes e ON s.episode_id = e.episode_id
+            WHERE s.suggestion_id = %s AND s.status = 'pending'
+        """, (suggestion_id,))
+        suggestion = cur.fetchone()
+
+        if not suggestion:
+            raise HTTPException(status_code=404, detail="Suggestion not found or already reviewed")
+
+        first_name = suggestion['first_name']
+        last_name  = suggestion['last_name']
+        name       = suggestion['candidate_name']
+        episode_id = suggestion['episode_id']
+        source     = suggestion['source']
+
+        # Create or get host record
+        cur.execute("""
+            INSERT INTO hosts (first_name, last_name, data_source, created_at)
+            VALUES (%s, %s, 'approved_suggestion', NOW())
+            ON CONFLICT (first_name, last_name) DO UPDATE
+                SET first_name = EXCLUDED.first_name
+            RETURNING host_id
+        """, (first_name, last_name))
+        host_id = cur.fetchone()['host_id']
+
+        # Scan ALL episodes EXCEPT the source episode
+        cur.execute("""
+            SELECT e.episode_id, e.title, e.description,
+                   p.podcast_id, p.title AS podcast_title
+            FROM episodes e
+            JOIN podcasts p ON e.podcast_id = p.podcast_id
+            WHERE e.episode_id != %s
+        """, (episode_id,))
+        all_episodes = cur.fetchall()
+
+        additional_links = []
+        name_lower = name.lower()
+
+        for ep in all_episodes:
+            matched_source = None
+            title = (ep['title'] or '').lower()
+            desc  = (ep['description'] or '').lower()
+            if name_lower in title:
+                matched_source = 'parsed_title'
+            elif name_lower in desc:
+                matched_source = 'parsed_desc'
+            if matched_source:
+                cur.execute("""
+                    INSERT INTO episode_host (episode_id, host_id, is_guest, role, data_source)
+                    VALUES (%s, %s, true, 'Guest', %s)
+                    ON CONFLICT (episode_id, host_id) DO NOTHING
+                """, (ep['episode_id'], host_id, matched_source))
+                if cur.rowcount > 0:
+                    additional_links.append({'podcast': ep['podcast_title'], 'episode': ep['title']})
+
+        # Mark suggestion approved
+        cur.execute("""
+            UPDATE suggestions SET status = 'approved', reviewed_at = NOW(), host_id = %s
+            WHERE suggestion_id = %s
+        """, (host_id, suggestion_id))
+
+        # Mark other pending suggestions for same name as approved
+        cur.execute("""
+            UPDATE suggestions SET status = 'approved', reviewed_at = NOW(), host_id = %s
+            WHERE LOWER(candidate_name) = LOWER(%s) AND status = 'pending'
+        """, (host_id, name))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        from collections import defaultdict
+        by_podcast = defaultdict(int)
+        for link in additional_links:
+            by_podcast[link['podcast']] += 1
+
+        return {
+            "success": True,
+            "host_id": host_id,
+            "name": name,
+            "source_episode_linked": False,
+            "additional_episodes_linked": len(additional_links),
+            "by_podcast": dict(by_podcast),
+            "message": (
+                f"Created {name} (not linked to this episode). "
+                f"Found {len(additional_links)} appearance(s) in other episodes"
+                + (f": {', '.join(f'{p} ({n})' for p, n in by_podcast.items())}" if by_podcast else "")
+            )
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/admin/suggestions/{suggestion_id}/reject")
 async def reject_suggestion(suggestion_id: int):
     """
