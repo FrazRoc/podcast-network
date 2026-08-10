@@ -62,6 +62,8 @@ STRIP_AFTER_PATTERNS = [
     r'\nJoin the conversation:',                        # Outrage + Optimism social footer
     r'\nHosted on Acast',                               # Acast footer
     r'See acast.com/privacy',                           # Acast privacy footer
+    r'\nhttps://www.linkedin.com/in/',                  # CORE Knowledge LinkedIn footer
+    r'\nBlue Spark\n',                                  # CORE Knowledge company links section
 ]
 
 
