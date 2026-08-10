@@ -668,9 +668,17 @@ const PodcastHostNetwork = () => {
     <div className="flex h-screen w-full relative">
       {/* Sidebar */}
       <div className="w-96 min-w-[24rem] bg-gray-50 p-4 overflow-y-auto shadow-lg z-10">
-        <div className="mb-4">
-          <h1 className="text-2xl font-bold text-gray-800">Podcast Network</h1>
-          <p className="text-gray-500 text-sm">Explore host connections and collaborations</p>
+        <div className="mb-4 flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-800">Podcast Network</h1>
+            <p className="text-gray-500 text-sm">Explore host connections and collaborations</p>
+          </div>
+          <a
+            href="/admin"
+            className="text-xs text-gray-400 hover:text-gray-600 border border-gray-200 rounded px-2 py-1 mt-1 flex-shrink-0"
+          >
+            ⚙ Admin
+          </a>
         </div>
 
         {selectedNode ? (
