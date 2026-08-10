@@ -204,7 +204,51 @@ curl http://localhost:8000/api/podcasts | python3 -m json.tool | head -40
 
 ---
 
-## 6. Frontend Setup
+## 6. episode_name_scanner.py — Episode Name Scanning
+
+Two modes:
+
+**`run` mode** — scans episodes for names already in the `hosts` table and creates `episode_host` links:
+```bash
+python3 episode_name_scanner.py dry-run --title-only   # preview title matches only
+python3 episode_name_scanner.py run --title-only        # insert title matches
+python3 episode_name_scanner.py dry-run                 # preview title + description matches
+python3 episode_name_scanner.py run                     # insert all matches
+```
+
+**`suggest` mode** — finds NEW names not in `hosts`, writes to `suggestions` queue for human review at `/admin`:
+```bash
+python3 episode_name_scanner.py suggest                        # scan all episodes
+python3 episode_name_scanner.py suggest --show "Volts"         # one show only
+python3 episode_name_scanner.py suggest --title-only           # titles only (safer)
+python3 episode_name_scanner.py suggest --limit 200            # limit episodes scanned
+```
+
+**Recommended pipeline for a new show:**
+```bash
+# 1. Scrape episodes
+python3 manager.py add --apple-id XXXXXXXXXX
+python3 manager.py scrape --new-only
+
+# 2. Link known people by name match
+python3 episode_name_scanner.py run --title-only
+python3 episode_name_scanner.py run
+
+# 3. Queue new people for human review
+python3 episode_name_scanner.py suggest --show "Show Name"
+# Then review at http://localhost:3001/admin
+```
+
+**Cleanup scripts:**
+```bash
+# Remove incorrectly linked guests caused by show-notes cross-promotion footers
+python3 cleanup_zero_guests.py          # dry run
+python3 cleanup_zero_guests.py --run    # actually delete
+```
+
+---
+
+## 7. Frontend Setup
 
 ```bash
 cd frontend
