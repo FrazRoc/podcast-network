@@ -47,6 +47,7 @@ export default function AdminSuggestions() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [lastResult, setLastResult] = useState(null);
+  const [editedName, setEditedName] = useState('');
   const [done, setDone] = useState(false);
 
   const fetchNext = useCallback(async (clearResult = true) => {
@@ -60,6 +61,7 @@ export default function AdminSuggestions() {
         setSuggestion(null);
       } else {
         setSuggestion(data);
+        setEditedName('');
         setDone(false);
       }
     } catch (e) {
@@ -98,8 +100,13 @@ export default function AdminSuggestions() {
     if (!suggestion || actionLoading) return;
     setActionLoading(true);
     try {
+      const body = editedName.trim() && editedName.trim() !== suggestion.candidate_name
+        ? JSON.stringify({ name: editedName.trim() })
+        : undefined;
       const res = await fetch(`${API}/suggestions/${suggestion.suggestion_id}/${action}`, {
         method: 'POST',
+        headers: body ? { 'Content-Type': 'application/json' } : {},
+        body,
       });
       const result = await res.json();
       setLastResult({ action, ...result });
@@ -264,12 +271,20 @@ export default function AdminSuggestions() {
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
                 Suggested Person
               </p>
-              <div className="flex items-baseline gap-3 mb-3">
-                <h2 className="text-3xl font-bold text-gray-900">
-                  {suggestion.candidate_name}
-                </h2>
+              <div className="flex items-baseline gap-3 mb-2">
                 <SourceBadge source={suggestion.source} />
               </div>
+              <div className="flex items-center gap-2 mb-3">
+                <input
+                  type="text"
+                  value={editedName || suggestion.candidate_name}
+                  onChange={e => setEditedName(e.target.value)}
+                  className="text-3xl font-bold text-gray-900 bg-transparent border-b-2 border-transparent hover:border-gray-300 focus:border-blue-500 focus:outline-none w-full"
+                />
+              </div>
+              {editedName && editedName !== suggestion.candidate_name && (
+                <p className="text-xs text-blue-600 mb-2">✏️ Name edited — will approve as "{editedName}"</p>
+              )}
 
               {/* Matched context */}
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-3 mb-4">

@@ -15,6 +15,10 @@ load_dotenv()
 
 app = FastAPI()
 
+
+class NameOverrideRequest(BaseModel):
+    name: str = None
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -276,7 +280,7 @@ async def get_suggestion_stats():
 
 
 @app.post("/api/admin/suggestions/{suggestion_id}/approve")
-async def approve_suggestion(suggestion_id: int):
+async def approve_suggestion(suggestion_id: int, body: NameOverrideRequest = None):
     """
     Approve a suggestion:
     1. Create host record
@@ -305,6 +309,13 @@ async def approve_suggestion(suggestion_id: int):
         name       = suggestion['candidate_name']
         episode_id = suggestion['episode_id']
         source     = suggestion['source']
+
+        # Allow name override from UI (e.g. correcting "Reverend Lennox" → "Lennox Yearwood Jr")
+        if body and body.name and body.name.strip():
+            name = body.name.strip()
+            parts = name.split(' ')
+            first_name = ' '.join(parts[:-1]) if len(parts) > 1 else name
+            last_name = parts[-1] if len(parts) > 1 else ''
 
         # 1. Create or get host record
         cur.execute("""
@@ -405,7 +416,7 @@ async def approve_suggestion(suggestion_id: int):
 
 
 @app.post("/api/admin/suggestions/{suggestion_id}/approve_only")
-async def approve_suggestion_only(suggestion_id: int):
+async def approve_suggestion_only(suggestion_id: int, body: NameOverrideRequest = None):
     """
     Approve a suggestion as a person but don't link to the source episode.
     Scans ALL OTHER episodes for this name and links any matches.
@@ -431,6 +442,13 @@ async def approve_suggestion_only(suggestion_id: int):
         name       = suggestion['candidate_name']
         episode_id = suggestion['episode_id']
         source     = suggestion['source']
+
+        # Allow name override from UI
+        if body and body.name and body.name.strip():
+            name = body.name.strip()
+            parts = name.split(' ')
+            first_name = ' '.join(parts[:-1]) if len(parts) > 1 else name
+            last_name = parts[-1] if len(parts) > 1 else ''
 
         # Create or get host record
         cur.execute("""
