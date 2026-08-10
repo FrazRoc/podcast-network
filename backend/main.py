@@ -697,26 +697,56 @@ class TwitterHandleRequest(BaseModel):
 @app.post("/api/admin/images/{host_id}/set_twitter")
 async def set_twitter_handle(host_id: int, body: TwitterHandleRequest):
     """
-    Extract handle from a Twitter/X URL, store handle and image URL on the host.
+    Extract handle from a Twitter/X or Bluesky URL, store handle and image URL.
     Returns the image URL for preview before final approval.
     """
     try:
         import re
-        # Extract handle from URL like https://x.com/shaylekann or https://twitter.com/drvolts
-        match = re.search(r'(?:x\.com|twitter\.com)/([A-Za-z0-9_]+)', body.twitter_url)
-        if not match:
-            raise HTTPException(status_code=400, detail="Could not extract Twitter handle from URL")
+        import httpx
 
-        handle = match.group(1)
-        image_url = f'https://unavatar.io/twitter/{handle}'
+        url = body.twitter_url.strip()
+        handle = None
+        image_url = None
+        platform = None
 
-        # Store the handle — image saved on approve
+        # Bluesky: https://bsky.app/profile/handle.bsky.social
+        bsky_match = re.search(r'bsky\.app/profile/([A-Za-z0-9._-]+)', url)
+        if bsky_match:
+            handle = bsky_match.group(1)
+            platform = 'bluesky'
+            # Fetch avatar from Bluesky public API
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(
+                    'https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile',
+                    params={'actor': handle}
+                )
+                data = resp.json()
+                image_url = data.get('avatar')
+                if not image_url:
+                    raise HTTPException(status_code=404, detail="No avatar found on Bluesky profile")
+
+        else:
+            # Twitter/X: https://x.com/handle or https://twitter.com/handle
+            tw_match = re.search(r'(?:x\.com|twitter\.com)/([A-Za-z0-9_]+)', url)
+            if not tw_match:
+                raise HTTPException(status_code=400, detail="Could not extract handle from URL — paste an x.com or bsky.app profile URL")
+            handle = tw_match.group(1)
+            platform = 'twitter'
+            image_url = f'https://unavatar.io/twitter/{handle}'
+
+        # Store the handle
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute(
-            "UPDATE hosts SET twitter_handle = %s WHERE host_id = %s",
-            (handle, host_id)
-        )
+        if platform == 'bluesky':
+            cur.execute(
+                "UPDATE hosts SET bluesky_handle = %s WHERE host_id = %s",
+                (handle, host_id)
+            )
+        else:
+            cur.execute(
+                "UPDATE hosts SET twitter_handle = %s WHERE host_id = %s",
+                (handle, host_id)
+            )
         conn.commit()
         cur.close()
         conn.close()
@@ -724,6 +754,7 @@ async def set_twitter_handle(host_id: int, body: TwitterHandleRequest):
         return {
             "success": True,
             "handle": handle,
+            "platform": platform,
             "image_url": image_url,
         }
 
@@ -733,31 +764,34 @@ async def set_twitter_handle(host_id: int, body: TwitterHandleRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class ImageApproveRequest(BaseModel):
+    image_url: str
+
+
 @app.post("/api/admin/images/{host_id}/approve")
-async def approve_image(host_id: int):
-    """Save the Twitter image URL to hosts.profile_image_url."""
+async def approve_image(host_id: int, body: ImageApproveRequest):
+    """Save the previewed image URL to hosts.profile_image_url."""
     try:
         conn = get_db_connection()
         cur = conn.cursor()
 
         cur.execute(
-            "SELECT twitter_handle, first_name || ' ' || last_name AS name FROM hosts WHERE host_id = %s",
+            "SELECT first_name || ' ' || last_name AS name FROM hosts WHERE host_id = %s",
             (host_id,)
         )
         row = cur.fetchone()
-        if not row or not row['twitter_handle']:
-            raise HTTPException(status_code=400, detail="No Twitter handle set for this host")
+        if not row:
+            raise HTTPException(status_code=404, detail="Host not found")
 
-        image_url = f"https://unavatar.io/twitter/{row['twitter_handle']}"
         cur.execute(
             "UPDATE hosts SET profile_image_url = %s WHERE host_id = %s",
-            (image_url, host_id)
+            (body.image_url, host_id)
         )
         conn.commit()
         cur.close()
         conn.close()
 
-        return {"success": True, "name": row['name'], "image_url": image_url}
+        return {"success": True, "name": row['name'], "image_url": body.image_url}
 
     except HTTPException:
         raise

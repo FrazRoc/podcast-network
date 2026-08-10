@@ -58,7 +58,11 @@ export default function AdminImages() {
     if (!person || !preview) return;
     setSubmitting(true);
     try {
-      const res = await fetch(`${API}/images/${person.host_id}/approve`, { method: 'POST' });
+      const res = await fetch(`${API}/images/${person.host_id}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_url: preview.image_url }),
+      });
       const data = await res.json();
       setLastResult({ action: 'approve', ...data });
       await fetchStats();
@@ -126,7 +130,7 @@ export default function AdminImages() {
                 />
               </div>
               <div className="px-4 py-3 border-t border-gray-100 text-center">
-                <p className="text-sm text-gray-600"><span className="font-medium">@{preview.handle}</span> on Twitter/X</p>
+                <p className="text-sm text-gray-600"><span className="font-medium">@{preview.handle}</span> on {preview.platform === 'bluesky' ? 'Bluesky' : 'Twitter/X'}</p>
                 <p className="text-xs text-gray-400 mt-0.5">{preview.image_url}</p>
               </div>
             </div>
@@ -145,7 +149,7 @@ export default function AdminImages() {
               value={twitterUrl}
               onChange={e => { setTwitterUrl(e.target.value); setPreview(null); }}
               onKeyDown={e => e.key === 'Enter' && handleSubmitUrl()}
-              placeholder="https://x.com/shaylekann"
+              placeholder="https://x.com/handle or https://bsky.app/profile/handle"
               className="flex-1 rounded-xl border border-gray-300 px-4 py-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
             <button
