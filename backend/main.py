@@ -15,10 +15,6 @@ load_dotenv()
 
 app = FastAPI()
 
-
-class NameOverrideRequest(BaseModel):
-    name: str = None
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -280,7 +276,7 @@ async def get_suggestion_stats():
 
 
 @app.post("/api/admin/suggestions/{suggestion_id}/approve")
-async def approve_suggestion(suggestion_id: int, body: NameOverrideRequest = None):
+async def approve_suggestion(suggestion_id: int):
     """
     Approve a suggestion:
     1. Create host record
@@ -309,13 +305,6 @@ async def approve_suggestion(suggestion_id: int, body: NameOverrideRequest = Non
         name       = suggestion['candidate_name']
         episode_id = suggestion['episode_id']
         source     = suggestion['source']
-
-        # Allow name override from UI (e.g. correcting "Reverend Lennox" → "Lennox Yearwood Jr")
-        if body and body.name and body.name.strip():
-            name = body.name.strip()
-            parts = name.split(' ')
-            first_name = ' '.join(parts[:-1]) if len(parts) > 1 else name
-            last_name = parts[-1] if len(parts) > 1 else ''
 
         # 1. Create or get host record
         cur.execute("""
@@ -405,123 +394,6 @@ async def approve_suggestion(suggestion_id: int, body: NameOverrideRequest = Non
                 f"Created {name}. "
                 f"Found {len(additional_links)} additional episode appearance(s)"
                 + (f" across: {', '.join(f'{p} ({n})' for p, n in by_podcast.items())}" if by_podcast else "")
-            )
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(str(e))
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/admin/suggestions/{suggestion_id}/approve_only")
-async def approve_suggestion_only(suggestion_id: int, body: NameOverrideRequest = None):
-    """
-    Approve a suggestion as a person but don't link to the source episode.
-    Scans ALL OTHER episodes for this name and links any matches.
-    Use when the person is referenced/mentioned but not actually a guest on this episode.
-    """
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-
-        cur.execute("""
-            SELECT s.*, e.podcast_id
-            FROM suggestions s
-            JOIN episodes e ON s.episode_id = e.episode_id
-            WHERE s.suggestion_id = %s AND s.status = 'pending'
-        """, (suggestion_id,))
-        suggestion = cur.fetchone()
-
-        if not suggestion:
-            raise HTTPException(status_code=404, detail="Suggestion not found or already reviewed")
-
-        first_name = suggestion['first_name']
-        last_name  = suggestion['last_name']
-        name       = suggestion['candidate_name']
-        episode_id = suggestion['episode_id']
-        source     = suggestion['source']
-
-        # Allow name override from UI
-        if body and body.name and body.name.strip():
-            name = body.name.strip()
-            parts = name.split(' ')
-            first_name = ' '.join(parts[:-1]) if len(parts) > 1 else name
-            last_name = parts[-1] if len(parts) > 1 else ''
-
-        # Create or get host record
-        cur.execute("""
-            INSERT INTO hosts (first_name, last_name, data_source, created_at)
-            VALUES (%s, %s, 'approved_suggestion', NOW())
-            ON CONFLICT (first_name, last_name) DO UPDATE
-                SET first_name = EXCLUDED.first_name
-            RETURNING host_id
-        """, (first_name, last_name))
-        host_id = cur.fetchone()['host_id']
-
-        # Scan ALL episodes EXCEPT the source episode
-        cur.execute("""
-            SELECT e.episode_id, e.title, e.description,
-                   p.podcast_id, p.title AS podcast_title
-            FROM episodes e
-            JOIN podcasts p ON e.podcast_id = p.podcast_id
-            WHERE e.episode_id != %s
-        """, (episode_id,))
-        all_episodes = cur.fetchall()
-
-        additional_links = []
-        name_lower = name.lower()
-
-        for ep in all_episodes:
-            matched_source = None
-            title = (ep['title'] or '').lower()
-            desc  = (ep['description'] or '').lower()
-            if name_lower in title:
-                matched_source = 'parsed_title'
-            elif name_lower in desc:
-                matched_source = 'parsed_desc'
-            if matched_source:
-                cur.execute("""
-                    INSERT INTO episode_host (episode_id, host_id, is_guest, role, data_source)
-                    VALUES (%s, %s, true, 'Guest', %s)
-                    ON CONFLICT (episode_id, host_id) DO NOTHING
-                """, (ep['episode_id'], host_id, matched_source))
-                if cur.rowcount > 0:
-                    additional_links.append({'podcast': ep['podcast_title'], 'episode': ep['title']})
-
-        # Mark suggestion approved
-        cur.execute("""
-            UPDATE suggestions SET status = 'approved', reviewed_at = NOW(), host_id = %s
-            WHERE suggestion_id = %s
-        """, (host_id, suggestion_id))
-
-        # Mark other pending suggestions for same name as approved
-        cur.execute("""
-            UPDATE suggestions SET status = 'approved', reviewed_at = NOW(), host_id = %s
-            WHERE LOWER(candidate_name) = LOWER(%s) AND status = 'pending'
-        """, (host_id, name))
-
-        conn.commit()
-        cur.close()
-        conn.close()
-
-        from collections import defaultdict
-        by_podcast = defaultdict(int)
-        for link in additional_links:
-            by_podcast[link['podcast']] += 1
-
-        return {
-            "success": True,
-            "host_id": host_id,
-            "name": name,
-            "source_episode_linked": False,
-            "additional_episodes_linked": len(additional_links),
-            "by_podcast": dict(by_podcast),
-            "message": (
-                f"Created {name} (not linked to this episode). "
-                f"Found {len(additional_links)} appearance(s) in other episodes"
-                + (f": {', '.join(f'{p} ({n})' for p, n in by_podcast.items())}" if by_podcast else "")
             )
         }
 
@@ -697,56 +569,26 @@ class TwitterHandleRequest(BaseModel):
 @app.post("/api/admin/images/{host_id}/set_twitter")
 async def set_twitter_handle(host_id: int, body: TwitterHandleRequest):
     """
-    Extract handle from a Twitter/X or Bluesky URL, store handle and image URL.
+    Extract handle from a Twitter/X URL, store handle and image URL on the host.
     Returns the image URL for preview before final approval.
     """
     try:
         import re
-        import httpx
+        # Extract handle from URL like https://x.com/shaylekann or https://twitter.com/drvolts
+        match = re.search(r'(?:x\.com|twitter\.com)/([A-Za-z0-9_]+)', body.twitter_url)
+        if not match:
+            raise HTTPException(status_code=400, detail="Could not extract Twitter handle from URL")
 
-        url = body.twitter_url.strip()
-        handle = None
-        image_url = None
-        platform = None
+        handle = match.group(1)
+        image_url = f'https://unavatar.io/twitter/{handle}'
 
-        # Bluesky: https://bsky.app/profile/handle.bsky.social
-        bsky_match = re.search(r'bsky\.app/profile/([A-Za-z0-9._-]+)', url)
-        if bsky_match:
-            handle = bsky_match.group(1)
-            platform = 'bluesky'
-            # Fetch avatar from Bluesky public API
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.get(
-                    'https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile',
-                    params={'actor': handle}
-                )
-                data = resp.json()
-                image_url = data.get('avatar')
-                if not image_url:
-                    raise HTTPException(status_code=404, detail="No avatar found on Bluesky profile")
-
-        else:
-            # Twitter/X: https://x.com/handle or https://twitter.com/handle
-            tw_match = re.search(r'(?:x\.com|twitter\.com)/([A-Za-z0-9_]+)', url)
-            if not tw_match:
-                raise HTTPException(status_code=400, detail="Could not extract handle from URL — paste an x.com or bsky.app profile URL")
-            handle = tw_match.group(1)
-            platform = 'twitter'
-            image_url = f'https://unavatar.io/twitter/{handle}'
-
-        # Store the handle
+        # Store the handle — image saved on approve
         conn = get_db_connection()
         cur = conn.cursor()
-        if platform == 'bluesky':
-            cur.execute(
-                "UPDATE hosts SET bluesky_handle = %s WHERE host_id = %s",
-                (handle, host_id)
-            )
-        else:
-            cur.execute(
-                "UPDATE hosts SET twitter_handle = %s WHERE host_id = %s",
-                (handle, host_id)
-            )
+        cur.execute(
+            "UPDATE hosts SET twitter_handle = %s WHERE host_id = %s",
+            (handle, host_id)
+        )
         conn.commit()
         cur.close()
         conn.close()
@@ -754,7 +596,6 @@ async def set_twitter_handle(host_id: int, body: TwitterHandleRequest):
         return {
             "success": True,
             "handle": handle,
-            "platform": platform,
             "image_url": image_url,
         }
 
@@ -764,34 +605,31 @@ async def set_twitter_handle(host_id: int, body: TwitterHandleRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-class ImageApproveRequest(BaseModel):
-    image_url: str
-
-
 @app.post("/api/admin/images/{host_id}/approve")
-async def approve_image(host_id: int, body: ImageApproveRequest):
-    """Save the previewed image URL to hosts.profile_image_url."""
+async def approve_image(host_id: int):
+    """Save the Twitter image URL to hosts.profile_image_url."""
     try:
         conn = get_db_connection()
         cur = conn.cursor()
 
         cur.execute(
-            "SELECT first_name || ' ' || last_name AS name FROM hosts WHERE host_id = %s",
+            "SELECT twitter_handle, first_name || ' ' || last_name AS name FROM hosts WHERE host_id = %s",
             (host_id,)
         )
         row = cur.fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="Host not found")
+        if not row or not row['twitter_handle']:
+            raise HTTPException(status_code=400, detail="No Twitter handle set for this host")
 
+        image_url = f"https://unavatar.io/twitter/{row['twitter_handle']}"
         cur.execute(
             "UPDATE hosts SET profile_image_url = %s WHERE host_id = %s",
-            (body.image_url, host_id)
+            (image_url, host_id)
         )
         conn.commit()
         cur.close()
         conn.close()
 
-        return {"success": True, "name": row['name'], "image_url": body.image_url}
+        return {"success": True, "name": row['name'], "image_url": image_url}
 
     except HTTPException:
         raise
@@ -839,3 +677,251 @@ async def proxy_image(url: str):
             )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to fetch image: {e}")
+
+
+# ==================================================================
+# ADMIN ENDPOINTS — People management
+# ==================================================================
+
+class CreatePersonRequest(BaseModel):
+    first_name: str
+    last_name: str
+    twitter_url: str = None
+    bluesky_url: str = None
+
+
+@app.post("/api/admin/people")
+async def create_person(body: CreatePersonRequest):
+    """
+    Create a new person, optionally fetch their profile image,
+    then scan all episodes for name matches.
+    """
+    try:
+        import re
+        import httpx
+
+        first_name = body.first_name.strip()
+        last_name  = body.last_name.strip()
+        full_name  = f"{first_name} {last_name}"
+
+        conn = get_db_connection()
+        cur  = conn.cursor()
+
+        # Check if already exists
+        cur.execute(
+            "SELECT host_id FROM hosts WHERE first_name = %s AND last_name = %s",
+            (first_name, last_name)
+        )
+        existing = cur.fetchone()
+        if existing:
+            cur.close()
+            conn.close()
+            raise HTTPException(status_code=409, detail=f"{full_name} already exists (host_id={existing['host_id']})")
+
+        # Fetch image if handle provided
+        image_url     = None
+        twitter_handle = None
+        bluesky_handle = None
+
+        if body.bluesky_url:
+            bsky_match = re.search(r'bsky\.app/profile/([A-Za-z0-9._-]+)', body.bluesky_url)
+            if bsky_match:
+                bluesky_handle = bsky_match.group(1)
+                async with httpx.AsyncClient(timeout=10) as client:
+                    resp = await client.get(
+                        'https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile',
+                        params={'actor': bluesky_handle}
+                    )
+                    if resp.status_code == 200:
+                        image_url = resp.json().get('avatar')
+
+        if not image_url and body.twitter_url:
+            tw_match = re.search(r'(?:x\.com|twitter\.com)/([A-Za-z0-9_]+)', body.twitter_url)
+            if tw_match:
+                twitter_handle = tw_match.group(1)
+                image_url = f'https://unavatar.io/twitter/{twitter_handle}'
+
+        # Create host record
+        cur.execute("""
+            INSERT INTO hosts (first_name, last_name, profile_image_url, twitter_handle, bluesky_handle, data_source, created_at)
+            VALUES (%s, %s, %s, %s, %s, 'manual', NOW())
+            RETURNING host_id
+        """, (first_name, last_name, image_url, twitter_handle, bluesky_handle))
+        host_id = cur.fetchone()['host_id']
+
+        # Scan all episodes for name matches
+        cur.execute("""
+            SELECT e.episode_id, e.title, e.description, p.title AS podcast_title
+            FROM episodes e
+            JOIN podcasts p ON e.podcast_id = p.podcast_id
+        """)
+        all_episodes = cur.fetchall()
+
+        name_lower = full_name.lower()
+        links = []
+
+        for ep in all_episodes:
+            matched_source = None
+            if name_lower in (ep['title'] or '').lower():
+                matched_source = 'parsed_title'
+            elif name_lower in (ep['description'] or '').lower():
+                matched_source = 'parsed_desc'
+
+            if matched_source:
+                cur.execute("""
+                    INSERT INTO episode_host (episode_id, host_id, is_guest, role, data_source)
+                    VALUES (%s, %s, true, 'Guest', %s)
+                    ON CONFLICT (episode_id, host_id) DO NOTHING
+                """, (ep['episode_id'], host_id, matched_source))
+                if cur.rowcount > 0:
+                    links.append({'podcast': ep['podcast_title'], 'episode': ep['title']})
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        from collections import defaultdict
+        by_podcast = defaultdict(int)
+        for l in links:
+            by_podcast[l['podcast']] += 1
+
+        return {
+            "success": True,
+            "host_id": host_id,
+            "name": full_name,
+            "image_url": image_url,
+            "episodes_linked": len(links),
+            "by_podcast": dict(by_podcast),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/people")
+async def list_people(q: str = ""):
+    """Search people by name."""
+    try:
+        conn = get_db_connection()
+        cur  = conn.cursor()
+        cur.execute("""
+            SELECT h.host_id,
+                   h.first_name || ' ' || h.last_name AS full_name,
+                   h.first_name, h.last_name,
+                   h.profile_image_url,
+                   h.twitter_handle, h.bluesky_handle,
+                   h.data_source,
+                   COUNT(DISTINCT eh.episode_id) AS appearances,
+                   COUNT(DISTINCT e.podcast_id)  AS podcast_count
+            FROM hosts h
+            LEFT JOIN episode_host eh ON eh.host_id = h.host_id
+            LEFT JOIN episodes e ON e.episode_id = eh.episode_id
+            WHERE (%s = '' OR (h.first_name || ' ' || h.last_name) ILIKE '%%' || %s || '%%')
+            GROUP BY h.host_id, h.first_name, h.last_name, h.profile_image_url,
+                     h.twitter_handle, h.bluesky_handle, h.data_source
+            ORDER BY appearances DESC, h.last_name
+            LIMIT 50
+        """, (q, q))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return list(rows)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/admin/people/{host_id}")
+async def delete_person(host_id: int):
+    """Delete a person and all their episode/show links."""
+    try:
+        conn = get_db_connection()
+        cur  = conn.cursor()
+
+        cur.execute("SELECT first_name || ' ' || last_name AS name FROM hosts WHERE host_id = %s", (host_id,))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Person not found")
+        name = row['name']
+
+        cur.execute("DELETE FROM episode_host WHERE host_id = %s", (host_id,))
+        cur.execute("DELETE FROM host_podcast WHERE host_id = %s", (host_id,))
+        cur.execute("DELETE FROM suggestions WHERE host_id = %s", (host_id,))
+        cur.execute("DELETE FROM image_suggestions WHERE host_id = %s", (host_id,))
+        cur.execute("DELETE FROM hosts WHERE host_id = %s", (host_id,))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return {"success": True, "name": name, "message": f"Deleted {name} and all their links"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/people/{host_id}/scan")
+async def scan_person_episodes(host_id: int):
+    """Scan all episodes for an existing person's name and link any matches."""
+    try:
+        conn = get_db_connection()
+        cur  = conn.cursor()
+
+        cur.execute(
+            "SELECT first_name || ' ' || last_name AS name FROM hosts WHERE host_id = %s",
+            (host_id,)
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Person not found")
+
+        name       = row['name']
+        name_lower = name.lower()
+
+        cur.execute("""
+            SELECT e.episode_id, e.title, e.description, p.title AS podcast_title
+            FROM episodes e JOIN podcasts p ON e.podcast_id = p.podcast_id
+        """)
+        all_episodes = cur.fetchall()
+
+        links = []
+        for ep in all_episodes:
+            matched_source = None
+            if name_lower in (ep['title'] or '').lower():
+                matched_source = 'parsed_title'
+            elif name_lower in (ep['description'] or '').lower():
+                matched_source = 'parsed_desc'
+            if matched_source:
+                cur.execute("""
+                    INSERT INTO episode_host (episode_id, host_id, is_guest, role, data_source)
+                    VALUES (%s, %s, true, 'Guest', %s)
+                    ON CONFLICT (episode_id, host_id) DO NOTHING
+                """, (ep['episode_id'], host_id, matched_source))
+                if cur.rowcount > 0:
+                    links.append({'podcast': ep['podcast_title']})
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        from collections import defaultdict
+        by_podcast = defaultdict(int)
+        for l in links:
+            by_podcast[l['podcast']] += 1
+
+        return {
+            "success": True,
+            "host_id": host_id,
+            "name": name,
+            "episodes_linked": len(links),
+            "by_podcast": dict(by_podcast),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

@@ -162,6 +162,7 @@ export default function AdminSuggestions() {
         <div className="flex items-center gap-4">
           <a href="/" className="text-gray-400 hover:text-gray-600 text-sm">← Network</a>
           <a href="/admin/images" className="text-gray-400 hover:text-gray-600 text-sm">Images</a>
+          <a href="/admin/people" className="text-gray-400 hover:text-gray-600 text-sm">People</a>
           <h1 className="text-lg font-semibold text-gray-900">Suggestion Review</h1>
         </div>
         <div className="flex items-center gap-4 text-sm text-gray-500">
