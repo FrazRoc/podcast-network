@@ -4,21 +4,26 @@ A tool that scrapes clean energy podcasts, extracts guest and host relationships
 
 **Branch:** `clean-energy-podcasts`
 
+**Current stats:** 86 shows tracked, 10,500+ episodes, 975+ people, 2,000+ connections across 51 podcasts.
+
 ---
 
 ## Architecture
 
 ```
 scraper/        Python pipeline: pulls episodes + credits from Apple Podcasts
-backend/        FastAPI: serves graph data via 3 API endpoints
-frontend/       React: force-directed network graph visualization
+backend/        FastAPI: serves graph data + admin endpoints
+frontend/       React: force-directed network graph + admin UI
 ```
 
-Data flows in this order:
-1. **manager.py** hits iTunes API → populates `episodes` table
-2. **apple_credits_scraper.py** scrapes Apple Podcasts episode pages → populates `hosts` and `episode_host`
-3. **FastAPI backend** queries DB and serves `/api/host-connections`, `/api/people`, `/api/podcasts`
-4. **React frontend** renders the network graph
+**Data flow:**
+1. **manager.py** → iTunes API → `episodes` table
+2. **apple_credits_scraper.py** → Apple Podcasts → `hosts`, `episode_host`, `host_podcast`
+3. **host_extractor.py** → channel names/titles/descriptions → `host_podcast`
+4. **episode_name_scanner.py** → known names in episodes → `episode_host`; new names → `suggestions`
+5. **Admin UI** at `/admin` → human reviews suggestions → approve creates host + scans all episodes
+6. **FastAPI** serves graph + admin endpoints
+7. **React frontend** → network graph at `/`, admin at `/admin`, `/admin/images`, `/admin/people`
 
 ---
 
@@ -39,13 +44,21 @@ brew services start postgresql@15
 createdb podcast_db
 psql podcast_db < scraper/podcast-schema.sql
 
-# Verify — should show 15 tables and 80+ seeded shows
+# Run migrations
+psql podcast_db < scraper/migrate_add_data_source.sql
+psql podcast_db < scraper/migrate_add_suggestions.sql
+psql podcast_db -c "ALTER TABLE hosts ADD COLUMN IF NOT EXISTS twitter_handle VARCHAR(100);"
+psql podcast_db -c "ALTER TABLE hosts ADD COLUMN IF NOT EXISTS bluesky_handle VARCHAR(200);"
+
+# Verify
 psql podcast_db -c "\dt"
 psql podcast_db -c "SELECT COUNT(*) FROM podcast_tracking;"
 
 # Full reset (nuclear option)
 dropdb podcast_db && createdb podcast_db
 psql podcast_db < scraper/podcast-schema.sql
+psql podcast_db < scraper/migrate_add_data_source.sql
+psql podcast_db < scraper/migrate_add_suggestions.sql
 ```
 
 ---
@@ -63,120 +76,88 @@ pip install psycopg2-binary requests beautifulsoup4 python-dotenv feedparser rat
 
 ## 3. manager.py — Episode Scraper
 
-Pulls episode metadata (titles, dates, descriptions) from the iTunes API and RSS feeds.
-
 ```bash
-cd scraper
-source venv/bin/activate
-
-# Show current status of all tracked podcasts
 python3 manager.py status
-
-# Scrape all pending shows (first-time run or after adding new shows)
 python3 manager.py scrape
-
-# Only scrape shows with no episodes yet (safe to run after adding new shows)
 python3 manager.py scrape --new-only
-
-# Scrape a specific show (resets it to pending first)
 python3 manager.py scrape --podcast "Volts"
-
-# Limit to N shows (useful for testing)
-python3 manager.py scrape --max 5
-
-# Add a new show by Apple ID (title auto-fetched from iTunes)
 python3 manager.py add --apple-id 1593204897
-
-# Add a new show with a known Podchaser ID too
-python3 manager.py add --apple-id 1321759767 --podchaser-id 595385
-
-# Reset failed/stuck shows back to pending
-# (skips shows marked PERMANENT in error_message)
 python3 manager.py reset
-
-# Backfill historical episodes for shows where we have fewer than iTunes reports
-# Compares DB count vs iTunes trackCount, re-scrapes gaps with limit=200
 python3 manager.py backfill
-
-# Backfill only shows with a gap of 50+ episodes
-python3 manager.py backfill --min-gap 50
-
-# Backfill with a custom episode fetch limit (iTunes max is 200)
-python3 manager.py backfill --limit 200
+python3 manager.py backfill --min-gap 50 --limit 200
+python3 manager.py refresh-descriptions
 ```
 
-**Typical workflow for adding new shows:**
+**Typical workflow for new shows:**
 ```bash
 python3 manager.py add --apple-id XXXXXXXXXX
 python3 manager.py scrape --new-only
-python3 manager.py status
+python3 manager.py backfill
 ```
 
-**Typical workflow for keeping shows up to date:**
+**Permanent failures** (show removed from Apple):
 ```bash
-python3 manager.py backfill        # pick up new + historical episodes
-python3 manager.py status
+psql podcast_db -c "UPDATE podcast_tracking SET status = 'failed',
+  error_message = 'PERMANENT: Removed from Apple Podcasts directory'
+  WHERE apple_podcast_id = 'XXXXXXXXXX';"
 ```
 
 ---
 
 ## 4. apple_credits_scraper.py — Host & Guest Credits
 
-Scrapes the "Hosts & Guests" section from Apple Podcasts pages. Populates the `hosts`, `episode_host`, and `host_podcast` tables. This is what builds the network graph edges.
-
 ```bash
-cd scraper
-source venv/bin/activate
-
-# Step 1: Scrape show pages for permanent hosts (~2 min, run once per show)
-# Populates host_podcast table
 python3 apple_credits_scraper.py shows
-
-# Scrape show page for one specific podcast
 python3 apple_credits_scraper.py shows --podcast "Catalyst with Shayle Kann"
-
-# Step 2: Scrape all episode pages for credits (~40+ min for 2,000+ episodes)
-# Only scrapes episodes from shows that have host data (recommended)
 python3 apple_credits_scraper.py episodes --hosts-only
-
-# Scrape all episodes regardless of whether show has host data
-python3 apple_credits_scraper.py episodes
-
-# Scrape episodes from one specific podcast
 python3 apple_credits_scraper.py episodes --podcast "Volts"
-
-# Scrape a limited batch (useful for testing)
 python3 apple_credits_scraper.py episodes --batch 50
-
-# Step 3: Backfill missing profile images for hosts
 python3 apple_credits_scraper.py backfill
-
-# Run all three steps in sequence
-python3 apple_credits_scraper.py all
 python3 apple_credits_scraper.py all --hosts-only
-```
-
-**Notes on Apple credits data:**
-- Data is crowdsourced — coverage varies by show (~15% of episodes have credits)
-- Shows with no "Hosts & Guests" section on the show page will have zero episode credits too
-- Profile images are captured when available; initials-only avatars return `null`
-- 500 errors are normal (pulled/regional episodes); timeouts mean you're being rate-limited
-
-**After adding new shows and scraping episodes, re-run credits:**
-```bash
-python3 apple_credits_scraper.py shows --podcast "New Show Name"
-python3 apple_credits_scraper.py episodes --podcast "New Show Name"
 ```
 
 ---
 
-## 5. Backend Setup
+## 5. host_extractor.py — Extract Hosts from Metadata
 
 ```bash
-cd backend
-python3 -m venv venv
-source venv/bin/activate
-pip install fastapi uvicorn psycopg2-binary python-dotenv
+python3 host_extractor.py dry-run
+python3 host_extractor.py run
+```
+
+---
+
+## 6. episode_name_scanner.py — Episode Name Scanning
+
+**`run` mode** — scans episodes for known names → `episode_host` links:
+```bash
+python3 episode_name_scanner.py dry-run --title-only
+python3 episode_name_scanner.py run --title-only
+python3 episode_name_scanner.py dry-run
+python3 episode_name_scanner.py run
+```
+
+**`suggest` mode** — finds NEW names → `suggestions` queue for human review:
+```bash
+python3 episode_name_scanner.py suggest
+python3 episode_name_scanner.py suggest --show "Volts"
+python3 episode_name_scanner.py suggest --title-only
+python3 episode_name_scanner.py suggest --limit 200
+```
+
+**Cleanup scripts:**
+```bash
+python3 cleanup_zero_guests.py          # dry run
+python3 cleanup_zero_guests.py --run    # delete wrongly linked Zero guests
+```
+
+---
+
+## 7. Backend Setup
+
+```bash
+cd backend && python3 -m venv venv && source venv/bin/activate
+pip install fastapi uvicorn psycopg2-binary python-dotenv httpx
 ```
 
 Create `backend/.env`:
@@ -188,112 +169,132 @@ DB_PASSWORD=
 ```
 
 ```bash
-# Start the API server
 python3 -m uvicorn main:app --reload --port 8000
-
-# Test endpoints
-curl http://localhost:8000/api/host-connections | python3 -m json.tool | head -40
-curl http://localhost:8000/api/people | python3 -m json.tool | head -40
-curl http://localhost:8000/api/podcasts | python3 -m json.tool | head -40
 ```
 
-**Endpoints:**
+### Graph API Endpoints
 - `GET /api/host-connections` — co-appearance pairs for the network graph
-- `GET /api/people` — all unique people with episode counts and podcast lists
-- `GET /api/podcasts` — all shows with episode and person counts
+- `GET /api/people` — all people with episode counts
+- `GET /api/podcasts` — all shows
+- `GET /api/proxy/image?url=` — proxies external images to fix canvas CORS
+
+### Admin — Suggestions (`/admin`)
+- `GET /api/admin/suggestions/next` — next pending suggestion with full episode context + existing credits
+- `GET /api/admin/suggestions/stats`
+- `POST /api/admin/suggestions/:id/approve` — creates host, scans ALL episodes, returns summary
+- `POST /api/admin/suggestions/:id/approve_only` — creates host, skips source episode, scans others
+- `POST /api/admin/suggestions/:id/reject` — rejects + blocklists name permanently
+- `POST /api/admin/suggestions/:id/skip` — pushes to back of queue
+
+### Admin — Images (`/admin/images`)
+- `GET /api/admin/images/next?skip=` — next person missing image (client-side skip list)
+- `GET /api/admin/images/stats`
+- `POST /api/admin/images/:id/set_twitter` — extract handle from X or Bluesky URL, fetch image
+- `POST /api/admin/images/:id/approve` — saves image_url to hosts.profile_image_url
+
+### Admin — People (`/admin/people`)
+- `GET /api/admin/people?q=&filter=&sort=` — search/filter/sort
+- `POST /api/admin/people` — create person + fetch image + scan episodes
+- `PUT /api/admin/people/:id` — update name/handles, re-scan
+- `DELETE /api/admin/people/:id` — cascade delete all links
+- `GET /api/admin/people/:id/episodes` — episodes grouped by podcast
+- `POST /api/admin/people/:id/scan` — scan all episodes for existing person
 
 ---
 
-## 6. episode_name_scanner.py — Episode Name Scanning
+## 8. Frontend Setup
 
-Two modes:
-
-**`run` mode** — scans episodes for names already in the `hosts` table and creates `episode_host` links:
 ```bash
-python3 episode_name_scanner.py dry-run --title-only   # preview title matches only
-python3 episode_name_scanner.py run --title-only        # insert title matches
-python3 episode_name_scanner.py dry-run                 # preview title + description matches
-python3 episode_name_scanner.py run                     # insert all matches
+cd frontend && npm install
+npm start   # http://localhost:3001
 ```
 
-**`suggest` mode** — finds NEW names not in `hosts`, writes to `suggestions` queue for human review at `/admin`:
-```bash
-python3 episode_name_scanner.py suggest                        # scan all episodes
-python3 episode_name_scanner.py suggest --show "Volts"         # one show only
-python3 episode_name_scanner.py suggest --title-only           # titles only (safer)
-python3 episode_name_scanner.py suggest --limit 200            # limit episodes scanned
-```
-
-**Recommended pipeline for a new show:**
-```bash
-# 1. Scrape episodes
-python3 manager.py add --apple-id XXXXXXXXXX
-python3 manager.py scrape --new-only
-
-# 2. Link known people by name match
-python3 episode_name_scanner.py run --title-only
-python3 episode_name_scanner.py run
-
-# 3. Queue new people for human review
-python3 episode_name_scanner.py suggest --show "Show Name"
-# Then review at http://localhost:3001/admin
-```
-
-**Cleanup scripts:**
-```bash
-# Remove incorrectly linked guests caused by show-notes cross-promotion footers
-python3 cleanup_zero_guests.py          # dry run
-python3 cleanup_zero_guests.py --run    # actually delete
-```
+- **Network graph:** `http://localhost:3001`
+- **Suggestion review:** `http://localhost:3001/admin`
+- **Image review:** `http://localhost:3001/admin/images`
+- **People management:** `http://localhost:3001/admin/people`
 
 ---
 
-## 7. Frontend Setup
+## Admin UIs
 
-```bash
-cd frontend
-npm install
-npm start   # opens at http://localhost:3001 (3000 is taken by Colorado Current)
-```
+### `/admin` — Suggestion Review
+- Left: podcast cover, episode title/date, existing credits (green=host, blue=guest, Apple badge), full description (candidate highlighted yellow, credited names underlined)
+- Right: candidate name (editable inline), source badge, matched context, Approve/Approve Person Only/Reject/Skip buttons
+- **Keyboard shortcuts:** `A` = Approve, `P` = Approve Person Only, `R` = Reject, `S` = Skip
+- Approve auto-scans all episodes, returns breakdown by podcast
+- Approve Person Only: creates person but skips the source episode link (use when person is referenced, not a guest)
+- Rejected names added to `rejected_names` table and never suggested again
 
-Make sure the backend is running on port 8000 first.
+### `/admin/images` — Image Review
+- Shows next person missing profile image (ordered by most appearances)
+- Paste Twitter/X URL (`https://x.com/handle`) or Bluesky URL (`https://bsky.app/profile/handle`)
+- Preview fetched image, Approve saves to `hosts.profile_image_url`
+- Client-side skip list so skipped people don't repeat this session
+- Bluesky images fetched from `public.api.bsky.app/xrpc/app.bsky.actor.getProfile`
+
+### `/admin/people` — People Management
+- Two-column: left = searchable/filterable/sortable list, right = add/edit panel
+- **Filters:** All | 0 appearances | Parsed only | No image
+- **Sort:** most/fewest appearances, name A–Z/Z–A, newest
+- Click person → edit panel shows profile card + episode list (collapsible by show)
+- Edit: update name/handles, re-scan (if name changed, clears parsed links first)
+- Delete with trash icon + confirm click
 
 ---
 
 ## Running Everything Together
 
-You need three terminal tabs:
-
-| Tab | Directory  | Command |
-|-----|------------|---------|
-| 1   | `backend/` | `source venv/bin/activate && python3 -m uvicorn main:app --reload --port 8000` |
+| Tab | Directory   | Command |
+|-----|-------------|---------|
+| 1   | `backend/`  | `source venv/bin/activate && python3 -m uvicorn main:app --reload --port 8000` |
 | 2   | `frontend/` | `npm start` |
 | 3   | `scraper/`  | `source venv/bin/activate && python3 manager.py status` |
 
 ---
 
-## Podcast List
+## Data Sources & Provenance
 
-80+ clean energy podcasts are tracked. The master list with Apple IDs, Podchaser IDs, hosts, and sector tags lives in `clean_energy_podcasts.xlsx`.
+All host/guest records have a `data_source` field:
 
-Sectors covered: Solar & Storage, Grid Software, Hydrogen, Geothermal, EV & Transportation, Home Electrification, Carbon Removal, Industrial Decarb, Research/Policy, Fusion.
-
-To check which shows have Apple Credits data (and are therefore worth scraping for episode credits):
-```bash
-psql podcast_db -c "
-SELECT p.title, COUNT(DISTINCT hp.host_id) as hosts
-FROM podcasts p
-LEFT JOIN host_podcast hp ON hp.podcast_id = p.podcast_id
-GROUP BY p.title
-ORDER BY hosts DESC;
-"
-```
+| Value | Source |
+|-------|--------|
+| `apple_verified` | Apple Podcasts "Hosts & Guests" section |
+| `itunes_artist` | iTunes `artistName` field or podcast title pattern |
+| `parsed_desc` | Extracted from episode description |
+| `parsed_title` | Extracted from episode title |
+| `approved_suggestion` | Human-approved via admin suggestion review |
+| `manual` | Manually entered via admin people page or SQL |
 
 ---
 
 ## Useful DB Queries
 
 ```bash
+# Network summary
+psql podcast_db -c "
+SELECT
+  (SELECT COUNT(*) FROM hosts) as total_people,
+  (SELECT COUNT(*) FROM episode_host) as total_credits,
+  (SELECT COUNT(*) FROM suggestions WHERE status = 'pending') as pending_suggestions,
+  (SELECT COUNT(*) FROM rejected_names) as rejected_names,
+  (SELECT COUNT(*) FROM hosts WHERE profile_image_url IS NOT NULL) as with_image;
+"
+
+# People on multiple shows (graph bridges)
+psql podcast_db -c "
+SELECT h.first_name || ' ' || h.last_name as name,
+       COUNT(DISTINCT e.podcast_id) as show_count,
+       COUNT(DISTINCT eh.episode_id) as episodes
+FROM hosts h
+JOIN episode_host eh ON h.host_id = eh.host_id
+JOIN episodes e ON eh.episode_id = e.episode_id
+GROUP BY h.host_id, h.first_name, h.last_name
+HAVING COUNT(DISTINCT e.podcast_id) > 2
+ORDER BY show_count DESC, episodes DESC
+LIMIT 20;
+"
+
 # Episode counts by show
 psql podcast_db -c "
 SELECT p.title, COUNT(e.episode_id) as episodes
@@ -302,37 +303,20 @@ LEFT JOIN episodes e ON e.podcast_id = p.podcast_id
 GROUP BY p.title ORDER BY episodes DESC;
 "
 
-# Credits coverage by show
-psql podcast_db -c "
-SELECT p.title, COUNT(DISTINCT eh.host_id) as people, COUNT(eh.episode_id) as credits
-FROM podcasts p
-LEFT JOIN episodes e ON e.podcast_id = p.podcast_id
-LEFT JOIN episode_host eh ON eh.episode_id = e.episode_id
-GROUP BY p.title ORDER BY credits DESC;
-"
+# Suggestion queue status
+psql podcast_db -c "SELECT status, COUNT(*) FROM suggestions GROUP BY status;"
 
-# All unique people in the network
+# Image coverage
 psql podcast_db -c "
-SELECT h.first_name || ' ' || h.last_name as name,
-       COUNT(DISTINCT eh.episode_id) as appearances
-FROM hosts h
-JOIN episode_host eh ON h.host_id = eh.host_id
-GROUP BY h.host_id, h.first_name, h.last_name
-ORDER BY appearances DESC;
+SELECT COUNT(*) as total,
+       COUNT(profile_image_url) as with_image,
+       ROUND(COUNT(profile_image_url)::numeric / COUNT(*) * 100) as pct
+FROM hosts;
 "
 ```
 
 ---
 
-## Permanent Failures
+## Sector Coverage
 
-Some shows get removed from Apple Podcasts and will never scrape successfully. Mark them so `reset` skips them:
-
-```bash
-psql podcast_db -c "
-UPDATE podcast_tracking
-SET status = 'failed',
-    error_message = 'PERMANENT: Removed from Apple Podcasts directory'
-WHERE apple_podcast_id = 'XXXXXXXXXX';
-"
-```
+86 shows tracked across: Solar & Storage, Grid Software, Hydrogen, Geothermal, EV & Transportation, Home Electrification, Carbon Removal, Industrial Decarb, Research/Policy, Fusion, Community Solar.
