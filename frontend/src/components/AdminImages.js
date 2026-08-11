@@ -152,6 +152,12 @@ export default function AdminImages() {
               placeholder="https://x.com/handle or https://bsky.app/profile/handle"
               className="flex-1 rounded-xl border border-gray-300 px-4 py-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
+            <a
+              href={`https://bsky.app/search?q=${encodeURIComponent(person?.host_name || '')}`}
+              target="_blank" rel="noopener noreferrer"
+              className="px-3 py-3 bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-xl text-sky-600 text-sm transition-colors flex-shrink-0"
+              title="Search Bluesky"
+            >🦋</a>
             <button
               onClick={handleSubmitUrl}
               disabled={!twitterUrl.trim() || submitting}

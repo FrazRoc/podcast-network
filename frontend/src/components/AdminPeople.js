@@ -214,10 +214,18 @@ function PersonPanel({ selected, onSaved, onCancel }) {
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1">Bluesky URL</label>
-          <input type="text" value={form.bluesky_url}
-            onChange={e => setForm(f => ({ ...f, bluesky_url: e.target.value }))}
-            placeholder="https://bsky.app/profile/handle.bsky.social"
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none" />
+          <div className="flex gap-1.5">
+            <input type="text" value={form.bluesky_url}
+              onChange={e => setForm(f => ({ ...f, bluesky_url: e.target.value }))}
+              placeholder="https://bsky.app/profile/handle.bsky.social"
+              className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none" />
+            <a
+              href={`https://bsky.app/search?q=${encodeURIComponent((form.first_name + ' ' + form.last_name).trim())}`}
+              target="_blank" rel="noopener noreferrer"
+              className="px-2.5 py-2 bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-lg text-sky-600 text-sm transition-colors flex-shrink-0"
+              title="Search Bluesky"
+            >🦋</a>
+          </div>
         </div>
       </div>
 
