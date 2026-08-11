@@ -31,7 +31,7 @@ const SORTS = [
   { id: 'newest',           label: 'Newest first' },
 ];
 
-const emptyForm = { first_name: '', last_name: '', twitter_url: '', bluesky_url: '' };
+const emptyForm = { first_name: '', last_name: '', twitter_url: '', bluesky_url: '', linkedin_url: '' };
 
 // ─── Right panel: Add or Edit ──────────────────────────────────────────────────
 function PersonPanel({ selected, onSaved, onCancel }) {
@@ -62,6 +62,7 @@ function PersonPanel({ selected, onSaved, onCancel }) {
         last_name:    selected.last_name   || '',
         twitter_url:  selected.twitter_handle ? `https://x.com/${selected.twitter_handle}` : '',
         bluesky_url:  selected.bluesky_handle  ? `https://bsky.app/profile/${selected.bluesky_handle}` : '',
+        linkedin_url: selected.linkedin_url || '',
       });
       setResult(null);
       setError('');
@@ -225,6 +226,21 @@ function PersonPanel({ selected, onSaved, onCancel }) {
               className="px-2.5 py-2 bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-lg text-sky-600 text-sm transition-colors flex-shrink-0"
               title="Search Bluesky"
             >🦋</a>
+          </div>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">LinkedIn URL</label>
+          <div className="flex gap-1.5">
+            <input type="text" value={form.linkedin_url}
+              onChange={e => setForm(f => ({ ...f, linkedin_url: e.target.value }))}
+              placeholder="https://linkedin.com/in/handle"
+              className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none" />
+            <a
+              href={`https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent((form.first_name + ' ' + form.last_name).trim())}`}
+              target="_blank" rel="noopener noreferrer"
+              className="px-2.5 py-2 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg text-blue-700 text-sm transition-colors flex-shrink-0"
+              title="Search LinkedIn"
+            >in</a>
           </div>
         </div>
       </div>

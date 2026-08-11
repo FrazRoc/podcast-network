@@ -688,6 +688,7 @@ class CreatePersonRequest(BaseModel):
     last_name: str
     twitter_url: str = None
     bluesky_url: str = None
+    linkedin_url: str = None
 
 
 @app.post("/api/admin/people")
@@ -742,11 +743,13 @@ async def create_person(body: CreatePersonRequest):
                 image_url = f'https://unavatar.io/twitter/{twitter_handle}'
 
         # Create host record
+        linkedin_url = body.linkedin_url.strip() if body.linkedin_url else None
+
         cur.execute("""
-            INSERT INTO hosts (first_name, last_name, profile_image_url, twitter_handle, bluesky_handle, data_source, created_at)
-            VALUES (%s, %s, %s, %s, %s, 'manual', NOW())
+            INSERT INTO hosts (first_name, last_name, profile_image_url, twitter_handle, bluesky_handle, linkedin_url, data_source, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, 'manual', NOW())
             RETURNING host_id
-        """, (first_name, last_name, image_url, twitter_handle, bluesky_handle))
+        """, (first_name, last_name, image_url, twitter_handle, bluesky_handle, linkedin_url))
         host_id = cur.fetchone()['host_id']
 
         # Scan all episodes for name matches
@@ -831,7 +834,7 @@ async def list_people(q: str = "", filter: str = "all", sort: str = "appearances
                    h.first_name || ' ' || h.last_name AS full_name,
                    h.first_name, h.last_name,
                    h.profile_image_url,
-                   h.twitter_handle, h.bluesky_handle,
+                   h.twitter_handle, h.bluesky_handle, h.linkedin_url,
                    h.data_source,
                    COUNT(DISTINCT eh.episode_id) AS appearances,
                    COUNT(DISTINCT e.podcast_id)  AS podcast_count
@@ -910,6 +913,8 @@ async def update_person(host_id: int, body: CreatePersonRequest):
                 twitter_handle = m.group(1)
                 image_url = f'https://unavatar.io/twitter/{twitter_handle}'
 
+        linkedin_url = body.linkedin_url.strip() if body.linkedin_url else None
+
         # Update host record
         cur.execute("""
             UPDATE hosts SET
@@ -917,9 +922,10 @@ async def update_person(host_id: int, body: CreatePersonRequest):
                 last_name      = %s,
                 twitter_handle = COALESCE(%s, twitter_handle),
                 bluesky_handle = COALESCE(%s, bluesky_handle),
+                linkedin_url   = COALESCE(%s, linkedin_url),
                 profile_image_url = COALESCE(%s, profile_image_url)
             WHERE host_id = %s
-        """, (first_name, last_name, twitter_handle, bluesky_handle, image_url, host_id))
+        """, (first_name, last_name, twitter_handle, bluesky_handle, linkedin_url, image_url, host_id))
 
         # If name changed: clear parsed links, then re-scan with new name
         if name_changed:
