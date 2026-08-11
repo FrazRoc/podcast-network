@@ -814,6 +814,7 @@ async def list_people(q: str = "", filter: str = "all", sort: str = "appearances
         sort_map = {
             "appearances_desc": "appearances DESC, h.last_name ASC",
             "appearances_asc":  "appearances ASC, h.last_name ASC",
+            "shows_desc":       "podcast_count DESC, appearances DESC",
             "name_asc":         "h.last_name ASC, h.first_name ASC",
             "name_desc":        "h.last_name DESC, h.first_name DESC",
             "newest":           "h.created_at DESC",

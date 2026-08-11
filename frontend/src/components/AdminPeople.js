@@ -24,8 +24,9 @@ const FILTERS = [
 ];
 
 const SORTS = [
-  { id: 'appearances_desc', label: 'Most appearances' },
-  { id: 'appearances_asc',  label: 'Fewest appearances' },
+  { id: 'appearances_desc', label: 'Most episodes' },
+  { id: 'appearances_asc',  label: 'Fewest episodes' },
+  { id: 'shows_desc',       label: 'Most shows' },
   { id: 'name_asc',         label: 'Name A–Z' },
   { id: 'name_desc',        label: 'Name Z–A' },
   { id: 'newest',           label: 'Newest first' },
