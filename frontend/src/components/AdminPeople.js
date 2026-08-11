@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 
 const API = 'http://localhost:8000/api/admin';
 
@@ -56,7 +56,12 @@ function PersonPanel({ selected, onSaved, onCancel }) {
   const toggleShow = (show) =>
     setExpandedShows(prev => ({ ...prev, [show]: !prev[show] }));
 
+  // Track previous host_id to only reset result when switching to a DIFFERENT person
+  const prevHostId = React.useRef(null);
   useEffect(() => {
+    const switchedPerson = selected?.host_id !== prevHostId.current;
+    prevHostId.current = selected?.host_id || null;
+
     if (selected) {
       setForm({
         first_name:   selected.first_name  || '',
@@ -65,9 +70,9 @@ function PersonPanel({ selected, onSaved, onCancel }) {
         bluesky_url:  selected.bluesky_handle  ? `https://bsky.app/profile/${selected.bluesky_handle}` : '',
         linkedin_url: selected.linkedin_url || '',
       });
-      setResult(null);
       setError('');
       setExistingId(null);
+      if (switchedPerson) setResult(null);  // only clear result when switching people
     } else {
       setForm(emptyForm);
       setResult(null);
@@ -112,7 +117,17 @@ function PersonPanel({ selected, onSaved, onCancel }) {
       } else {
         setResult(data);
         if (!isEdit) setForm(emptyForm);
-        onSaved?.();
+        // Pass back updated person data so parent can refresh selected
+        onSaved?.({
+          host_id: data.host_id || selected?.host_id,
+          profile_image_url: data.image_url || selected?.profile_image_url,
+          first_name: form.first_name.trim(),
+          last_name: form.last_name.trim(),
+          full_name: `${form.first_name.trim()} ${form.last_name.trim()}`,
+          twitter_handle: form.twitter_url ? form.twitter_url.split('/').pop() : selected?.twitter_handle,
+          bluesky_handle: form.bluesky_url ? form.bluesky_url.split('/').pop() : selected?.bluesky_handle,
+          linkedin_url: form.linkedin_url || selected?.linkedin_url,
+        });
       }
     } catch (e) {
       setError(e.message);
@@ -129,7 +144,7 @@ function PersonPanel({ selected, onSaved, onCancel }) {
       const data = await res.json();
       setResult(data);
       setExistingId(null);
-      onSaved?.();
+      onSaved?.({ host_id: data.host_id, profile_image_url: data.image_url });
     } catch (e) {
       setError(e.message);
     } finally {
@@ -209,10 +224,18 @@ function PersonPanel({ selected, onSaved, onCancel }) {
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1">Twitter/X URL</label>
-          <input type="text" value={form.twitter_url}
-            onChange={e => setForm(f => ({ ...f, twitter_url: e.target.value }))}
-            placeholder="https://x.com/handle"
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none" />
+          <div className="flex gap-1.5">
+            <input type="text" value={form.twitter_url}
+              onChange={e => setForm(f => ({ ...f, twitter_url: e.target.value }))}
+              placeholder="https://x.com/handle"
+              className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none" />
+            <a
+              href={`https://x.com/search?q=${encodeURIComponent((form.first_name + ' ' + form.last_name).trim())}&src=typed_query&f=user`}
+              target="_blank" rel="noopener noreferrer"
+              className="px-2.5 py-2 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg text-gray-700 text-sm font-bold transition-colors flex-shrink-0"
+              title="Search X"
+            >𝕏</a>
+          </div>
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1">Bluesky URL</label>
@@ -386,8 +409,12 @@ export default function AdminPeople() {
     } catch (e) { console.error(e); }
   };
 
-  const handleSaved = () => {
+  const handleSaved = (updatedPerson) => {
     fetchPeople(searchQ, filter, sort);
+    // If the saved person is the one currently selected, update it so image refreshes
+    if (updatedPerson && selected && updatedPerson.host_id === selected.host_id) {
+      setSelected(prev => ({ ...prev, ...updatedPerson }));
+    }
   };
 
   return (
@@ -409,9 +436,17 @@ export default function AdminPeople() {
 
           {/* Search + filters */}
           <div className="bg-white rounded-2xl border border-gray-200 p-4 mb-4">
+            <div className="relative mb-3">
             <input ref={searchRef} type="text" value={searchQ} onChange={handleSearch}
               placeholder="Search by name..."
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm mb-3 focus:border-blue-500 focus:outline-none" />
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none pr-7" />
+            {searchQ && (
+              <button
+                onClick={() => { setSearchQ(''); fetchPeople('', filter, sort); }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-lg leading-none"
+              >×</button>
+            )}
+          </div>
 
             <div className="flex gap-2 flex-wrap mb-3">
               {FILTERS.map(f => (

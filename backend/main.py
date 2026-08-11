@@ -854,6 +854,11 @@ async def create_person(body: CreatePersonRequest):
         twitter_handle = None
         bluesky_handle = None
 
+        if body.twitter_url:
+            tw_match = re.search(r'(?:x\.com|twitter\.com)/([A-Za-z0-9_]+)', body.twitter_url)
+            if tw_match:
+                twitter_handle = tw_match.group(1)
+
         if body.bluesky_url:
             bsky_match = re.search(r'bsky\.app/profile/([A-Za-z0-9._-]+)', body.bluesky_url)
             if bsky_match:
@@ -866,11 +871,8 @@ async def create_person(body: CreatePersonRequest):
                     if resp.status_code == 200:
                         image_url = resp.json().get('avatar')
 
-        if not image_url and body.twitter_url:
-            tw_match = re.search(r'(?:x\.com|twitter\.com)/([A-Za-z0-9_]+)', body.twitter_url)
-            if tw_match:
-                twitter_handle = tw_match.group(1)
-                image_url = f'https://unavatar.io/twitter/{twitter_handle}'
+        if not image_url and twitter_handle:
+            image_url = f'https://unavatar.io/twitter/{twitter_handle}'
 
         # Create host record
         linkedin_url = body.linkedin_url.strip() if body.linkedin_url else None
@@ -1021,10 +1023,15 @@ async def update_person(host_id: int, body: CreatePersonRequest):
         full_name  = f"{first_name} {last_name}"
         name_changed = (first_name != existing['first_name'] or last_name != existing['last_name'])
 
-        # Fetch new image if handle provided
+        # Extract both handles independently
         image_url      = None
         twitter_handle = None
         bluesky_handle = None
+
+        if body.twitter_url:
+            m = re.search(r'(?:x\.com|twitter\.com)/([A-Za-z0-9_]+)', body.twitter_url)
+            if m:
+                twitter_handle = m.group(1)
 
         if body.bluesky_url:
             m = re.search(r'bsky\.app/profile/([A-Za-z0-9._-]+)', body.bluesky_url)
@@ -1038,11 +1045,9 @@ async def update_person(host_id: int, body: CreatePersonRequest):
                     if resp.status_code == 200:
                         image_url = resp.json().get('avatar')
 
-        if not image_url and body.twitter_url:
-            m = re.search(r'(?:x\.com|twitter\.com)/([A-Za-z0-9_]+)', body.twitter_url)
-            if m:
-                twitter_handle = m.group(1)
-                image_url = f'https://unavatar.io/twitter/{twitter_handle}'
+        # Fall back to Twitter for image if no Bluesky image
+        if not image_url and twitter_handle:
+            image_url = f'https://unavatar.io/twitter/{twitter_handle}'
 
         linkedin_url = body.linkedin_url.strip() if body.linkedin_url else None
 

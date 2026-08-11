@@ -67,6 +67,11 @@ STRIP_AFTER_PATTERNS = [
     r'\nLinks and Related Episodes',                      # Cleaning Up: Leadership combined footer
     r'\nRelevant Guest & Topic Links',                   # Cleaning Up: Leadership links variant
     r'\nGuest Bio',                                      # Cleaning Up: Leadership guest bio section
+    r'\nFor show notes',                               # Climate One footer
+    r'\nLearn more about your ad choices',             # Megaphone universal footer
+    r'megaphone.fm/adchoices',                          # Megaphone universal footer
+    r'🎟',                                             # Climate One upcoming shows ticket promo
+    r'\nSupport Climate One',                          # Climate One support/subscribe footer
     r'\nhttps://www.linkedin.com/in/',                  # CORE Knowledge LinkedIn footer
     r'\nBlue Spark\n',                                  # CORE Knowledge company links section
 ]
