@@ -7,6 +7,12 @@ import { API_BASE_URL } from '../config';
 
 const API_URL = `${API_BASE_URL}/api/host-connections`;
 const SIDEBAR_WIDTH = 384;
+const MOBILE_BREAKPOINT = 768;
+
+// Below the mobile breakpoint the sidebar overlays the graph instead of
+// pushing it over, so the graph should use the full viewport width.
+const getGraphWidth = () =>
+  window.innerWidth >= MOBILE_BREAKPOINT ? window.innerWidth - SIDEBAR_WIDTH : window.innerWidth;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -399,8 +405,14 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
   </div>
 );
 
-const PodcastLegend = ({ podcasts, isOpen, onToggle }) => (
-  <div className="absolute bottom-4 right-4 bg-white rounded-lg shadow-lg max-w-xs">
+const PodcastLegend = ({ podcasts, isOpen, onToggle }) => {
+  const [legendSearch, setLegendSearch] = useState('');
+  const visiblePodcasts = podcasts.filter(p =>
+    p.toLowerCase().includes(legendSearch.toLowerCase())
+  );
+
+  return (
+  <div className="absolute bottom-4 right-4 bg-white rounded-lg shadow-lg max-w-xs w-64">
     <button
       onClick={onToggle}
       className="w-full flex items-center justify-between px-4 py-2 text-sm font-semibold text-gray-700"
@@ -409,17 +421,30 @@ const PodcastLegend = ({ podcasts, isOpen, onToggle }) => (
       <span>{isOpen ? '▲' : '▼'}</span>
     </button>
     {isOpen && (
-      <div className="px-4 pb-3 space-y-1 max-h-64 overflow-y-auto">
-        {podcasts.map(p => (
+      <div className="px-4 pb-3">
+        <input
+          type="text"
+          value={legendSearch}
+          onChange={e => setLegendSearch(e.target.value)}
+          placeholder="Search podcasts..."
+          className="w-full mb-2 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
+        />
+        <div className="space-y-1 max-h-64 overflow-y-auto">
+        {visiblePodcasts.map(p => (
           <div key={p} className="flex items-center text-xs">
             <div className="w-3 h-3 rounded-full mr-2 flex-shrink-0" style={{ backgroundColor: podcastColor(p) }} />
             <span className="truncate">{p}</span>
           </div>
         ))}
+        {visiblePodcasts.length === 0 && (
+          <div className="text-xs text-gray-400 text-center py-2">No matches</div>
+        )}
+        </div>
       </div>
     )}
   </div>
-);
+  );
+};
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
@@ -434,9 +459,10 @@ const PodcastHostNetwork = () => {
   const [selectedNodeConnections, setSelectedNodeConnections] = useState([]);
   const [selectedLinks, setSelectedLinks] = useState(new Set());
   const [legendOpen, setLegendOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [dimensions, setDimensions] = useState({
-    width: window.innerWidth - SIDEBAR_WIDTH,
+    width: getGraphWidth(),
     height: window.innerHeight,
   });
   const [currentFilters, setCurrentFilters] = useState({
@@ -460,7 +486,7 @@ const PodcastHostNetwork = () => {
   // Window resize
   useEffect(() => {
     const onResize = () => setDimensions({
-      width: window.innerWidth - SIDEBAR_WIDTH,
+      width: getGraphWidth(),
       height: window.innerHeight,
     });
     window.addEventListener('resize', onResize);
@@ -549,6 +575,7 @@ const PodcastHostNetwork = () => {
       setHighlightNodes(new Set([node.id]));
       setSelectedLinks(new Set(conns));
       setHighlightLinks(new Set(conns));
+      if (window.innerWidth < MOBILE_BREAKPOINT) setSidebarOpen(true);
     }
   }, [selectedNode, graphData.links]);
 
@@ -565,6 +592,7 @@ const PodcastHostNetwork = () => {
 
   const handleLinkClick = useCallback(link => {
     setSelectedLink(link); setSelectedNode(null);
+    if (window.innerWidth < MOBILE_BREAKPOINT) setSidebarOpen(true);
   }, []);
 
   const handleFiltersChange = useCallback(partial => {
@@ -680,19 +708,49 @@ const PodcastHostNetwork = () => {
 
   return (
     <div className="flex h-screen w-full relative">
+      {/* Mobile menu toggle */}
+      <button
+        onClick={() => setSidebarOpen(true)}
+        className="md:hidden absolute top-4 left-4 z-30 bg-white rounded-lg shadow-lg p-2 text-gray-700"
+        aria-label="Open menu"
+      >
+        ☰
+      </button>
+
+      {/* Mobile backdrop */}
+      {sidebarOpen && (
+        <div
+          className="md:hidden fixed inset-0 bg-black/30 z-20"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       {/* Sidebar */}
-      <div className="w-96 min-w-[24rem] bg-gray-50 p-4 overflow-y-auto shadow-lg z-10">
+      <div
+        className={`fixed md:static inset-y-0 left-0 w-96 max-w-[85vw] md:max-w-none md:min-w-[24rem] bg-gray-50 p-4 overflow-y-auto shadow-lg z-20 transform transition-transform duration-200 ease-in-out md:translate-x-0 ${
+          sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
         <div className="mb-4 flex items-start justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-800">Podcast Network</h1>
             <p className="text-gray-500 text-sm">Explore host connections and collaborations</p>
           </div>
-          <a
-            href="/admin"
-            className="text-xs text-gray-400 hover:text-gray-600 border border-gray-200 rounded px-2 py-1 mt-1 flex-shrink-0"
-          >
-            ⚙ Admin
-          </a>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <a
+              href="/admin"
+              className="text-xs text-gray-400 hover:text-gray-600 border border-gray-200 rounded px-2 py-1 mt-1"
+            >
+              ⚙ Admin
+            </a>
+            <button
+              onClick={() => setSidebarOpen(false)}
+              className="md:hidden text-gray-400 hover:text-gray-600 border border-gray-200 rounded px-2 py-1 mt-1"
+              aria-label="Close menu"
+            >
+              ✕
+            </button>
+          </div>
         </div>
 
         {selectedNode ? (
