@@ -275,10 +275,8 @@ const ConnectionDetails = ({ connection, onClose }) => (
 );
 
 const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuery, onSearchChange }) => (
-  <div className="space-y-5">
-    <h2 className="text-xl font-bold text-gray-800">Filter Network</h2>
-
-    <div className="p-3 bg-teal-50 rounded-lg text-sm text-gray-600">
+  <div className="space-y-4">
+    <div className="p-2.5 bg-teal-50 rounded-lg text-sm text-gray-600">
       Showing <span className="font-bold text-gray-900">{networkStats.visibleNodes}</span> hosts with{' '}
       <span className="font-bold text-gray-900">{networkStats.visibleLinks}</span> connections from{' '}
       <span className="font-bold text-gray-900">{networkStats.visiblePodcasts}</span> podcasts
@@ -345,10 +343,10 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
     </div>
 
     {/* Roles */}
-    <div className="space-y-1">
-      <label className="block text-sm font-medium text-gray-700">Roles</label>
+    <div className="flex items-center gap-4">
+      <label className="text-sm font-medium text-gray-700">Roles</label>
       {['Host', 'Guest'].map(role => (
-        <label key={role} className="flex items-center space-x-2">
+        <label key={role} className="flex items-center gap-1.5">
           <input
             type="checkbox"
             checked={currentFilters.selectedRoles.includes(role)}
@@ -365,30 +363,31 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
       ))}
     </div>
 
-    {/* Genre */}
-    <div className="space-y-1">
-      <label className="block text-sm font-medium text-gray-700">Genre</label>
-      <select
-        value={currentFilters.selectedGenre}
-        onChange={e => onFiltersChange({ selectedGenre: e.target.value })}
-        className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm shadow-sm focus:border-teal-500 focus:outline-none"
-      >
-        <option value="all">All Genres</option>
-        {networkStats.genres?.map(g => <option key={g} value={g}>{g}</option>)}
-      </select>
-    </div>
+    {/* Genre & Channel */}
+    <div className="grid grid-cols-2 gap-3">
+      <div className="space-y-1">
+        <label className="block text-sm font-medium text-gray-700">Genre</label>
+        <select
+          value={currentFilters.selectedGenre}
+          onChange={e => onFiltersChange({ selectedGenre: e.target.value })}
+          className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm shadow-sm focus:border-teal-500 focus:outline-none"
+        >
+          <option value="all">All Genres</option>
+          {networkStats.genres?.map(g => <option key={g} value={g}>{g}</option>)}
+        </select>
+      </div>
 
-    {/* Channel */}
-    <div className="space-y-1">
-      <label className="block text-sm font-medium text-gray-700">Channel</label>
-      <select
-        value={currentFilters.selectedChannel}
-        onChange={e => onFiltersChange({ selectedChannel: e.target.value })}
-        className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm shadow-sm focus:border-teal-500 focus:outline-none"
-      >
-        <option value="all">All Channels</option>
-        {networkStats.channels?.map(c => <option key={c} value={c}>{c}</option>)}
-      </select>
+      <div className="space-y-1">
+        <label className="block text-sm font-medium text-gray-700">Channel</label>
+        <select
+          value={currentFilters.selectedChannel}
+          onChange={e => onFiltersChange({ selectedChannel: e.target.value })}
+          className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm shadow-sm focus:border-teal-500 focus:outline-none"
+        >
+          <option value="all">All Channels</option>
+          {networkStats.channels?.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </div>
     </div>
 
     <button
@@ -712,10 +711,10 @@ const PodcastHostNetwork = () => {
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        <div className="mb-4 flex items-start justify-between">
+        <div className="mb-3 flex items-start justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-800">Podcast Network</h1>
-            <p className="text-gray-500 text-sm">Explore host connections and collaborations</p>
+            <h1 className="text-xl font-bold text-gray-800">Podcast Network</h1>
+            <p className="text-gray-500 text-xs">Explore host connections</p>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             <a
