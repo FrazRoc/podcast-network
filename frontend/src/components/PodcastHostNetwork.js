@@ -405,14 +405,8 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
   </div>
 );
 
-const PodcastLegend = ({ podcasts, isOpen, onToggle }) => {
-  const [legendSearch, setLegendSearch] = useState('');
-  const visiblePodcasts = podcasts.filter(p =>
-    p.toLowerCase().includes(legendSearch.toLowerCase())
-  );
-
-  return (
-  <div className="absolute bottom-4 right-4 bg-white rounded-lg shadow-lg max-w-xs w-64">
+const PodcastLegend = ({ podcasts, isOpen, onToggle }) => (
+  <div className="absolute bottom-4 right-4 bg-white rounded-lg shadow-lg max-w-xs">
     <button
       onClick={onToggle}
       className="w-full flex items-center justify-between px-4 py-2 text-sm font-semibold text-gray-700"
@@ -421,30 +415,17 @@ const PodcastLegend = ({ podcasts, isOpen, onToggle }) => {
       <span>{isOpen ? '▲' : '▼'}</span>
     </button>
     {isOpen && (
-      <div className="px-4 pb-3">
-        <input
-          type="text"
-          value={legendSearch}
-          onChange={e => setLegendSearch(e.target.value)}
-          placeholder="Search podcasts..."
-          className="w-full mb-2 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
-        />
-        <div className="space-y-1 max-h-64 overflow-y-auto">
-        {visiblePodcasts.map(p => (
+      <div className="px-4 pb-3 space-y-1 max-h-64 overflow-y-auto">
+        {podcasts.map(p => (
           <div key={p} className="flex items-center text-xs">
             <div className="w-3 h-3 rounded-full mr-2 flex-shrink-0" style={{ backgroundColor: podcastColor(p) }} />
             <span className="truncate">{p}</span>
           </div>
         ))}
-        {visiblePodcasts.length === 0 && (
-          <div className="text-xs text-gray-400 text-center py-2">No matches</div>
-        )}
-        </div>
       </div>
     )}
   </div>
-  );
-};
+);
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
