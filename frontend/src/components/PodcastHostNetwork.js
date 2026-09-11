@@ -399,7 +399,7 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
 
     <button
       onClick={() => onFiltersChange({
-        minConnections: 1, minPodcasts: 1,
+        minConnections: 2, minPodcasts: 1,
         minClusterSize: 8,
         selectedRoles: ['Host', 'Guest'],
         selectedChannel: 'all', selectedGenre: 'all',
@@ -453,7 +453,7 @@ const PodcastHostNetwork = () => {
     height: window.innerHeight,
   });
   const [currentFilters, setCurrentFilters] = useState({
-    minConnections: 1,
+    minConnections: 2,
     minPodcasts: 1,
     minClusterSize: 8,
     selectedRoles: ['Host', 'Guest'],
