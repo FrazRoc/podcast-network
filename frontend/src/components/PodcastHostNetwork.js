@@ -468,13 +468,19 @@ const PodcastHostNetwork = () => {
   }, []);
 
   // Data fetch
-  useEffect(() => {
+  const loadData = useCallback(() => {
+    setLoading(true);
+    setError(null);
     fetch(API_URL)
       .then(r => { if (!r.ok) throw new Error(`API error ${r.status}`); return r.json(); })
-      .then(data => setGraphData(processData(data)))
-      .catch(err => setError(err.message))
+      .then(data => setGraphData(processData(Array.isArray(data) ? data : [])))
+      .catch(err => setError(err.message || 'Failed to load network data'))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
 
 
@@ -660,8 +666,15 @@ const PodcastHostNetwork = () => {
   );
 
   if (error) return (
-    <div className="flex items-center justify-center h-screen text-red-500">
-      <div className="text-xl font-semibold">Error: {error}</div>
+    <div className="flex flex-col items-center justify-center h-screen gap-4 text-center px-4">
+      <div className="text-xl font-semibold text-red-500">Couldn't load the network data</div>
+      <div className="text-sm text-gray-500 max-w-md">{error}</div>
+      <button
+        className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+        onClick={loadData}
+      >
+        Retry
+      </button>
     </div>
   );
 
