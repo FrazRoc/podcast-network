@@ -8,7 +8,7 @@ on:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
     steps:
@@ -32,7 +32,8 @@ jobs:
 
       - name: Scrape host/guest credits
         working-directory: scraper
-        run: python3 apple_credits_scraper.py episodes --hosts-only --db "$DATABASE_URL"
+        timeout-minutes: 35
+        run: python3 apple_credits_scraper.py episodes --hosts-only --batch 500 --db "$DATABASE_URL"
 
       - name: Extract hosts from show metadata
         working-directory: scraper
