@@ -283,7 +283,7 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
         { label: 'Podcasts', value: networkStats.visiblePodcasts },
       ].map(({ label, value }) => (
         <div key={label} className="bg-teal-50 rounded-lg text-center py-2">
-          <p className="text-lg font-bold text-gray-900 leading-tight">{loading ? '—' : value}</p>
+          <p className="text-lg font-bold text-gray-900 leading-tight">{loading ? ' ' : value}</p>
           <p className="text-xs text-gray-500">{label}</p>
         </div>
       ))}
