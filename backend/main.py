@@ -280,6 +280,17 @@ async def get_next_suggestion():
         """, (row['candidate_name'], row['episode_id']))
         other_count = cur.fetchone()['other_suggestions']
 
+        # Other names already queued for review on this same episode, so the
+        # admin UI can distinguish "still pending" names from unhandled ones
+        cur.execute("""
+            SELECT DISTINCT candidate_name
+            FROM suggestions
+            WHERE episode_id = %s
+              AND suggestion_id != %s
+              AND status = 'pending'
+        """, (row['episode_id'], row['suggestion_id']))
+        other_pending_names = [r['candidate_name'] for r in cur.fetchall()]
+
         cur.close()
         conn.close()
 
@@ -288,6 +299,7 @@ async def get_next_suggestion():
             **row,
             "existing_credits": existing_credits,
             "other_pending_suggestions": other_count,
+            "other_pending_names": other_pending_names,
         }
 
     except Exception as e:

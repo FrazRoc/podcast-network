@@ -248,9 +248,16 @@ export default function AdminSuggestions() {
 
             {/* Full episode description */}
             <div className="px-6 py-4 flex-1 overflow-y-auto">
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
-                Episode Description
-              </p>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+                  Episode Description
+                </p>
+                {suggestion.other_pending_names?.length > 0 && (
+                  <p className="text-xs text-purple-600">
+                    <span className="underline decoration-dotted decoration-purple-500 decoration-2">dotted</span> = also pending review
+                  </p>
+                )}
+              </div>
               <div className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap text-left">
                 {highlightNames(suggestion.episode_description, [
                   { name: suggestion.candidate_name, className: 'bg-yellow-200 rounded px-0.5 not-italic' },
@@ -259,7 +266,11 @@ export default function AdminSuggestions() {
                     className: c.is_guest
                       ? 'underline decoration-blue-400 decoration-2 bg-transparent not-italic'
                       : 'underline decoration-green-500 decoration-2 bg-transparent not-italic',
-                  }))
+                  })),
+                  ...(suggestion.other_pending_names || []).map(name => ({
+                    name,
+                    className: 'underline decoration-dotted decoration-purple-500 decoration-2 bg-transparent not-italic',
+                  })),
                 ])}
               </div>
             </div>
