@@ -46,3 +46,7 @@ jobs:
       - name: Queue new-name suggestions for review
         working-directory: scraper
         run: python3 episode_name_scanner.py suggest --title-only
+
+      - name: Record successful run timestamp
+        working-directory: scraper
+        run: python3 mark_scrape_complete.py --db "$DATABASE_URL"

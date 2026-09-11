@@ -120,6 +120,21 @@ async def get_host_connections():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/last-updated")
+async def get_last_updated():
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT last_run_at FROM scrape_status WHERE id = 1;")
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return {"last_run_at": row["last_run_at"] if row else None}
+    except Exception as e:
+        print(str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/people")
 async def get_people():
     try:

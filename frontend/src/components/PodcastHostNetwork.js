@@ -6,6 +6,7 @@ import { API_BASE_URL } from '../config';
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const API_URL = `${API_BASE_URL}/api/host-connections`;
+const LAST_UPDATED_URL = `${API_BASE_URL}/api/last-updated`;
 const SIDEBAR_WIDTH = 384;
 const MOBILE_BREAKPOINT = 768;
 
@@ -18,6 +19,19 @@ const getGraphWidth = () =>
 
 const getAvatarUrl = (name) =>
   `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}&backgroundColor=65c9ff,92a1c6,dd6b7f,58c9b9,ade498`;
+
+const formatRelativeTime = (isoString) => {
+  if (!isoString) return null;
+  const then = new Date(isoString.endsWith('Z') ? isoString : isoString + 'Z');
+  const seconds = Math.max(0, Math.floor((Date.now() - then.getTime()) / 1000));
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} minute${minutes !== 1 ? 's' : ''} ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours !== 1 ? 's' : ''} ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days !== 1 ? 's' : ''} ago`;
+};
 
 // Stable color per podcast title (deterministic, no random)
 const podcastColor = (title) => {
@@ -274,7 +288,7 @@ const ConnectionDetails = ({ connection, onClose }) => (
   </div>
 );
 
-const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuery, onSearchChange, loading }) => (
+const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuery, onSearchChange, loading, lastUpdated }) => (
   <div className="space-y-4">
     <div className="grid grid-cols-3 gap-2">
       {[
@@ -288,6 +302,12 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
         </div>
       ))}
     </div>
+
+    {lastUpdated && (
+      <p className="text-xs text-gray-400 text-right -mt-2">
+        Data updated {formatRelativeTime(lastUpdated)}
+      </p>
+    )}
 
     {/* Name search */}
     <div className="space-y-1">
@@ -448,6 +468,7 @@ const PodcastHostNetwork = () => {
   const [legendOpen, setLegendOpen] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [lastUpdated, setLastUpdated] = useState(null);
   const [dimensions, setDimensions] = useState({
     width: getGraphWidth(),
     height: window.innerHeight,
@@ -494,6 +515,21 @@ const PodcastHostNetwork = () => {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // Last-updated timestamp — fetched once, then re-rendered periodically
+  // so the relative time ("3 hours ago") stays fresh without a refetch
+  useEffect(() => {
+    fetch(LAST_UPDATED_URL)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => data?.last_run_at && setLastUpdated(data.last_run_at))
+      .catch(() => {});
+  }, []);
+
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    const interval = setInterval(() => forceTick(t => t + 1), 60000);
+    return () => clearInterval(interval);
+  }, []);
 
 
 
@@ -746,6 +782,7 @@ const PodcastHostNetwork = () => {
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}
             loading={loading}
+            lastUpdated={lastUpdated}
           />
         )}
       </div>
