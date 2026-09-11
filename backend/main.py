@@ -9,9 +9,27 @@ from fastapi.middleware.cors import CORSMiddleware
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import os
+from urllib.parse import urlparse
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Hosts /api/proxy/image is allowed to fetch from — every domain profile
+# images actually come from (Apple's CDN, Twitter avatars via unavatar.io,
+# Bluesky avatars). Anything else is rejected to prevent the endpoint being
+# used as an open proxy / SSRF vector.
+ALLOWED_IMAGE_HOST_SUFFIXES = ('mzstatic.com', 'unavatar.io', 'bsky.app')
+
+
+def is_allowed_image_url(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+    if parsed.scheme not in ('http', 'https'):
+        return False
+    host = (parsed.hostname or '').lower()
+    return any(host == suffix or host.endswith('.' + suffix) for suffix in ALLOWED_IMAGE_HOST_SUFFIXES)
 
 app = FastAPI()
 
@@ -797,6 +815,9 @@ async def proxy_image(url: str):
     """
     import httpx
     from fastapi.responses import Response
+
+    if not is_allowed_image_url(url):
+        raise HTTPException(status_code=400, detail="URL host is not an allowed image source")
 
     try:
         async with httpx.AsyncClient(follow_redirects=True, timeout=10) as client:
