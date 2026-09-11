@@ -61,6 +61,16 @@ psql podcast_db < scraper/migrate_add_data_source.sql
 psql podcast_db < scraper/migrate_add_suggestions.sql
 ```
 
+### Loading the exported data
+
+`scraper/data_export.sql` is a data-only `pg_dump` of a cleaned-up local
+database (86 shows, 10,500+ episodes, 975+ people). To load it into a
+fresh database after running the schema + migrations above:
+
+```bash
+psql podcast_db < scraper/data_export.sql
+```
+
 ---
 
 ## 2. Scraper Setup
