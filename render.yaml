@@ -36,8 +36,9 @@ services:
       - key: ADDITIONAL_ALLOWED_ORIGINS
         value: https://podcast-network-frontend.onrender.com
 
-  - type: static
+  - type: web
     name: podcast-network-frontend
+    runtime: static
     rootDir: frontend
     buildCommand: npm install && npm run build
     staticPublishPath: build
