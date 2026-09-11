@@ -17,6 +17,7 @@ Usage:
     python3 episode_name_scanner.py suggest --title-only
 """
 
+import os
 import psycopg2
 import re
 import argparse
@@ -26,7 +27,7 @@ from collections import defaultdict
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
 
-DB = 'postgresql://localhost/podcast_db'
+DB = os.getenv('DATABASE_URL', 'postgresql://localhost/podcast_db')
 
 # Shows to skip for description scanning
 DESC_SCAN_SKIP_SHOWS = {

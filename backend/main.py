@@ -19,14 +19,17 @@ app = FastAPI()
 class NameOverrideRequest(BaseModel):
     name: str = None
 
+DEFAULT_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "https://coloradocurrent.com",
+    "https://www.coloradocurrent.com",
+]
+extra_origins = [o.strip() for o in os.getenv("ADDITIONAL_ALLOWED_ORIGINS", "").split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "https://coloradocurrent.com",
-        "https://www.coloradocurrent.com",
-    ],
+    allow_origins=DEFAULT_ALLOWED_ORIGINS + extra_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

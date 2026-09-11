@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
+import { API_BASE_URL } from '../config';
 
-const API = 'http://localhost:8000/api/admin';
+const API = `${API_BASE_URL}/api/admin`;
 
 // ─── Source badge ──────────────────────────────────────────────────────────────
 const SourceBadge = ({ source }) => {

@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { ForceGraph2D } from 'react-force-graph';
 import { forceX, forceY } from 'd3-force';
+import { API_BASE_URL } from '../config';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const API_URL = 'http://localhost:8000/api/host-connections';
+const API_URL = `${API_BASE_URL}/api/host-connections`;
 const SIDEBAR_WIDTH = 384;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -135,7 +136,7 @@ const useImageCache = (nodes) => {
       if (!node.image) return;
       // Proxy external images (unavatar, etc.) to avoid CORS in canvas
       const src = node.image.startsWith('http') && !node.image.includes('mzstatic.com')
-        ? `http://localhost:8000/api/proxy/image?url=${encodeURIComponent(node.image)}`
+        ? `${API_BASE_URL}/api/proxy/image?url=${encodeURIComponent(node.image)}`
         : node.image;
       if (!cache.current[src]) {
         const img = new Image();
@@ -591,7 +592,7 @@ const PodcastHostNetwork = () => {
     ctx.clip();
 
     const proxiedSrc = node.image && !node.image.includes('mzstatic.com')
-      ? `http://localhost:8000/api/proxy/image?url=${encodeURIComponent(node.image)}`
+      ? `${API_BASE_URL}/api/proxy/image?url=${encodeURIComponent(node.image)}`
       : node.image;
     const img = node.image ? (imageCache.current[proxiedSrc] || imageCache.current[node.image]) : null;
     if (img?.complete && img.naturalWidth > 0) {

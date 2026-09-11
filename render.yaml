@@ -1,0 +1,52 @@
+databases:
+  - name: podcast-network-db
+    plan: free
+    databaseName: podcast_db
+    user: podcast_network
+
+services:
+  - type: web
+    name: podcast-network-backend
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DB_HOST
+        fromDatabase:
+          name: podcast-network-db
+          property: host
+      - key: DB_NAME
+        fromDatabase:
+          name: podcast-network-db
+          property: database
+      - key: DB_USER
+        fromDatabase:
+          name: podcast-network-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: podcast-network-db
+          property: password
+      - key: DATABASE_URL
+        fromDatabase:
+          name: podcast-network-db
+          property: connectionString
+      - key: ADDITIONAL_ALLOWED_ORIGINS
+        value: https://podcast-network-frontend.onrender.com
+
+  - type: web
+    name: podcast-network-frontend
+    runtime: static
+    plan: free
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: build
+    envVars:
+      - key: REACT_APP_API_URL
+        value: https://podcast-network-backend.onrender.com
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

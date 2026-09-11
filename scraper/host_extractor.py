@@ -16,6 +16,7 @@ Usage:
     python3 host_extractor.py run        # insert into DB
 """
 
+import os
 import psycopg2
 import re
 import argparse
@@ -25,7 +26,7 @@ from html.parser import HTMLParser
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
 
-DB = 'postgresql://localhost/podcast_db'
+DB = os.getenv('DATABASE_URL', 'postgresql://localhost/podcast_db')
 
 
 # ------------------------------------------------------------------

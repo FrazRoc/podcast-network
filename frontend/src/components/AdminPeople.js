@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { API_BASE_URL } from '../config';
 
-const API = 'http://localhost:8000/api/admin';
+const API = `${API_BASE_URL}/api/admin`;
 
 const PROXY = (url) =>
   url && !url.includes('mzstatic.com') && !url.includes('cdn.bsky.app')
-    ? `http://localhost:8000/api/proxy/image?url=${encodeURIComponent(url)}`
+    ? `${API_BASE_URL}/api/proxy/image?url=${encodeURIComponent(url)}`
     : url;
 
 const SOURCE_BADGE = {

@@ -1,0 +1,47 @@
+name: Scrape podcast data
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch: {}
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install scraper dependencies
+        working-directory: scraper
+        run: pip install -r requirements.txt
+
+      - name: Scrape new episodes
+        working-directory: scraper
+        run: python3 manager.py scrape --new-only --db "$DATABASE_URL"
+
+      - name: Backfill missing episodes
+        working-directory: scraper
+        run: python3 manager.py backfill --db "$DATABASE_URL"
+
+      - name: Scrape host/guest credits
+        working-directory: scraper
+        run: python3 apple_credits_scraper.py episodes --hosts-only --db "$DATABASE_URL"
+
+      - name: Extract hosts from show metadata
+        working-directory: scraper
+        run: python3 host_extractor.py run
+
+      - name: Scan episodes for known names
+        working-directory: scraper
+        run: python3 episode_name_scanner.py run --title-only
+
+      - name: Queue new-name suggestions for review
+        working-directory: scraper
+        run: python3 episode_name_scanner.py suggest --title-only
