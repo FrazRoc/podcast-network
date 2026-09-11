@@ -276,16 +276,17 @@ const ConnectionDetails = ({ connection, onClose }) => (
 
 const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuery, onSearchChange, loading }) => (
   <div className="space-y-4">
-    <div className="p-2.5 bg-teal-50 rounded-lg text-sm text-gray-600">
-      {loading ? (
-        'Loading network data…'
-      ) : (
-        <>
-          Showing <span className="font-bold text-gray-900">{networkStats.visibleNodes}</span> hosts with{' '}
-          <span className="font-bold text-gray-900">{networkStats.visibleLinks}</span> connections from{' '}
-          <span className="font-bold text-gray-900">{networkStats.visiblePodcasts}</span> podcasts
-        </>
-      )}
+    <div className="grid grid-cols-3 gap-2">
+      {[
+        { label: 'Hosts', value: networkStats.visibleNodes },
+        { label: 'Connections', value: networkStats.visibleLinks },
+        { label: 'Podcasts', value: networkStats.visiblePodcasts },
+      ].map(({ label, value }) => (
+        <div key={label} className="bg-teal-50 rounded-lg text-center py-2">
+          <p className="text-lg font-bold text-gray-900 leading-tight">{loading ? '—' : value}</p>
+          <p className="text-xs text-gray-500">{label}</p>
+        </div>
+      ))}
     </div>
 
     {/* Name search */}
