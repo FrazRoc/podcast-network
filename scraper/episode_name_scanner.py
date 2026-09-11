@@ -292,7 +292,10 @@ def extract_candidate_names(text: str) -> list[tuple[str, str]]:
     def find_and_names(text, after_pos):
         rest = text[after_pos:]
         for and_m in _AND_RE.finditer(rest):
-            if and_m.start() > 40:
+            # Window needs to span a job-title clause between names, e.g.
+            # "...Ben Chehebar, VP of Hardware at RoadRunner Recycling, and
+            # Jason Gates..." — 40 chars cut that case off by one character.
+            if and_m.start() > 100:
                 break
             yield and_m.group(1), after_pos + and_m.start()
 
