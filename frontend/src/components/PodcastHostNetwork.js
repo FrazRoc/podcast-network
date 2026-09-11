@@ -288,7 +288,7 @@ const ConnectionDetails = ({ connection, onClose }) => (
   </div>
 );
 
-const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuery, onSearchChange, loading, lastUpdated }) => (
+const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuery, onSearchChange, loading }) => (
   <div className="space-y-4">
     <div className="grid grid-cols-3 gap-2">
       {[
@@ -302,12 +302,6 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
         </div>
       ))}
     </div>
-
-    {lastUpdated && (
-      <p className="text-xs text-gray-400 text-right -mt-2">
-        Data updated {formatRelativeTime(lastUpdated)}
-      </p>
-    )}
 
     {/* Name search */}
     <div className="space-y-1">
@@ -731,7 +725,7 @@ const PodcastHostNetwork = () => {
 
       {/* Sidebar */}
       <div
-        className={`fixed md:static inset-y-0 left-0 w-96 max-w-[85vw] md:max-w-none md:min-w-[24rem] bg-gray-50 p-4 overflow-y-auto shadow-lg z-20 transform transition-transform duration-200 ease-in-out md:translate-x-0 ${
+        className={`fixed md:static inset-y-0 left-0 w-96 max-w-[85vw] md:max-w-none md:min-w-[24rem] bg-gray-50 p-4 overflow-y-auto shadow-lg z-20 transform transition-transform duration-200 ease-in-out flex flex-col md:translate-x-0 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
@@ -782,8 +776,13 @@ const PodcastHostNetwork = () => {
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}
             loading={loading}
-            lastUpdated={lastUpdated}
           />
+        )}
+
+        {lastUpdated && (
+          <p className="mt-auto pt-3 text-xs text-gray-400 text-center">
+            Data updated {formatRelativeTime(lastUpdated)}
+          </p>
         )}
       </div>
 
