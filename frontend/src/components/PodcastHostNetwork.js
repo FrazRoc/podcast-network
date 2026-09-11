@@ -274,12 +274,18 @@ const ConnectionDetails = ({ connection, onClose }) => (
   </div>
 );
 
-const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuery, onSearchChange }) => (
+const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuery, onSearchChange, loading }) => (
   <div className="space-y-4">
     <div className="p-2.5 bg-teal-50 rounded-lg text-sm text-gray-600">
-      Showing <span className="font-bold text-gray-900">{networkStats.visibleNodes}</span> hosts with{' '}
-      <span className="font-bold text-gray-900">{networkStats.visibleLinks}</span> connections from{' '}
-      <span className="font-bold text-gray-900">{networkStats.visiblePodcasts}</span> podcasts
+      {loading ? (
+        'Loading network data…'
+      ) : (
+        <>
+          Showing <span className="font-bold text-gray-900">{networkStats.visibleNodes}</span> hosts with{' '}
+          <span className="font-bold text-gray-900">{networkStats.visibleLinks}</span> connections from{' '}
+          <span className="font-bold text-gray-900">{networkStats.visiblePodcasts}</span> podcasts
+        </>
+      )}
     </div>
 
     {/* Name search */}
@@ -667,25 +673,6 @@ const PodcastHostNetwork = () => {
     ctx.fill();
   }, []);
 
-  if (loading) return (
-    <div className="flex items-center justify-center h-screen">
-      <div className="text-xl font-semibold text-gray-600">Loading network data...</div>
-    </div>
-  );
-
-  if (error) return (
-    <div className="flex flex-col items-center justify-center h-screen gap-4 text-center px-4">
-      <div className="text-xl font-semibold text-red-500">Couldn't load the network data</div>
-      <div className="text-sm text-gray-500 max-w-md">{error}</div>
-      <button
-        className="px-4 py-2 bg-teal-600 text-white rounded hover:bg-teal-700"
-        onClick={loadData}
-      >
-        Retry
-      </button>
-    </div>
-  );
-
   return (
     <div className="flex h-screen w-full relative">
       {/* Mobile menu toggle */}
@@ -757,12 +744,33 @@ const PodcastHostNetwork = () => {
             currentFilters={currentFilters}
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}
+            loading={loading}
           />
         )}
       </div>
 
       {/* Graph */}
       <div className="flex-1 relative">
+        {loading && (
+          <div className="absolute inset-0 flex items-center justify-center bg-white">
+            <div className="text-lg font-medium text-gray-500">Loading network data…</div>
+          </div>
+        )}
+
+        {!loading && error && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-center px-4 bg-white">
+            <div className="text-xl font-semibold text-red-500">Couldn't load the network data</div>
+            <div className="text-sm text-gray-500 max-w-md">{error}</div>
+            <button
+              className="px-4 py-2 bg-teal-600 text-white rounded hover:bg-teal-700"
+              onClick={loadData}
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        {!loading && !error && (
         <ForceGraph2D
           ref={graphRef}
           graphData={filteredGraphData}
@@ -819,14 +827,17 @@ const PodcastHostNetwork = () => {
           onNodeHover={handleNodeHover}
           onLinkClick={handleLinkClick}
         />
+        )}
       </div>
 
       {/* Legend */}
-      <PodcastLegend
-        podcasts={allPodcasts}
-        isOpen={legendOpen}
-        onToggle={() => setLegendOpen(o => !o)}
-      />
+      {!loading && !error && (
+        <PodcastLegend
+          podcasts={allPodcasts}
+          isOpen={legendOpen}
+          onToggle={() => setLegendOpen(o => !o)}
+        />
+      )}
     </div>
   );
 };
