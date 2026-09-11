@@ -269,19 +269,19 @@ export default function AdminSuggestions() {
           <div className="w-1/2 flex flex-col">
 
             {/* Candidate */}
-            <div className="px-8 py-8 border-b border-gray-200 bg-white">
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
+            <div className="px-6 py-5 border-b border-gray-200 bg-white">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
                 Suggested Person
               </p>
               <div className="flex items-baseline gap-3 mb-2">
                 <SourceBadge source={suggestion.source} />
               </div>
-              <div className="flex items-center gap-2 mb-3">
+              <div className="flex items-center gap-2 mb-2">
                 <input
                   type="text"
                   value={editedName || suggestion.candidate_name}
                   onChange={e => setEditedName(e.target.value)}
-                  className="text-3xl font-bold text-gray-900 bg-transparent border-b-2 border-transparent hover:border-gray-300 focus:border-blue-500 focus:outline-none w-full"
+                  className="text-2xl font-bold text-gray-900 bg-transparent border-b-2 border-transparent hover:border-gray-300 focus:border-blue-500 focus:outline-none w-full"
                 />
               </div>
               {editedName && editedName !== suggestion.candidate_name && (
@@ -289,7 +289,7 @@ export default function AdminSuggestions() {
               )}
 
               {/* Matched context */}
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-3 mb-4">
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-2.5 mb-3">
                 <p className="text-xs font-semibold text-yellow-700 mb-1">Matched text</p>
                 <p className="text-sm text-yellow-900 italic">
                   "…{highlightNames(suggestion.matched_text, [
@@ -307,16 +307,16 @@ export default function AdminSuggestions() {
             </div>
 
             {/* Action buttons */}
-            <div className="px-8 py-8 bg-gray-50 flex-1">
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-6">
+            <div className="px-6 py-5 bg-gray-50 flex-1">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
                 Your Decision
               </p>
 
-              <div className="space-y-3">
+              <div className="space-y-2">
                 <button
                   onClick={() => handleAction('approve')}
                   disabled={actionLoading}
-                  className="w-full py-4 px-6 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-semibold rounded-xl text-lg transition-colors flex items-center justify-between"
+                  className="w-full py-2.5 px-5 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-semibold rounded-lg text-base transition-colors flex items-center justify-between"
                 >
                   <span>✅ Approve</span>
                   <span className="text-green-300 text-sm font-normal">press A</span>
@@ -325,7 +325,7 @@ export default function AdminSuggestions() {
                 <button
                   onClick={() => handleAction('approve_only')}
                   disabled={actionLoading}
-                  className="w-full py-4 px-6 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold rounded-xl text-lg transition-colors flex items-center justify-between"
+                  className="w-full py-2.5 px-5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold rounded-lg text-base transition-colors flex items-center justify-between"
                 >
                   <span>👤 Approve Person Only</span>
                   <span className="text-blue-300 text-sm font-normal">press P</span>
@@ -334,7 +334,7 @@ export default function AdminSuggestions() {
                 <button
                   onClick={() => handleAction('reject')}
                   disabled={actionLoading}
-                  className="w-full py-4 px-6 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-semibold rounded-xl text-lg transition-colors flex items-center justify-between"
+                  className="w-full py-2.5 px-5 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-semibold rounded-lg text-base transition-colors flex items-center justify-between"
                 >
                   <span>❌ Reject + Blocklist</span>
                   <span className="text-red-300 text-sm font-normal">press R</span>
@@ -343,7 +343,7 @@ export default function AdminSuggestions() {
                 <button
                   onClick={() => handleAction('skip')}
                   disabled={actionLoading}
-                  className="w-full py-4 px-6 bg-gray-200 hover:bg-gray-300 disabled:opacity-50 text-gray-700 font-semibold rounded-xl text-lg transition-colors flex items-center justify-between"
+                  className="w-full py-2.5 px-5 bg-gray-200 hover:bg-gray-300 disabled:opacity-50 text-gray-700 font-semibold rounded-lg text-base transition-colors flex items-center justify-between"
                 >
                   <span>⏭ Skip for now</span>
                   <span className="text-gray-400 text-sm font-normal">press S</span>
@@ -352,7 +352,7 @@ export default function AdminSuggestions() {
 
               {/* Last action result — persists until next action */}
               {lastResult && (
-                <div className={`mt-6 p-4 rounded-xl text-sm ${
+                <div className={`mt-4 p-3 rounded-lg text-sm ${
                   lastResult.action === 'approve' || lastResult.action === 'approve_only'
                     ? 'bg-green-50 border border-green-200'
                     : lastResult.action === 'reject'
@@ -394,7 +394,7 @@ export default function AdminSuggestions() {
               )}
 
               {/* Progress */}
-              <div className="mt-8 pt-6 border-t border-gray-200">
+              <div className="mt-5 pt-4 border-t border-gray-200">
                 <div className="flex justify-between text-sm text-gray-500 mb-2">
                   <span>Queue progress</span>
                   <span className="font-medium">{suggestion.total_pending} remaining</span>
