@@ -197,7 +197,7 @@ const HostProfileCard = ({ host, connections, onClose }) => {
             href={host.linkedin_url}
             target="_blank"
             rel="noopener noreferrer"
-            className="mt-2 text-xs text-blue-600 hover:underline"
+            className="mt-2 text-xs text-teal-600 hover:underline"
           >
             LinkedIn →
           </a>
@@ -207,15 +207,15 @@ const HostProfileCard = ({ host, connections, onClose }) => {
       <div className="mb-4">
         <h4 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">Stats</h4>
         <div className="grid grid-cols-3 gap-2 text-sm">
-          <div className="bg-blue-50 p-2 rounded text-center">
+          <div className="bg-teal-50 p-2 rounded text-center">
             <p className="text-gray-500 text-xs">Podcasts</p>
             <p className="font-bold">{uniquePodcasts}</p>
           </div>
-          <div className="bg-blue-50 p-2 rounded text-center">
+          <div className="bg-teal-50 p-2 rounded text-center">
             <p className="text-gray-500 text-xs">Episodes</p>
             <p className="font-bold">{totalEpisodes}</p>
           </div>
-          <div className="bg-blue-50 p-2 rounded text-center">
+          <div className="bg-teal-50 p-2 rounded text-center">
             <p className="text-gray-500 text-xs">Connects</p>
             <p className="font-bold">{host.val}</p>
           </div>
@@ -251,7 +251,7 @@ const ConnectionDetails = ({ connection, onClose }) => (
     <div className="space-y-4">
       <div>
         <h4 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">Hosts</h4>
-        <div className="bg-blue-50 p-3 rounded space-y-2">
+        <div className="bg-teal-50 p-3 rounded space-y-2">
           <p className="font-medium">{connection.source.name}</p>
           <div className="flex items-center">
             <div className="flex-1 border-t border-gray-300" />
@@ -263,7 +263,7 @@ const ConnectionDetails = ({ connection, onClose }) => (
       </div>
       <div>
         <h4 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">Collaboration</h4>
-        <div className="bg-blue-50 p-3 rounded">
+        <div className="bg-teal-50 p-3 rounded">
           <p className="text-sm">
             <span className="font-bold">{connection.value}</span> episode{connection.value !== 1 ? 's' : ''} together
           </p>
@@ -278,7 +278,7 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
   <div className="space-y-5">
     <h2 className="text-xl font-bold text-gray-800">Filter Network</h2>
 
-    <div className="p-3 bg-blue-50 rounded-lg text-sm text-gray-600">
+    <div className="p-3 bg-teal-50 rounded-lg text-sm text-gray-600">
       Showing <span className="font-bold text-gray-900">{networkStats.visibleNodes}</span> hosts with{' '}
       <span className="font-bold text-gray-900">{networkStats.visibleLinks}</span> connections from{' '}
       <span className="font-bold text-gray-900">{networkStats.visiblePodcasts}</span> podcasts
@@ -292,7 +292,7 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
         value={searchQuery}
         onChange={e => onSearchChange(e.target.value)}
         placeholder="e.g. Jigar Shah"
-        className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
       />
     </div>
 
@@ -358,7 +358,7 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
                 : currentFilters.selectedRoles.filter(r => r !== role);
               onFiltersChange({ selectedRoles: newRoles });
             }}
-            className="rounded text-blue-600"
+            className="rounded text-teal-600"
           />
           <span className="text-sm text-gray-700">{role}</span>
         </label>
@@ -371,7 +371,7 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
       <select
         value={currentFilters.selectedGenre}
         onChange={e => onFiltersChange({ selectedGenre: e.target.value })}
-        className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none"
+        className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm shadow-sm focus:border-teal-500 focus:outline-none"
       >
         <option value="all">All Genres</option>
         {networkStats.genres?.map(g => <option key={g} value={g}>{g}</option>)}
@@ -384,7 +384,7 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
       <select
         value={currentFilters.selectedChannel}
         onChange={e => onFiltersChange({ selectedChannel: e.target.value })}
-        className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none"
+        className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm shadow-sm focus:border-teal-500 focus:outline-none"
       >
         <option value="all">All Channels</option>
         {networkStats.channels?.map(c => <option key={c} value={c}>{c}</option>)}
@@ -679,7 +679,7 @@ const PodcastHostNetwork = () => {
       <div className="text-xl font-semibold text-red-500">Couldn't load the network data</div>
       <div className="text-sm text-gray-500 max-w-md">{error}</div>
       <button
-        className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+        className="px-4 py-2 bg-teal-600 text-white rounded hover:bg-teal-700"
         onClick={loadData}
       >
         Retry

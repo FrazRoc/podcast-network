@@ -18,7 +18,7 @@ export default class ErrorBoundary extends React.Component {
           <div className="text-xl font-semibold text-gray-800">Something went wrong loading the page.</div>
           <div className="text-sm text-gray-500 max-w-md">{this.state.error.message}</div>
           <button
-            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+            className="px-4 py-2 bg-teal-600 text-white rounded hover:bg-teal-700"
             onClick={() => window.location.reload()}
           >
             Reload
