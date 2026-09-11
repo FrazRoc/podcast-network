@@ -45,6 +45,8 @@ services:
     envVars:
       - key: REACT_APP_API_URL
         value: https://podcast-network-backend.onrender.com
+      - key: PUBLIC_URL
+        value: /
     routes:
       - type: rewrite
         source: /*
