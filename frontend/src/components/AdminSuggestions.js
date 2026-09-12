@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { API_BASE_URL } from '../config';
 import { adminFetch } from '../adminAuth';
+import AdminHeader from './AdminHeader';
 
 const API = `${API_BASE_URL}/api/admin`;
 
@@ -159,25 +160,18 @@ export default function AdminSuggestions() {
   return (
     <div className="min-h-screen bg-gray-100 font-sans">
 
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <a href="/" className="text-gray-400 hover:text-gray-600 text-sm">← Network</a>
-          <a href="/admin/images" className="text-gray-400 hover:text-gray-600 text-sm">Images</a>
-          <a href="/admin/people" className="text-gray-400 hover:text-gray-600 text-sm">People</a>
-          <a href="/admin/shows" className="text-gray-400 hover:text-gray-600 text-sm">Shows</a>
-          <h1 className="text-lg font-semibold text-gray-900">Suggestion Review</h1>
-        </div>
-        <div className="flex items-center gap-4 text-sm text-gray-500">
-          {stats.pending !== undefined && (
-            <>
+      <AdminHeader
+        active="Suggestions"
+        right={
+          stats.pending !== undefined && (
+            <div className="flex items-center gap-4 text-sm text-gray-500">
               <span className="text-orange-600 font-medium">{stats.pending ?? 0} pending</span>
               <span>{stats.approved ?? 0} approved</span>
               <span>{stats.rejected ?? 0} rejected</span>
-            </>
-          )}
-        </div>
-      </header>
+            </div>
+          )
+        }
+      />
 
 
 

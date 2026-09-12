@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { API_BASE_URL } from '../config';
 import { adminFetch } from '../adminAuth';
+import AdminHeader from './AdminHeader';
 
 const API = `${API_BASE_URL}/api/admin`;
 
@@ -86,24 +87,18 @@ export default function AdminImages() {
 
   return (
     <div className="min-h-screen bg-gray-100 font-sans">
-      <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <a href="/" className="text-gray-400 hover:text-gray-600 text-sm">← Network</a>
-          <a href="/admin" className="text-gray-400 hover:text-gray-600 text-sm">Suggestions</a>
-          <a href="/admin/people" className="text-gray-400 hover:text-gray-600 text-sm">People</a>
-          <a href="/admin/shows" className="text-gray-400 hover:text-gray-600 text-sm">Shows</a>
-          <h1 className="text-lg font-semibold text-gray-900">Image Review</h1>
-        </div>
-        <div className="flex items-center gap-4 text-sm text-gray-500">
-          {stats.total && (
-            <>
+      <AdminHeader
+        active="Images"
+        right={
+          stats.total && (
+            <div className="flex items-center gap-4 text-sm text-gray-500">
               <span className="text-green-600 font-medium">{stats.with_image} with image</span>
               <span className="text-orange-600 font-medium">{stats.missing} missing</span>
               <span className="text-gray-400">({Math.round(stats.with_image / stats.total * 100)}% coverage)</span>
-            </>
-          )}
-        </div>
-      </header>
+            </div>
+          )
+        }
+      />
 
       {loading && <div className="flex items-center justify-center h-96 text-gray-400">Loading...</div>}
 

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { API_BASE_URL } from '../config';
 import { adminFetch } from '../adminAuth';
+import AdminHeader from './AdminHeader';
 
 const API = `${API_BASE_URL}/api/admin`;
 
@@ -424,16 +425,7 @@ export default function AdminPeople() {
 
   return (
     <div className="min-h-screen bg-gray-100 font-sans">
-      <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <a href="/" className="text-gray-400 hover:text-gray-600 text-sm">← Network</a>
-          <a href="/admin" className="text-gray-400 hover:text-gray-600 text-sm">Suggestions</a>
-          <a href="/admin/images" className="text-gray-400 hover:text-gray-600 text-sm">Images</a>
-          <a href="/admin/shows" className="text-gray-400 hover:text-gray-600 text-sm">Shows</a>
-          <h1 className="text-lg font-semibold text-gray-900">People</h1>
-        </div>
-        <span className="text-sm text-gray-400">{total} people</span>
-      </header>
+      <AdminHeader active="People" right={<span className="text-sm text-gray-400">{total} people</span>} />
 
       <div className="flex gap-6 p-6 max-w-7xl mx-auto">
 
