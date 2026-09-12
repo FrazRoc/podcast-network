@@ -1456,3 +1456,140 @@ async def scrape_show_now(apple_podcast_id: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to dispatch scrape workflow: {e}")
+
+
+# ==================================================================
+# ADMIN ENDPOINTS — Episode management
+# ==================================================================
+
+class AddCreditRequest(BaseModel):
+    host_id: int
+    is_guest: bool = True
+
+
+@app.get("/api/admin/episodes", dependencies=[Depends(verify_admin)])
+async def list_episodes(q: str = "", show: str = "", sort: str = "newest", limit: int = 50, offset: int = 0):
+    """List/search episodes with filtering, sorting, and pagination —
+    the episode table is far larger than shows or people, so unlike
+    those this can't just return everything and filter client-side."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        sort_map = {
+            "newest":         "e.published_date DESC NULLS LAST",
+            "oldest":         "e.published_date ASC NULLS LAST",
+            "credits_desc":   "credit_count DESC",
+            "credits_asc":    "credit_count ASC",
+            "title_asc":      "e.title ASC",
+        }
+        order = sort_map.get(sort, "e.published_date DESC NULLS LAST")
+
+        cur.execute(f"""
+            SELECT
+                e.episode_id, e.title, e.published_date,
+                p.podcast_id, p.title AS podcast_title, p.cover_art_url,
+                COUNT(DISTINCT eh.host_id) AS credit_count
+            FROM episodes e
+            JOIN podcasts p ON e.podcast_id = p.podcast_id
+            LEFT JOIN episode_host eh ON eh.episode_id = e.episode_id
+            WHERE (%(q)s = '' OR e.title ILIKE '%%' || %(q)s || '%%' OR p.title ILIKE '%%' || %(q)s || '%%')
+              AND (%(show)s = '' OR p.title = %(show)s)
+            GROUP BY e.episode_id, e.title, e.published_date, p.podcast_id, p.title, p.cover_art_url
+            ORDER BY {order}
+            LIMIT %(limit)s OFFSET %(offset)s;
+        """, {"q": q, "show": show, "limit": limit, "offset": offset})
+        items = cur.fetchall()
+
+        cur.execute("""
+            SELECT COUNT(*) AS total
+            FROM episodes e
+            JOIN podcasts p ON e.podcast_id = p.podcast_id
+            WHERE (%(q)s = '' OR e.title ILIKE '%%' || %(q)s || '%%' OR p.title ILIKE '%%' || %(q)s || '%%')
+              AND (%(show)s = '' OR p.title = %(show)s);
+        """, {"q": q, "show": show})
+        total = cur.fetchone()["total"]
+
+        cur.close()
+        conn.close()
+        return {"items": items, "total": total}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/episodes/{episode_id}", dependencies=[Depends(verify_admin)])
+async def get_episode(episode_id: int):
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT e.episode_id, e.title, e.description, e.published_date,
+                   p.podcast_id, p.title AS podcast_title, p.cover_art_url
+            FROM episodes e
+            JOIN podcasts p ON e.podcast_id = p.podcast_id
+            WHERE e.episode_id = %s
+        """, (episode_id,))
+        episode = cur.fetchone()
+        if not episode:
+            cur.close()
+            conn.close()
+            raise HTTPException(status_code=404, detail="Episode not found")
+
+        cur.execute("""
+            SELECT h.host_id, h.first_name || ' ' || h.last_name AS name,
+                   h.profile_image_url, eh.is_guest, eh.role, eh.data_source
+            FROM episode_host eh
+            JOIN hosts h ON h.host_id = eh.host_id
+            WHERE eh.episode_id = %s
+            ORDER BY eh.is_guest ASC, h.last_name ASC
+        """, (episode_id,))
+        credits = cur.fetchall()
+
+        cur.close()
+        conn.close()
+        return {**episode, "credits": credits}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/episodes/{episode_id}/credits", dependencies=[Depends(verify_admin)])
+async def add_episode_credit(episode_id: int, body: AddCreditRequest):
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO episode_host (episode_id, host_id, is_guest, role, data_source)
+            VALUES (%s, %s, %s, %s, 'manual')
+            ON CONFLICT (episode_id, host_id) DO UPDATE
+                SET is_guest = EXCLUDED.is_guest, data_source = 'manual'
+        """, (episode_id, body.host_id, body.is_guest, 'Guest' if body.is_guest else 'Host'))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/admin/episodes/{episode_id}/credits/{host_id}", dependencies=[Depends(verify_admin)])
+async def remove_episode_credit(episode_id: int, host_id: int):
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            "DELETE FROM episode_host WHERE episode_id = %s AND host_id = %s",
+            (episode_id, host_id),
+        )
+        deleted = cur.rowcount
+        conn.commit()
+        cur.close()
+        conn.close()
+        if deleted == 0:
+            raise HTTPException(status_code=404, detail="Credit not found")
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

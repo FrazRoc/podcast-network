@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { API_BASE_URL } from '../config';
 import { adminFetch } from '../adminAuth';
 import AdminHeader from './AdminHeader';
+import { formatDateOnly } from '../adminUtils';
 
 const API = `${API_BASE_URL}/api/admin`;
 
@@ -33,14 +34,6 @@ const extractAppleId = (input) => {
   const trimmed = input.trim();
   const match = trimmed.match(/id(\d+)/) || trimmed.match(/^(\d+)$/);
   return match ? match[1] : trimmed;
-};
-
-// A plain DATE like "2026-09-10" has no time component, so new Date(...)
-// parses it as UTC midnight — toLocaleDateString() then shows the wrong
-// day for anyone west of UTC. Parse the parts directly as local time instead.
-const formatDateOnly = (dateStr) => {
-  const [year, month, day] = dateStr.split('-').map(Number);
-  return new Date(year, month - 1, day).toLocaleDateString();
 };
 
 // ─── Right panel: Add or Edit ──────────────────────────────────────────────────

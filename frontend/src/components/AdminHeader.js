@@ -2,6 +2,7 @@ const NAV_LINKS = [
   { href: '/admin', label: 'Suggestions' },
   { href: '/admin/images', label: 'Images' },
   { href: '/admin/shows', label: 'Shows' },
+  { href: '/admin/episodes', label: 'Episodes' },
   { href: '/admin/people', label: 'People' },
 ];
 
