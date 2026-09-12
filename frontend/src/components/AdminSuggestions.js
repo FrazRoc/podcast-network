@@ -162,10 +162,10 @@ export default function AdminSuggestions() {
 
       {/* Main layout */}
       {suggestion && !loading && (
-        <div className="flex h-[calc(100vh-57px)]">
+        <div className="flex flex-col md:flex-row md:h-[calc(100vh-57px)]">
 
           {/* LEFT — Episode context */}
-          <div className="w-1/2 border-r border-gray-200 bg-white flex flex-col">
+          <div className="w-full md:w-1/2 border-b md:border-b-0 md:border-r border-gray-200 bg-white flex flex-col">
 
             {/* Podcast + episode header */}
             <div className="px-6 py-5 border-b border-gray-100">
@@ -244,7 +244,7 @@ export default function AdminSuggestions() {
           </div>
 
           {/* RIGHT — Suggestion + actions */}
-          <div className="w-1/2 flex flex-col">
+          <div className="w-full md:w-1/2 flex flex-col">
 
             {/* Candidate */}
             <div className="px-6 py-5 border-b border-gray-200 bg-white">

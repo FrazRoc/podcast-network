@@ -8,14 +8,14 @@ export default function AdminLoginGate({ children }) {
   if (entered) return children;
 
   return (
-    <div className="flex items-center justify-center h-screen bg-gray-50">
+    <div className="flex items-center justify-center h-screen bg-gray-50 px-4">
       <form
         onSubmit={e => {
           e.preventDefault();
           setAdminPassword(password);
           setEntered(true);
         }}
-        className="bg-white p-8 rounded-lg shadow-lg w-80"
+        className="bg-white p-8 rounded-lg shadow-lg w-full max-w-xs"
       >
         <h2 className="text-lg font-semibold mb-4 text-gray-800">Admin Login</h2>
         <input

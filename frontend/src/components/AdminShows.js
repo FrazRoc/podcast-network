@@ -180,7 +180,7 @@ function ShowPanel({ selected, onDone, onCancel }) {
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-200 p-6 overflow-y-auto" style={{ maxHeight: "calc(100vh - 80px)", position: "sticky", top: "24px" }}>
+    <div className="bg-white rounded-2xl border border-gray-200 p-6 overflow-y-auto md:sticky md:top-6 md:max-h-[calc(100vh-80px)]">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-base font-semibold text-gray-900">
           {isEdit ? 'Edit Show' : 'Add New Show'}
@@ -435,7 +435,7 @@ export default function AdminShows() {
     <div className="min-h-screen bg-gray-100 font-sans">
       <AdminHeader active="Shows" right={<span className="text-sm text-gray-400">{shows.length} shows</span>} />
 
-      <div className="flex gap-6 p-6 max-w-7xl mx-auto">
+      <div className="flex flex-col md:flex-row gap-4 md:gap-6 p-4 md:p-6 max-w-7xl mx-auto">
 
         {/* LEFT — shows list */}
         <div className="flex-1 min-w-0">
@@ -475,7 +475,7 @@ export default function AdminShows() {
           </div>
 
           {/* Shows list */}
-          <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden" style={{ maxHeight: "calc(100vh - 280px)", overflowY: "auto" }}>
+          <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden overflow-y-auto max-h-[60vh] md:max-h-[calc(100vh-280px)]">
             {loading ? (
               <div className="py-12 text-center text-gray-400 text-sm">Loading...</div>
             ) : listError ? (
@@ -533,7 +533,7 @@ export default function AdminShows() {
         </div>
 
         {/* RIGHT — add/edit panel */}
-        <div className="w-96 flex-shrink-0">
+        <div className="w-full md:w-96 flex-shrink-0">
           <ShowPanel
             selected={selected}
             onDone={handleDone}

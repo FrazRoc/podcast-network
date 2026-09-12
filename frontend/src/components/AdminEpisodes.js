@@ -99,14 +99,14 @@ function EpisodePanel({ episodeId, onChanged }) {
 
   if (!episodeId) {
     return (
-      <div className="bg-white rounded-2xl border border-gray-200 p-6 text-center text-sm text-gray-400" style={{ position: "sticky", top: "24px" }}>
+      <div className="bg-white rounded-2xl border border-gray-200 p-6 text-center text-sm text-gray-400 md:sticky md:top-6">
         Select an episode to manage its hosts and guests
       </div>
     );
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-200 p-6 overflow-y-auto" style={{ maxHeight: "calc(100vh - 80px)", position: "sticky", top: "24px" }}>
+    <div className="bg-white rounded-2xl border border-gray-200 p-6 overflow-y-auto md:sticky md:top-6 md:max-h-[calc(100vh-80px)]">
       {loading && !episode ? (
         <div className="py-8 text-center text-gray-400 text-sm">Loading...</div>
       ) : episode ? (
@@ -297,7 +297,7 @@ export default function AdminEpisodes() {
     <div className="min-h-screen bg-gray-100 font-sans">
       <AdminHeader active="Episodes" right={<span className="text-sm text-gray-400">{total} episodes</span>} />
 
-      <div className="flex gap-6 p-6 max-w-7xl mx-auto">
+      <div className="flex flex-col md:flex-row gap-4 md:gap-6 p-4 md:p-6 max-w-7xl mx-auto">
 
         {/* LEFT — episode list */}
         <div className="flex-1 min-w-0">
@@ -331,7 +331,7 @@ export default function AdminEpisodes() {
           </div>
 
           {/* Episode list */}
-          <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden" style={{ maxHeight: "calc(100vh - 280px)", overflowY: "auto" }}>
+          <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden overflow-y-auto max-h-[60vh] md:max-h-[calc(100vh-280px)]">
             {loading && episodes.length === 0 ? (
               <div className="py-12 text-center text-gray-400 text-sm">Loading...</div>
             ) : listError ? (
@@ -395,7 +395,7 @@ export default function AdminEpisodes() {
         </div>
 
         {/* RIGHT — episode details + credits */}
-        <div className="w-96 flex-shrink-0">
+        <div className="w-full md:w-96 flex-shrink-0">
           <EpisodePanel episodeId={selectedId} onChanged={handleChanged} />
         </div>
       </div>
