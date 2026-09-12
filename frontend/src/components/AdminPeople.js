@@ -396,13 +396,17 @@ export default function AdminPeople() {
 
   useEffect(() => { fetchPeople(searchQ, filter, sort); }, [fetchPeople]);
 
-  // Deep-link support: /admin/people?host_id=X auto-opens that person
+  // Deep-link support: /admin/people?host_id=X auto-opens that person.
+  // Fetched directly rather than found in the list, which is capped at
+  // the top 100 by appearances and may not include the target person.
   useEffect(() => {
     const targetId = new URLSearchParams(window.location.search).get('host_id');
-    if (!targetId || people.length === 0) return;
-    const match = people.find(p => p.host_id === parseInt(targetId, 10));
-    if (match) setSelected(match);
-  }, [people]);
+    if (!targetId) return;
+    adminFetch(`${API}/people/${targetId}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(person => { if (person) setSelected(person); })
+      .catch(() => {});
+  }, []);
 
   const handleSearch = (e) => {
     const q = e.target.value;

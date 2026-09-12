@@ -1011,6 +1011,41 @@ async def create_person(body: CreatePersonRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/admin/people/{host_id}", dependencies=[Depends(verify_admin)])
+async def get_person(host_id: int):
+    """Single-person summary — used for deep-linking to a person who may
+    not be in the default (top-100) list, e.g. by appearance count."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT h.host_id,
+                   h.first_name || ' ' || h.last_name AS full_name,
+                   h.first_name, h.last_name,
+                   h.profile_image_url,
+                   h.twitter_handle, h.bluesky_handle, h.linkedin_url,
+                   h.data_source,
+                   COUNT(DISTINCT eh.episode_id) AS appearances,
+                   COUNT(DISTINCT e.podcast_id)  AS podcast_count
+            FROM hosts h
+            LEFT JOIN episode_host eh ON eh.host_id = h.host_id
+            LEFT JOIN episodes e ON e.episode_id = eh.episode_id
+            WHERE h.host_id = %s
+            GROUP BY h.host_id, h.first_name, h.last_name, h.profile_image_url,
+                     h.twitter_handle, h.bluesky_handle, h.linkedin_url, h.data_source
+        """, (host_id,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        if not row:
+            raise HTTPException(status_code=404, detail="Person not found")
+        return row
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/admin/people", dependencies=[Depends(verify_admin)])
 async def list_people(q: str = "", filter: str = "all", sort: str = "appearances_desc"):
     """List/search people with filtering and sorting."""
