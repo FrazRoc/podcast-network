@@ -1403,6 +1403,7 @@ async def get_shows():
                 pt.total_episodes AS itunes_total_episodes,
                 p.cover_art_url,
                 COUNT(DISTINCT e.episode_id) AS episode_count,
+                MIN(e.published_date) AS earliest_episode_date,
                 MAX(e.published_date) AS latest_episode_date,
                 COUNT(DISTINCT CASE WHEN eh.is_guest = false THEN eh.host_id END) AS host_count,
                 COUNT(DISTINCT CASE WHEN eh.is_guest = true THEN eh.host_id END) AS guest_count
@@ -1498,6 +1499,84 @@ async def scrape_show_now(apple_podcast_id: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to dispatch scrape workflow: {e}")
+
+
+class AddShowHostRequest(BaseModel):
+    host_id: int
+
+
+@app.get("/api/admin/shows/{apple_podcast_id}/hosts", dependencies=[Depends(verify_admin)])
+async def get_show_hosts(apple_podcast_id: str):
+    """Show-level permanent hosts (host_podcast), distinct from
+    per-episode credits (episode_host)."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT h.host_id, h.first_name || ' ' || h.last_name AS name,
+                   h.profile_image_url, hp.role, hp.data_source
+            FROM host_podcast hp
+            JOIN hosts h ON h.host_id = hp.host_id
+            JOIN podcasts p ON p.podcast_id = hp.podcast_id
+            WHERE p.apple_podcast_id = %s
+            ORDER BY h.last_name ASC
+        """, (apple_podcast_id,))
+        hosts = cur.fetchall()
+        cur.close()
+        conn.close()
+        return hosts
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/shows/{apple_podcast_id}/hosts", dependencies=[Depends(verify_admin)])
+async def add_show_host(apple_podcast_id: str, body: AddShowHostRequest):
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT podcast_id FROM podcasts WHERE apple_podcast_id = %s", (apple_podcast_id,))
+        row = cur.fetchone()
+        if not row:
+            cur.close()
+            conn.close()
+            raise HTTPException(status_code=404, detail="Show not found")
+
+        cur.execute("""
+            INSERT INTO host_podcast (host_id, podcast_id, role, data_source)
+            VALUES (%s, %s, 'Host', 'manual')
+            ON CONFLICT (host_id, podcast_id) DO UPDATE SET role = 'Host', data_source = 'manual'
+        """, (body.host_id, row["podcast_id"]))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/admin/shows/{apple_podcast_id}/hosts/{host_id}", dependencies=[Depends(verify_admin)])
+async def remove_show_host(apple_podcast_id: str, host_id: int):
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            DELETE FROM host_podcast
+            WHERE host_id = %s
+              AND podcast_id = (SELECT podcast_id FROM podcasts WHERE apple_podcast_id = %s)
+        """, (host_id, apple_podcast_id))
+        deleted = cur.rowcount
+        conn.commit()
+        cur.close()
+        conn.close()
+        if deleted == 0:
+            raise HTTPException(status_code=404, detail="Host link not found")
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ==================================================================

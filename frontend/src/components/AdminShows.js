@@ -13,6 +13,15 @@ const STATUS_BADGE = {
   failed:      { label: 'Failed',      bg: 'bg-red-100 text-red-700' },
 };
 
+const SOURCE_BADGE = {
+  apple_verified:      { label: 'Apple',    bg: 'bg-green-100 text-green-700' },
+  approved_suggestion: { label: 'Approved', bg: 'bg-blue-100 text-blue-700' },
+  itunes_artist:       { label: 'iTunes',   bg: 'bg-purple-100 text-purple-700' },
+  parsed_desc:         { label: 'Parsed',   bg: 'bg-yellow-100 text-yellow-700' },
+  parsed_title:        { label: 'Parsed',   bg: 'bg-yellow-100 text-yellow-700' },
+  manual:              { label: 'Manual',   bg: 'bg-gray-100 text-gray-600' },
+};
+
 const FILTERS = [
   { id: 'all',     label: 'All' },
   { id: 'pending', label: 'Pending' },
@@ -44,7 +53,20 @@ function ShowPanel({ selected, onDone, onCancel }) {
   const [error, setError] = useState('');
   const [episodes, setEpisodes] = useState([]);
   const [episodesTotal, setEpisodesTotal] = useState(0);
+  const [hosts, setHosts] = useState([]);
+  const [hostQ, setHostQ] = useState('');
+  const [hostResults, setHostResults] = useState([]);
+  const [addingHostId, setAddingHostId] = useState(null);
+  const [removingHostId, setRemovingHostId] = useState(null);
   const isEdit = !!selected;
+
+  const fetchHosts = useCallback(() => {
+    if (!selected) { setHosts([]); return; }
+    adminFetch(`${API}/shows/${selected.apple_podcast_id}/hosts`)
+      .then(r => r.json())
+      .then(setHosts)
+      .catch(() => {});
+  }, [selected]);
 
   useEffect(() => {
     setNewShowInput('');
@@ -52,12 +74,55 @@ function ShowPanel({ selected, onDone, onCancel }) {
     setError('');
     setEpisodes([]);
     setEpisodesTotal(0);
+    setHostQ('');
+    setHostResults([]);
+    fetchHosts();
     if (!selected) return;
     adminFetch(`${API}/episodes?show=${encodeURIComponent(selected.podcast_title)}&sort=newest&limit=10`)
       .then(r => r.json())
       .then(data => { setEpisodes(data.items || []); setEpisodesTotal(data.total || 0); })
       .catch(() => {});
-  }, [selected]);
+  }, [selected, fetchHosts]);
+
+  useEffect(() => {
+    if (!hostQ.trim()) { setHostResults([]); return; }
+    adminFetch(`${API}/people?q=${encodeURIComponent(hostQ.trim())}&sort=name_asc`)
+      .then(r => r.json())
+      .then(data => setHostResults((data.items || []).slice(0, 8)))
+      .catch(() => {});
+  }, [hostQ]);
+
+  const handleAddShowHost = async (hostId) => {
+    setAddingHostId(hostId);
+    try {
+      const res = await adminFetch(`${API}/shows/${selected.apple_podcast_id}/hosts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ host_id: hostId }),
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || 'Failed to add host');
+      setHostQ('');
+      setHostResults([]);
+      fetchHosts();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setAddingHostId(null);
+    }
+  };
+
+  const handleRemoveShowHost = async (hostId) => {
+    setRemovingHostId(hostId);
+    try {
+      const res = await adminFetch(`${API}/shows/${selected.apple_podcast_id}/hosts/${hostId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error((await res.json()).detail || 'Failed to remove host');
+      fetchHosts();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setRemovingHostId(null);
+    }
+  };
 
   const handleAdd = async () => {
     if (!newShowInput.trim() || submitting) return;
@@ -154,15 +219,20 @@ function ShowPanel({ selected, onDone, onCancel }) {
                 <p className="text-lg font-bold text-gray-900">{selected.guest_count}</p>
                 <p className="text-gray-400">guests</p>
               </div>
-              <div className="bg-white rounded-lg p-2 text-center">
-                <p className="text-sm font-bold text-gray-900">
+              <div className="bg-white rounded-lg p-2 text-center flex flex-col items-center justify-center">
+                <span className={`px-2 py-0.5 rounded-full font-medium ${(STATUS_BADGE[selected.status] || STATUS_BADGE.pending).bg}`}>
                   {(STATUS_BADGE[selected.status] || STATUS_BADGE.pending).label}
-                </p>
-                <p className="text-gray-400">status</p>
+                </span>
+                <p className="text-gray-400 mt-1">status</p>
               </div>
             </div>
-            {selected.latest_episode_date && (
+            {selected.earliest_episode_date && (
               <p className="text-xs text-gray-500 mt-2">
+                Earliest episode: {formatDateOnly(selected.earliest_episode_date)}
+              </p>
+            )}
+            {selected.latest_episode_date && (
+              <p className="text-xs text-gray-500">
                 Latest episode: {formatDateOnly(selected.latest_episode_date)}
               </p>
             )}
@@ -173,6 +243,69 @@ function ShowPanel({ selected, onDone, onCancel }) {
             )}
             {selected.error_message && (
               <p className="text-xs text-red-500 mt-2">{selected.error_message}</p>
+            )}
+          </div>
+
+          {/* Show hosts */}
+          <div className="mb-5">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+              Hosts ({hosts.length})
+            </p>
+            {hosts.length === 0 ? (
+              <p className="text-sm text-gray-400 italic mb-2">No hosts yet</p>
+            ) : (
+              <div className="space-y-1.5 mb-2">
+                {hosts.map(h => {
+                  const badge = SOURCE_BADGE[h.data_source] || SOURCE_BADGE.manual;
+                  return (
+                    <div key={h.host_id} className="flex items-center gap-2 py-1.5 px-3 bg-gray-50 rounded-lg text-sm">
+                      {h.profile_image_url ? (
+                        <img src={h.profile_image_url} alt={h.name}
+                          className="w-6 h-6 rounded-full object-cover flex-shrink-0"
+                          onError={e => { e.target.style.display = 'none'; }} />
+                      ) : (
+                        <span className="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" />
+                      )}
+                      <a href={`/admin/people?host_id=${h.host_id}`}
+                        className="font-medium text-gray-800 hover:text-teal-600 flex-1 truncate">
+                        {h.name}
+                      </a>
+                      <span className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${badge.bg}`}>{badge.label}</span>
+                      <button
+                        onClick={() => handleRemoveShowHost(h.host_id)}
+                        disabled={removingHostId === h.host_id}
+                        className="text-gray-300 hover:text-red-500 disabled:opacity-40 flex-shrink-0 text-xs px-1"
+                        title="Unlink"
+                      >
+                        {removingHostId === h.host_id ? '…' : '✕'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <input
+              type="text"
+              value={hostQ}
+              onChange={e => setHostQ(e.target.value)}
+              placeholder="Search people to add as a host..."
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none"
+            />
+            {hostResults.length > 0 && (
+              <div className="mt-2 border border-gray-100 rounded-lg divide-y divide-gray-50 overflow-hidden">
+                {hostResults.map(p => (
+                  <div key={p.host_id} className="flex items-center gap-2 px-3 py-2 text-sm">
+                    <span className="flex-1 truncate text-gray-800">{p.full_name}</span>
+                    <button
+                      onClick={() => handleAddShowHost(p.host_id)}
+                      disabled={addingHostId === p.host_id}
+                      className="text-xs px-2 py-1 rounded bg-green-50 text-green-700 hover:bg-green-100 disabled:opacity-40"
+                    >
+                      + Host
+                    </button>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
 
