@@ -169,16 +169,8 @@ function EpisodePanel({ episodeId, onChanged }) {
             )}
           </div>
 
-          {/* Episode description */}
-          {episode.description && (
-            <div className="mb-5">
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Episode Description</p>
-              <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{episode.description}</p>
-            </div>
-          )}
-
           {/* Add a host/guest */}
-          <div className="border-t border-gray-100 pt-4">
+          <div className="mb-5">
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Add Host or Guest</p>
             <input
               type="text"
@@ -211,6 +203,14 @@ function EpisodePanel({ episodeId, onChanged }) {
               </div>
             )}
           </div>
+
+          {/* Episode description */}
+          {episode.description && (
+            <div className="mb-5 border-t border-gray-100 pt-4">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Episode Description</p>
+              <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{episode.description}</p>
+            </div>
+          )}
 
           {error && <p className="text-sm text-red-600 mt-3">{error}</p>}
         </>
