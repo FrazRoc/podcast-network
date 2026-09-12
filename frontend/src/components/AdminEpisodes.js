@@ -125,6 +125,14 @@ function EpisodePanel({ episodeId, onChanged }) {
             </div>
           </div>
 
+          {/* Episode description */}
+          {episode.description && (
+            <div className="mb-5">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Episode Description</p>
+              <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{episode.description}</p>
+            </div>
+          )}
+
           {/* Current credits */}
           <div className="mb-5">
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">

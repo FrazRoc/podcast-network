@@ -122,8 +122,16 @@ function ShowPanel({ selected, onDone, onCancel }) {
         <>
           {/* Current show info */}
           <div className="bg-gray-50 rounded-xl p-4 mb-5 text-sm">
-            <p className="font-semibold text-gray-900 mb-1">{selected.podcast_title}</p>
-            <p className="text-xs text-gray-500 mb-3">apple id: {selected.apple_podcast_id}</p>
+            <div className="flex items-start gap-3 mb-3">
+              {selected.cover_art_url && (
+                <img src={selected.cover_art_url} alt={selected.podcast_title}
+                  className="w-12 h-12 rounded-lg flex-shrink-0 object-cover" />
+              )}
+              <div className="min-w-0">
+                <p className="font-semibold text-gray-900">{selected.podcast_title}</p>
+                <p className="text-xs text-gray-500">apple id: {selected.apple_podcast_id}</p>
+              </div>
+            </div>
             <div className="grid grid-cols-4 gap-2 text-xs text-gray-600">
               <div className="bg-white rounded-lg p-2 text-center">
                 <p className="text-lg font-bold text-gray-900">{selected.episode_count}</p>
@@ -317,6 +325,10 @@ export default function AdminShows() {
                         isSelected ? 'bg-teal-50 border-l-2 border-teal-500' : ''
                       }`}
                       onClick={() => setSelected(isSelected ? null : show)}>
+                      {show.cover_art_url && (
+                        <img src={show.cover_art_url} alt={show.podcast_title}
+                          className="w-8 h-8 rounded object-cover flex-shrink-0" />
+                      )}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <p className="text-sm font-medium text-gray-900 truncate">{show.podcast_title}</p>

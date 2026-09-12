@@ -1361,6 +1361,7 @@ async def get_shows():
                 pt.last_scraped_at,
                 pt.error_message,
                 pt.total_episodes AS itunes_total_episodes,
+                p.cover_art_url,
                 COUNT(DISTINCT e.episode_id) AS episode_count,
                 MAX(e.published_date) AS latest_episode_date,
                 COUNT(DISTINCT CASE WHEN eh.is_guest = false THEN eh.host_id END) AS host_count,
@@ -1370,7 +1371,8 @@ async def get_shows():
             LEFT JOIN episodes e ON e.podcast_id = p.podcast_id
             LEFT JOIN episode_host eh ON eh.episode_id = e.episode_id
             GROUP BY pt.tracking_id, pt.apple_podcast_id, pt.podcast_title,
-                     pt.status, pt.last_scraped_at, pt.error_message, pt.total_episodes
+                     pt.status, pt.last_scraped_at, pt.error_message, pt.total_episodes,
+                     p.cover_art_url
             ORDER BY pt.podcast_title;
         """)
         results = cur.fetchall()
