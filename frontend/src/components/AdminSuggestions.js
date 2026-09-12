@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { API_BASE_URL } from '../config';
 import { adminFetch } from '../adminAuth';
 import AdminHeader from './AdminHeader';
+import { highlightNames } from '../adminUtils';
 
 const API = `${API_BASE_URL}/api/admin`;
 
@@ -123,41 +124,6 @@ export default function AdminSuggestions() {
     } finally {
       setActionLoading(false);
     }
-  };
-
-  // Highlight names in text with configurable style
-  const highlightNames = (text, highlights) => {
-    // highlights: [{name, className}]
-    if (!text || !highlights?.length) return text;
-    
-    // Build a combined regex for all names
-    const patterns = highlights.map(h => ({
-      re: new RegExp(h.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'),
-      className: h.className,
-    }));
-
-    // Find all matches with positions
-    const matches = [];
-    patterns.forEach(({ re, className }) => {
-      let m;
-      while ((m = re.exec(text)) !== null) {
-        matches.push({ start: m.index, end: m.index + m[0].length, text: m[0], className });
-      }
-    });
-
-    if (!matches.length) return text;
-
-    matches.sort((a, b) => a.start - b.start);
-
-    const parts = [];
-    let pos = 0;
-    matches.forEach((m, i) => {
-      if (m.start > pos) parts.push(text.slice(pos, m.start));
-      parts.push(<mark key={i} className={m.className}>{m.text}</mark>);
-      pos = m.end;
-    });
-    if (pos < text.length) parts.push(text.slice(pos));
-    return parts;
   };
 
   return (
