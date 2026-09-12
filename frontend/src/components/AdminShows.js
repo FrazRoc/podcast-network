@@ -19,6 +19,14 @@ const extractAppleId = (input) => {
   return match ? match[1] : trimmed;
 };
 
+// A plain DATE like "2026-09-10" has no time component, so new Date(...)
+// parses it as UTC midnight — toLocaleDateString() then shows the wrong
+// day for anyone west of UTC. Parse the parts directly as local time instead.
+const formatDateOnly = (dateStr) => {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString();
+};
+
 export default function AdminShows() {
   const [shows, setShows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -161,6 +169,9 @@ export default function AdminShows() {
                       <div className="flex items-center gap-2 mt-1 text-xs text-gray-500">
                         <span className={`px-2 py-0.5 rounded-full font-medium ${badge.bg}`}>{badge.label}</span>
                         <span>{show.episode_count} episode{show.episode_count !== 1 ? 's' : ''}</span>
+                        {show.latest_episode_date && (
+                          <span>· latest episode {formatDateOnly(show.latest_episode_date)}</span>
+                        )}
                         {show.last_scraped_at && (
                           <span>· last scraped {new Date(show.last_scraped_at).toLocaleDateString()}</span>
                         )}

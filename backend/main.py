@@ -1361,7 +1361,8 @@ async def get_shows():
                 pt.last_scraped_at,
                 pt.error_message,
                 pt.total_episodes AS itunes_total_episodes,
-                COUNT(DISTINCT e.episode_id) AS episode_count
+                COUNT(DISTINCT e.episode_id) AS episode_count,
+                MAX(e.published_date) AS latest_episode_date
             FROM podcast_tracking pt
             LEFT JOIN podcasts p ON p.apple_podcast_id = pt.apple_podcast_id
             LEFT JOIN episodes e ON e.podcast_id = p.podcast_id
