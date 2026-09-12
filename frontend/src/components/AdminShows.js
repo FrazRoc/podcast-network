@@ -22,6 +22,8 @@ const FILTERS = [
 const SORTS = [
   { id: 'title_asc',      label: 'Title A–Z' },
   { id: 'episodes_desc',  label: 'Most episodes' },
+  { id: 'guests_desc',    label: 'Most guests' },
+  { id: 'guests_asc',     label: 'Fewest guests' },
   { id: 'recent_scrape',  label: 'Recently scraped' },
 ];
 
@@ -241,6 +243,8 @@ export default function AdminShows() {
     items = [...items];
     if (sort === 'title_asc') items.sort((a, b) => (a.podcast_title || '').localeCompare(b.podcast_title || ''));
     else if (sort === 'episodes_desc') items.sort((a, b) => b.episode_count - a.episode_count);
+    else if (sort === 'guests_desc') items.sort((a, b) => b.guest_count - a.guest_count);
+    else if (sort === 'guests_asc') items.sort((a, b) => a.guest_count - b.guest_count);
     else if (sort === 'recent_scrape') items.sort((a, b) => new Date(b.last_scraped_at || 0) - new Date(a.last_scraped_at || 0));
     return items;
   }, [shows, filter, searchQ, sort]);
