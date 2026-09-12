@@ -2,7 +2,10 @@ name: Scrape podcast data
 
 on:
   schedule:
-    - cron: '0 */6 * * *'
+    # Offset from :00 — GitHub Actions explicitly documents the top of
+    # every hour as its highest-congestion slot for scheduled workflows,
+    # where runs can be delayed or dropped entirely.
+    - cron: '17 */6 * * *'
   workflow_dispatch: {}
 
 jobs:
