@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { API_BASE_URL } from '../config';
+import { adminFetch } from '../adminAuth';
 
 const API = `${API_BASE_URL}/api/admin`;
 
@@ -7,6 +8,7 @@ export default function AdminImages() {
   const [person, setPerson] = useState(null);
   const [stats, setStats] = useState({});
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [twitterUrl, setTwitterUrl] = useState('');
   const [preview, setPreview] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -17,22 +19,24 @@ export default function AdminImages() {
 
   const fetchNext = useCallback(async (clearResult = true) => {
     setLoading(true);
+    setError(null);
     setTwitterUrl('');
     setPreview(null);
     if (clearResult) setLastResult(null);
     try {
       const skipped = Array.from(skippedIdsRef.current).join(',');
-      const res = await fetch(`${API}/images/next${skipped ? '?skip=' + skipped : ''}`);
+      const res = await adminFetch(`${API}/images/next${skipped ? '?skip=' + skipped : ''}`);
+      if (!res.ok) throw new Error(`API error ${res.status}`);
       const data = await res.json();
       if (data.done) { setDone(true); setPerson(null); }
       else { setPerson(data); setDone(false); }
-    } catch (e) { console.error(e); }
+    } catch (e) { setError(e.message || 'Failed to load'); }
     finally { setLoading(false); }
   }, []);
 
   const fetchStats = useCallback(async () => {
     try {
-      const res = await fetch(`${API}/images/stats`);
+      const res = await adminFetch(`${API}/images/stats`);
       setStats(await res.json());
     } catch (e) {}
   }, []);
@@ -43,7 +47,7 @@ export default function AdminImages() {
     if (!twitterUrl.trim() || !person || submitting) return;
     setSubmitting(true);
     try {
-      const res = await fetch(`${API}/images/${person.host_id}/set_twitter`, {
+      const res = await adminFetch(`${API}/images/${person.host_id}/set_twitter`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ twitter_url: twitterUrl.trim() }),
@@ -59,7 +63,7 @@ export default function AdminImages() {
     if (!person || !preview) return;
     setSubmitting(true);
     try {
-      const res = await fetch(`${API}/images/${person.host_id}/approve`, {
+      const res = await adminFetch(`${API}/images/${person.host_id}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image_url: preview.image_url }),
@@ -101,14 +105,27 @@ export default function AdminImages() {
 
       {loading && <div className="flex items-center justify-center h-96 text-gray-400">Loading...</div>}
 
-      {done && !loading && (
+      {error && !loading && (
+        <div className="flex flex-col items-center justify-center h-96 gap-3">
+          <p className="text-lg font-semibold text-red-500">Couldn't load</p>
+          <p className="text-sm text-gray-500">{error}</p>
+          <button
+            className="px-4 py-2 bg-teal-600 text-white rounded hover:bg-teal-700"
+            onClick={() => fetchNext()}
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {done && !loading && !error && (
         <div className="flex flex-col items-center justify-center h-96 gap-3">
           <div className="text-4xl">🎉</div>
           <p className="text-xl font-semibold text-gray-700">Everyone has a profile image!</p>
         </div>
       )}
 
-      {person && !loading && (
+      {person && !loading && !error && (
         <div className="max-w-xl mx-auto py-8 px-6">
 
           <div className="text-center mb-6">

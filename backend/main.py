@@ -3,7 +3,9 @@
 # source ~/.bash_profile
 # python3 -m uvicorn main:app --reload
 
-from fastapi import FastAPI, HTTPException
+import secrets
+
+from fastapi import FastAPI, HTTPException, Header, Depends
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 import psycopg2
@@ -13,6 +15,20 @@ from urllib.parse import urlparse
 from dotenv import load_dotenv
 
 load_dotenv()
+
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
+
+
+def verify_admin(x_admin_password: str = Header(default=None)):
+    """Dependency guarding every /api/admin/* route with a shared password.
+
+    ADMIN_PASSWORD must be set in the environment — if it's missing, admin
+    routes are refused entirely rather than silently left open.
+    """
+    if not ADMIN_PASSWORD:
+        raise HTTPException(status_code=503, detail="Admin auth is not configured on the server")
+    if not x_admin_password or not secrets.compare_digest(x_admin_password, ADMIN_PASSWORD):
+        raise HTTPException(status_code=401, detail="Invalid or missing admin password")
 
 # Hosts /api/proxy/image is allowed to fetch from — every domain profile
 # images actually come from (Apple's CDN, Twitter avatars via unavatar.io,
@@ -213,7 +229,7 @@ if __name__ == "__main__":
 # ADMIN ENDPOINTS — Suggestions queue
 # ==================================================================
 
-@app.get("/api/admin/suggestions/next")
+@app.get("/api/admin/suggestions/next", dependencies=[Depends(verify_admin)])
 async def get_next_suggestion():
     """
     Get the next pending suggestion for review.
@@ -307,7 +323,7 @@ async def get_next_suggestion():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/admin/suggestions/stats")
+@app.get("/api/admin/suggestions/stats", dependencies=[Depends(verify_admin)])
 async def get_suggestion_stats():
     """Return counts by status."""
     try:
@@ -327,7 +343,7 @@ async def get_suggestion_stats():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/admin/suggestions/{suggestion_id}/approve")
+@app.post("/api/admin/suggestions/{suggestion_id}/approve", dependencies=[Depends(verify_admin)])
 async def approve_suggestion(suggestion_id: int, body: NameOverrideRequest = None):
     """
     Approve a suggestion:
@@ -465,7 +481,7 @@ async def approve_suggestion(suggestion_id: int, body: NameOverrideRequest = Non
 
 
 
-@app.post("/api/admin/suggestions/{suggestion_id}/approve_only")
+@app.post("/api/admin/suggestions/{suggestion_id}/approve_only", dependencies=[Depends(verify_admin)])
 async def approve_suggestion_only(suggestion_id: int, body: NameOverrideRequest = None):
     """
     Approve a suggestion as a person but don't link to the source episode.
@@ -582,7 +598,7 @@ async def approve_suggestion_only(suggestion_id: int, body: NameOverrideRequest 
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/admin/suggestions/{suggestion_id}/reject")
+@app.post("/api/admin/suggestions/{suggestion_id}/reject", dependencies=[Depends(verify_admin)])
 async def reject_suggestion(suggestion_id: int):
     """
     Reject a suggestion:
@@ -645,7 +661,7 @@ async def reject_suggestion(suggestion_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/admin/suggestions/{suggestion_id}/skip")
+@app.post("/api/admin/suggestions/{suggestion_id}/skip", dependencies=[Depends(verify_admin)])
 async def skip_suggestion(suggestion_id: int):
     """Move a suggestion to the back of the queue."""
     try:
@@ -668,7 +684,7 @@ async def skip_suggestion(suggestion_id: int):
 # ADMIN ENDPOINTS — Image suggestions queue
 # ==================================================================
 
-@app.get("/api/admin/images/next")
+@app.get("/api/admin/images/next", dependencies=[Depends(verify_admin)])
 async def get_next_image_person(skip: str = ""):
     """Get the next person without a profile image, ordered by most appearances.
     skip: comma-separated host_ids to exclude this session.
@@ -719,7 +735,7 @@ async def get_next_image_person(skip: str = ""):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/admin/images/stats")
+@app.get("/api/admin/images/stats", dependencies=[Depends(verify_admin)])
 async def get_image_stats():
     """Return image coverage stats."""
     try:
@@ -744,7 +760,7 @@ class TwitterHandleRequest(BaseModel):
     twitter_url: str
 
 
-@app.post("/api/admin/images/{host_id}/set_twitter")
+@app.post("/api/admin/images/{host_id}/set_twitter", dependencies=[Depends(verify_admin)])
 async def set_twitter_handle(host_id: int, body: TwitterHandleRequest):
     """
     Extract handle from a Twitter/X URL, store handle and image URL on the host.
@@ -783,7 +799,7 @@ async def set_twitter_handle(host_id: int, body: TwitterHandleRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/admin/images/{host_id}/approve")
+@app.post("/api/admin/images/{host_id}/approve", dependencies=[Depends(verify_admin)])
 async def approve_image(host_id: int):
     """Save the Twitter image URL to hosts.profile_image_url."""
     try:
@@ -815,7 +831,7 @@ async def approve_image(host_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/admin/images/{host_id}/skip")
+@app.post("/api/admin/images/{host_id}/skip", dependencies=[Depends(verify_admin)])
 async def skip_image(host_id: int):
     """Skip this person — move them to the back by setting a placeholder."""
     try:
@@ -872,7 +888,7 @@ class CreatePersonRequest(BaseModel):
     linkedin_url: str = None
 
 
-@app.post("/api/admin/people")
+@app.post("/api/admin/people", dependencies=[Depends(verify_admin)])
 async def create_person(body: CreatePersonRequest):
     """
     Create a new person, optionally fetch their profile image,
@@ -987,7 +1003,7 @@ async def create_person(body: CreatePersonRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/admin/people")
+@app.get("/api/admin/people", dependencies=[Depends(verify_admin)])
 async def list_people(q: str = "", filter: str = "all", sort: str = "appearances_desc"):
     """List/search people with filtering and sorting."""
     try:
@@ -1050,7 +1066,7 @@ async def list_people(q: str = "", filter: str = "all", sort: str = "appearances
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.put("/api/admin/people/{host_id}")
+@app.put("/api/admin/people/{host_id}", dependencies=[Depends(verify_admin)])
 async def update_person(host_id: int, body: CreatePersonRequest):
     """
     Update a person's name and/or social handles.
@@ -1172,7 +1188,7 @@ async def update_person(host_id: int, body: CreatePersonRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.delete("/api/admin/people/{host_id}")
+@app.delete("/api/admin/people/{host_id}", dependencies=[Depends(verify_admin)])
 async def delete_person(host_id: int):
     """Delete a person and all their episode/show links."""
     try:
@@ -1203,7 +1219,7 @@ async def delete_person(host_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/admin/people/{host_id}/scan")
+@app.post("/api/admin/people/{host_id}/scan", dependencies=[Depends(verify_admin)])
 async def scan_person_episodes(host_id: int):
     """Scan all episodes for an existing person's name and link any matches."""
     try:
@@ -1266,7 +1282,7 @@ async def scan_person_episodes(host_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/admin/people/{host_id}/episodes")
+@app.get("/api/admin/people/{host_id}/episodes", dependencies=[Depends(verify_admin)])
 async def get_person_episodes(host_id: int):
     """Get all episodes a person appears in, grouped by podcast."""
     try:

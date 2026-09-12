@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { API_BASE_URL } from '../config';
+import { adminFetch } from '../adminAuth';
 
 const API = `${API_BASE_URL}/api/admin`;
 
@@ -55,7 +56,7 @@ export default function AdminSuggestions() {
     setLoading(true);
     if (clearResult) setLastResult(null);
     try {
-      const res = await fetch(`${API}/suggestions/next`);
+      const res = await adminFetch(`${API}/suggestions/next`);
       const data = await res.json();
       if (data.done) {
         setDone(true);
@@ -74,7 +75,7 @@ export default function AdminSuggestions() {
 
   const fetchStats = useCallback(async () => {
     try {
-      const res = await fetch(`${API}/suggestions/stats`);
+      const res = await adminFetch(`${API}/suggestions/stats`);
       setStats(await res.json());
     } catch (e) {}
   }, []);
@@ -104,7 +105,7 @@ export default function AdminSuggestions() {
       const body = editedName.trim() && editedName.trim() !== suggestion.candidate_name
         ? JSON.stringify({ name: editedName.trim() })
         : undefined;
-      const res = await fetch(`${API}/suggestions/${suggestion.suggestion_id}/${action}`, {
+      const res = await adminFetch(`${API}/suggestions/${suggestion.suggestion_id}/${action}`, {
         method: 'POST',
         headers: body ? { 'Content-Type': 'application/json' } : {},
         body,

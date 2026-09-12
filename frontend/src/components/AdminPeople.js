@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { API_BASE_URL } from '../config';
+import { adminFetch } from '../adminAuth';
 
 const API = `${API_BASE_URL}/api/admin`;
 
@@ -48,7 +49,7 @@ function PersonPanel({ selected, onSaved, onCancel }) {
 
   useEffect(() => {
     if (!selected) { setEpisodes([]); return; }
-    fetch(`${API}/people/${selected.host_id}/episodes`)
+    adminFetch(`${API}/people/${selected.host_id}/episodes`)
       .then(r => r.json())
       .then(setEpisodes)
       .catch(console.error);
@@ -95,13 +96,13 @@ function PersonPanel({ selected, onSaved, onCancel }) {
     try {
       let res, data;
       if (isEdit) {
-        res  = await fetch(`${API}/people/${selected.host_id}`, {
+        res  = await adminFetch(`${API}/people/${selected.host_id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(form),
         });
       } else {
-        res = await fetch(`${API}/people`, {
+        res = await adminFetch(`${API}/people`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(form),
@@ -141,7 +142,7 @@ function PersonPanel({ selected, onSaved, onCancel }) {
     setSubmitting(true);
     setError('');
     try {
-      const res  = await fetch(`${API}/people/${hostId}/scan`, { method: 'POST' });
+      const res  = await adminFetch(`${API}/people/${hostId}/scan`, { method: 'POST' });
       const data = await res.json();
       setResult(data);
       setExistingId(null);
@@ -361,6 +362,7 @@ function PersonPanel({ selected, onSaved, onCancel }) {
 export default function AdminPeople() {
   const [people, setPeople]         = useState([]);
   const [loading, setLoading]       = useState(false);
+  const [listError, setListError]   = useState(null);
   const [searchQ, setSearchQ]       = useState('');
   const [filter, setFilter]         = useState('all');
   const [sort, setSort]             = useState('appearances_desc');
@@ -371,14 +373,16 @@ export default function AdminPeople() {
 
   const fetchPeople = useCallback(async (q = '', f = 'all', s = 'appearances_desc') => {
     setLoading(true);
+    setListError(null);
     try {
       const params = new URLSearchParams({ q, filter: f, sort: s });
-      const res = await fetch(`${API}/people?${params}`);
+      const res = await adminFetch(`${API}/people?${params}`);
+      if (!res.ok) throw new Error(`API error ${res.status}`);
       const data = await res.json();
       const items = Array.isArray(data) ? data : (data.items || []);
       setPeople(items);
       setTotal(Array.isArray(data) ? data.length : (data.total || items.length));
-    } catch (e) { console.error(e); }
+    } catch (e) { setListError(e.message || 'Failed to load'); }
     finally { setLoading(false); }
   }, []);
 
@@ -403,7 +407,7 @@ export default function AdminPeople() {
   const handleDelete = async (host_id) => {
     if (deleteConfirm !== host_id) { setDeleteConfirm(host_id); return; }
     try {
-      await fetch(`${API}/people/${host_id}`, { method: 'DELETE' });
+      await adminFetch(`${API}/people/${host_id}`, { method: 'DELETE' });
       setDeleteConfirm(null);
       if (selected?.host_id === host_id) setSelected(null);
       fetchPeople(searchQ, filter, sort);
@@ -473,6 +477,17 @@ export default function AdminPeople() {
           <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden" style={{ maxHeight: "calc(100vh - 280px)", overflowY: "auto" }}>
             {loading ? (
               <div className="py-12 text-center text-gray-400 text-sm">Loading...</div>
+            ) : listError ? (
+              <div className="py-12 flex flex-col items-center gap-3">
+                <p className="text-sm font-semibold text-red-500">Couldn't load people</p>
+                <p className="text-xs text-gray-500">{listError}</p>
+                <button
+                  className="px-3 py-1.5 bg-teal-600 text-white text-sm rounded hover:bg-teal-700"
+                  onClick={() => fetchPeople(searchQ, filter, sort)}
+                >
+                  Retry
+                </button>
+              </div>
             ) : people.length === 0 ? (
               <div className="py-12 text-center text-gray-400 text-sm">No people found</div>
             ) : (
