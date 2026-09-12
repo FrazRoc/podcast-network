@@ -129,13 +129,21 @@ function ShowPanel({ selected, onDone, onCancel }) {
           <div className="bg-gray-50 rounded-xl p-4 mb-5 text-sm">
             <p className="font-semibold text-gray-900 mb-1">{selected.podcast_title}</p>
             <p className="text-xs text-gray-500 mb-3">apple id: {selected.apple_podcast_id}</p>
-            <div className="grid grid-cols-2 gap-2 text-xs text-gray-600">
+            <div className="grid grid-cols-4 gap-2 text-xs text-gray-600">
               <div className="bg-white rounded-lg p-2 text-center">
                 <p className="text-lg font-bold text-gray-900">{selected.episode_count}</p>
-                <p className="text-gray-400">episodes</p>
+                <p className="text-gray-400">eps</p>
               </div>
               <div className="bg-white rounded-lg p-2 text-center">
-                <p className="text-lg font-bold text-gray-900">
+                <p className="text-lg font-bold text-gray-900">{selected.host_count}</p>
+                <p className="text-gray-400">hosts</p>
+              </div>
+              <div className="bg-white rounded-lg p-2 text-center">
+                <p className="text-lg font-bold text-gray-900">{selected.guest_count}</p>
+                <p className="text-gray-400">guests</p>
+              </div>
+              <div className="bg-white rounded-lg p-2 text-center">
+                <p className="text-sm font-bold text-gray-900">
                   {(STATUS_BADGE[selected.status] || STATUS_BADGE.pending).label}
                 </p>
                 <p className="text-gray-400">status</p>
@@ -321,6 +329,8 @@ export default function AdminShows() {
                         </div>
                         <p className="text-xs text-gray-400">
                           {show.episode_count} episode{show.episode_count !== 1 ? 's' : ''}
+                          {' · '}{show.host_count} host{show.host_count !== 1 ? 's' : ''}
+                          {' · '}{show.guest_count} guest{show.guest_count !== 1 ? 's' : ''}
                           {show.latest_episode_date && ` · latest ${formatDateOnly(show.latest_episode_date)}`}
                           {show.last_scraped_at && ` · scraped ${new Date(show.last_scraped_at).toLocaleDateString()}`}
                         </p>
