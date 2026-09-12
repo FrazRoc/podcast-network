@@ -132,7 +132,10 @@ export default function AdminShows() {
         </div>
 
         {/* Shows list */}
-        <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+        <div
+          className="bg-white rounded-2xl border border-gray-200 overflow-hidden"
+          style={{ maxHeight: "calc(100vh - 280px)", overflowY: "auto" }}
+        >
           {loading ? (
             <div className="py-12 text-center text-gray-400 text-sm">Loading...</div>
           ) : error ? (
