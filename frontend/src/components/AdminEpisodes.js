@@ -226,7 +226,7 @@ export default function AdminEpisodes() {
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState(null);
   const [searchQ, setSearchQ] = useState('');
-  const [showFilter, setShowFilter] = useState('');
+  const [showFilter, setShowFilter] = useState(() => new URLSearchParams(window.location.search).get('show') || '');
   const [showOptions, setShowOptions] = useState([]);
   const [sort, setSort] = useState('newest');
   // Deep-link support: /admin/episodes?episode_id=X auto-opens that episode

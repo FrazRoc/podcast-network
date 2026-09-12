@@ -42,12 +42,21 @@ function ShowPanel({ selected, onDone, onCancel }) {
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
+  const [episodes, setEpisodes] = useState([]);
+  const [episodesTotal, setEpisodesTotal] = useState(0);
   const isEdit = !!selected;
 
   useEffect(() => {
     setNewShowInput('');
     setResult(null);
     setError('');
+    setEpisodes([]);
+    setEpisodesTotal(0);
+    if (!selected) return;
+    adminFetch(`${API}/episodes?show=${encodeURIComponent(selected.podcast_title)}&sort=newest&limit=10`)
+      .then(r => r.json())
+      .then(data => { setEpisodes(data.items || []); setEpisodesTotal(data.total || 0); })
+      .catch(() => {});
   }, [selected]);
 
   const handleAdd = async () => {
@@ -171,6 +180,33 @@ function ShowPanel({ selected, onDone, onCancel }) {
             className="w-full py-2.5 bg-teal-600 hover:bg-teal-700 disabled:opacity-40 text-white font-semibold rounded-xl text-sm transition-colors">
             {submitting ? 'Starting…' : '🔄 Scrape Now'}
           </button>
+
+          {/* Recent episodes */}
+          {episodes.length > 0 && (
+            <div className="mt-5 border-t border-gray-100 pt-4">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
+                Episodes ({episodesTotal})
+              </p>
+              <div className="space-y-1.5">
+                {episodes.map(ep => (
+                  <a key={ep.episode_id} href={`/admin/episodes?episode_id=${ep.episode_id}`}
+                    className="block rounded-lg bg-gray-50 hover:bg-gray-100 px-3 py-2 transition-colors">
+                    <p className="text-xs text-gray-700 leading-snug truncate">{ep.title}</p>
+                    <p className="text-xs text-gray-400">
+                      {ep.published_date && formatDateOnly(ep.published_date)}
+                      {' · '}{ep.credit_count} credit{ep.credit_count !== 1 ? 's' : ''}
+                    </p>
+                  </a>
+                ))}
+              </div>
+              {episodesTotal > episodes.length && (
+                <a href={`/admin/episodes?show=${encodeURIComponent(selected.podcast_title)}`}
+                  className="block text-center text-xs text-teal-600 hover:text-teal-700 mt-3">
+                  View all {episodesTotal} episodes in Episode Admin →
+                </a>
+              )}
+            </div>
+          )}
         </>
       ) : (
         <>
