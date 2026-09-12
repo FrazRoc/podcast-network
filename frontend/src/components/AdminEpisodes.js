@@ -59,7 +59,7 @@ function EpisodePanel({ episodeId, onChanged }) {
     if (!personQ.trim()) { setPersonResults([]); return; }
     adminFetch(`${API}/people?q=${encodeURIComponent(personQ.trim())}&sort=name_asc`)
       .then(r => r.json())
-      .then(data => setPersonResults(Array.isArray(data) ? data.slice(0, 8) : []))
+      .then(data => setPersonResults((data.items || []).slice(0, 8)))
       .catch(() => {});
   }, [personQ]);
 
