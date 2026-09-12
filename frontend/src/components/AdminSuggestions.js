@@ -165,6 +165,7 @@ export default function AdminSuggestions() {
           <a href="/" className="text-gray-400 hover:text-gray-600 text-sm">← Network</a>
           <a href="/admin/images" className="text-gray-400 hover:text-gray-600 text-sm">Images</a>
           <a href="/admin/people" className="text-gray-400 hover:text-gray-600 text-sm">People</a>
+          <a href="/admin/shows" className="text-gray-400 hover:text-gray-600 text-sm">Shows</a>
           <h1 className="text-lg font-semibold text-gray-900">Suggestion Review</h1>
         </div>
         <div className="flex items-center gap-4 text-sm text-gray-500">

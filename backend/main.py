@@ -11,12 +11,19 @@ from fastapi.middleware.cors import CORSMiddleware
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import os
+import httpx
 from urllib.parse import urlparse
 from dotenv import load_dotenv
 
 load_dotenv()
 
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
+
+# For dispatching the scrape workflow on demand ("Scrape Now" in Show Admin).
+# GITHUB_REPO is "owner/repo"; the token needs Actions: write on that repo.
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+GITHUB_REPO = os.getenv("GITHUB_REPO")
+SCRAPE_WORKFLOW_FILE = "scrape.yml"
 
 
 def verify_admin(x_admin_password: str = Header(default=None)):
@@ -1331,3 +1338,117 @@ async def get_person_episodes(host_id: int):
         ]
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================================================================
+# ADMIN ENDPOINTS — Show management
+# ==================================================================
+
+class AddShowRequest(BaseModel):
+    apple_podcast_id: str
+
+
+@app.get("/api/admin/shows", dependencies=[Depends(verify_admin)])
+async def get_shows():
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT
+                pt.apple_podcast_id,
+                pt.podcast_title,
+                pt.status,
+                pt.last_scraped_at,
+                pt.error_message,
+                pt.total_episodes AS itunes_total_episodes,
+                COUNT(DISTINCT e.episode_id) AS episode_count
+            FROM podcast_tracking pt
+            LEFT JOIN podcasts p ON p.apple_podcast_id = pt.apple_podcast_id
+            LEFT JOIN episodes e ON e.podcast_id = p.podcast_id
+            GROUP BY pt.tracking_id, pt.apple_podcast_id, pt.podcast_title,
+                     pt.status, pt.last_scraped_at, pt.error_message, pt.total_episodes
+            ORDER BY pt.podcast_title;
+        """)
+        results = cur.fetchall()
+        cur.close()
+        conn.close()
+        return results
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/shows", dependencies=[Depends(verify_admin)])
+async def add_show(body: AddShowRequest):
+    """Add a new show by Apple Podcast ID, mirroring manager.py's `add` command:
+    look up the title via iTunes, then queue it as 'pending' for the scraper."""
+    apple_id = body.apple_podcast_id.strip()
+    if not apple_id:
+        raise HTTPException(status_code=400, detail="apple_podcast_id is required")
+
+    title = apple_id
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                "https://itunes.apple.com/lookup",
+                params={"id": apple_id, "entity": "podcast", "country": "US"},
+            )
+            data = resp.json()
+            if data.get("resultCount", 0) > 0:
+                title = data["results"][0].get("collectionName", apple_id)
+    except Exception:
+        pass  # fall back to using the ID as the title, same as manager.py
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO podcast_tracking (apple_podcast_id, podcast_title, status, created_at)
+            VALUES (%s, %s, 'pending', NOW())
+            ON CONFLICT (apple_podcast_id) DO UPDATE
+                SET podcast_title = COALESCE(EXCLUDED.podcast_title, podcast_tracking.podcast_title)
+        """, (apple_id, title))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return {"success": True, "apple_podcast_id": apple_id, "title": title}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/shows/{apple_podcast_id}/scrape-now", dependencies=[Depends(verify_admin)])
+async def scrape_show_now(apple_podcast_id: str):
+    """Dispatch the scrape workflow scoped to one show (new show's initial
+    scrape, or pulling more episodes for an existing one)."""
+    if not GITHUB_TOKEN or not GITHUB_REPO:
+        raise HTTPException(status_code=503, detail="Scrape-now is not configured on the server")
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT podcast_title FROM podcast_tracking WHERE apple_podcast_id = %s", (apple_podcast_id,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Show not found")
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                f"https://api.github.com/repos/{GITHUB_REPO}/actions/workflows/{SCRAPE_WORKFLOW_FILE}/dispatches",
+                headers={
+                    "Authorization": f"Bearer {GITHUB_TOKEN}",
+                    "Accept": "application/vnd.github+json",
+                },
+                json={"ref": "main", "inputs": {"podcast_title": row["podcast_title"]}},
+            )
+        if resp.status_code >= 300:
+            raise HTTPException(status_code=502, detail=f"GitHub dispatch failed: {resp.status_code} {resp.text}")
+        return {"success": True, "podcast_title": row["podcast_title"]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to dispatch scrape workflow: {e}")

@@ -90,6 +90,8 @@ export default function AdminImages() {
         <div className="flex items-center gap-4">
           <a href="/" className="text-gray-400 hover:text-gray-600 text-sm">← Network</a>
           <a href="/admin" className="text-gray-400 hover:text-gray-600 text-sm">Suggestions</a>
+          <a href="/admin/people" className="text-gray-400 hover:text-gray-600 text-sm">People</a>
+          <a href="/admin/shows" className="text-gray-400 hover:text-gray-600 text-sm">Shows</a>
           <h1 className="text-lg font-semibold text-gray-900">Image Review</h1>
         </div>
         <div className="flex items-center gap-4 text-sm text-gray-500">

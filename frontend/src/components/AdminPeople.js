@@ -429,6 +429,7 @@ export default function AdminPeople() {
           <a href="/" className="text-gray-400 hover:text-gray-600 text-sm">← Network</a>
           <a href="/admin" className="text-gray-400 hover:text-gray-600 text-sm">Suggestions</a>
           <a href="/admin/images" className="text-gray-400 hover:text-gray-600 text-sm">Images</a>
+          <a href="/admin/shows" className="text-gray-400 hover:text-gray-600 text-sm">Shows</a>
           <h1 className="text-lg font-semibold text-gray-900">People</h1>
         </div>
         <span className="text-sm text-gray-400">{total} people</span>

@@ -6,7 +6,12 @@ on:
     # every hour as its highest-congestion slot for scheduled workflows,
     # where runs can be delayed or dropped entirely.
     - cron: '17 */6 * * *'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      podcast_title:
+        description: 'Scope this run to a single show by exact title (leave blank for the full sweep)'
+        required: false
+        type: string
 
 jobs:
   scrape:
@@ -14,6 +19,7 @@ jobs:
     timeout-minutes: 45
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      PODCAST_TITLE: ${{ inputs.podcast_title }}
     steps:
       - uses: actions/checkout@v4
 
@@ -25,18 +31,38 @@ jobs:
         working-directory: scraper
         run: pip install -r requirements.txt
 
-      - name: Scrape new episodes
+      - name: Scrape episodes
         working-directory: scraper
-        run: python3 manager.py scrape --new-only --db "$DATABASE_URL"
+        run: |
+          if [ -n "$PODCAST_TITLE" ]; then
+            python3 manager.py scrape --podcast "$PODCAST_TITLE" --db "$DATABASE_URL"
+          else
+            python3 manager.py scrape --new-only --db "$DATABASE_URL"
+          fi
 
       - name: Backfill missing episodes
         working-directory: scraper
+        if: ${{ !inputs.podcast_title }}
         run: python3 manager.py backfill --db "$DATABASE_URL"
+
+      - name: Scrape show-level host data
+        working-directory: scraper
+        run: |
+          if [ -n "$PODCAST_TITLE" ]; then
+            python3 apple_credits_scraper.py shows --podcast "$PODCAST_TITLE" --db "$DATABASE_URL"
+          else
+            python3 apple_credits_scraper.py shows --db "$DATABASE_URL"
+          fi
 
       - name: Scrape host/guest credits
         working-directory: scraper
         timeout-minutes: 35
-        run: python3 apple_credits_scraper.py episodes --hosts-only --batch 500 --db "$DATABASE_URL"
+        run: |
+          if [ -n "$PODCAST_TITLE" ]; then
+            python3 apple_credits_scraper.py episodes --hosts-only --podcast "$PODCAST_TITLE" --db "$DATABASE_URL"
+          else
+            python3 apple_credits_scraper.py episodes --hosts-only --batch 500 --db "$DATABASE_URL"
+          fi
 
       - name: Extract hosts from show metadata
         working-directory: scraper
