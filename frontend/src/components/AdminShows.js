@@ -212,7 +212,7 @@ function ShowPanel({ selected, onDone, onCancel }) {
                 <p className="text-gray-400">eps</p>
               </div>
               <div className="bg-white rounded-lg p-2 text-center">
-                <p className="text-lg font-bold text-gray-900">{selected.host_count}</p>
+                <p className="text-lg font-bold text-gray-900">{hosts.length}</p>
                 <p className="text-gray-400">hosts</p>
               </div>
               <div className="bg-white rounded-lg p-2 text-center">
