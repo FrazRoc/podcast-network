@@ -325,25 +325,32 @@ function PersonPanel({ selected, onSaved, onCancel }) {
           <div className="space-y-2">
             {episodes.map(pod => (
               <div key={pod.podcast} className="rounded-lg border border-gray-100 overflow-hidden">
-                <button
+                <div
                   onClick={() => toggleShow(pod.podcast)}
-                  className="w-full flex items-center gap-2 px-3 py-2 bg-gray-50 hover:bg-gray-100 text-left transition-colors"
+                  className="w-full flex items-center gap-2 px-3 py-2 bg-gray-50 hover:bg-gray-100 text-left transition-colors cursor-pointer"
                 >
                   {pod.cover_art_url && (
                     <img src={pod.cover_art_url} alt={pod.podcast}
                       className="w-6 h-6 rounded flex-shrink-0" />
                   )}
-                  <span className="text-xs font-medium text-gray-700 flex-1 truncate">{pod.podcast}</span>
+                  <a href={`/admin/shows?apple_podcast_id=${pod.apple_podcast_id}`}
+                    onClick={e => e.stopPropagation()}
+                    className="text-xs font-medium text-gray-700 hover:text-teal-600 flex-1 truncate">
+                    {pod.podcast}
+                  </a>
                   <span className="text-xs text-gray-400 flex-shrink-0">{pod.count} ep{pod.count !== 1 ? 's' : ''}</span>
                   <span className="text-gray-300 text-xs">{expandedShows[pod.podcast] ? '▲' : '▼'}</span>
-                </button>
+                </div>
                 {expandedShows[pod.podcast] && (
                   <div className="divide-y divide-gray-50">
                     {pod.episodes.map(ep => (
                       <div key={ep.episode_id} className="px-3 py-1.5 flex items-start gap-2">
                         <span className={`mt-0.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${ep.is_guest ? 'bg-blue-400' : 'bg-green-500'}`} />
                         <div className="min-w-0">
-                          <p className="text-xs text-gray-700 leading-snug">{ep.episode_title}</p>
+                          <a href={`/admin/episodes?episode_id=${ep.episode_id}`}
+                            className="text-xs text-gray-700 hover:text-teal-600 leading-snug block">
+                            {ep.episode_title}
+                          </a>
                           <p className="text-xs text-gray-400">{ep.published_date?.slice(0,10)} · {ep.data_source}</p>
                         </div>
                       </div>
@@ -388,6 +395,14 @@ export default function AdminPeople() {
   }, []);
 
   useEffect(() => { fetchPeople(searchQ, filter, sort); }, [fetchPeople]);
+
+  // Deep-link support: /admin/people?host_id=X auto-opens that person
+  useEffect(() => {
+    const targetId = new URLSearchParams(window.location.search).get('host_id');
+    if (!targetId || people.length === 0) return;
+    const match = people.find(p => p.host_id === parseInt(targetId, 10));
+    if (match) setSelected(match);
+  }, [people]);
 
   const handleSearch = (e) => {
     const q = e.target.value;

@@ -34,7 +34,10 @@ const CreditPill = ({ credit }) => {
       ) : (
         <span className={`w-2 h-2 rounded-full flex-shrink-0 ${color}`} />
       )}
-      <span className={`font-medium ${credit.is_guest ? 'text-blue-700' : 'text-green-700'}`}>{credit.name}</span>
+      <a href={`/admin/people?host_id=${credit.host_id}`}
+        className={`font-medium hover:underline ${credit.is_guest ? 'text-blue-700' : 'text-green-700'}`}>
+        {credit.name}
+      </a>
       <span className="text-gray-400 text-xs">{credit.is_guest ? 'Guest' : 'Host'}</span>
       {isVerified && (
         <span className="ml-auto text-xs text-green-600 font-medium">✓ Apple</span>
@@ -209,12 +212,14 @@ export default function AdminSuggestions() {
                   />
                 )}
                 <div className="min-w-0">
-                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-0.5">
+                  <a href={`/admin/shows?apple_podcast_id=${suggestion.apple_podcast_id}`}
+                    className="block text-xs font-semibold text-gray-400 hover:text-teal-600 uppercase tracking-wide mb-0.5">
                     {suggestion.podcast_title}
-                  </p>
-                  <h2 className="text-sm font-semibold text-gray-900 leading-snug">
+                  </a>
+                  <a href={`/admin/episodes?episode_id=${suggestion.episode_id}`}
+                    className="block text-sm font-semibold text-gray-900 hover:text-teal-600 leading-snug">
                     {suggestion.episode_title}
-                  </h2>
+                  </a>
                   {suggestion.published_date && (
                     <p className="text-xs text-gray-400 mt-1">
                       {new Date(suggestion.published_date).toLocaleDateString('en-US', {

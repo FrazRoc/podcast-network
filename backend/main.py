@@ -261,6 +261,7 @@ async def get_next_suggestion():
                 e.published_date,
                 p.title       AS podcast_title,
                 p.cover_art_url AS podcast_cover_art,
+                p.apple_podcast_id,
                 (SELECT COUNT(*) FROM suggestions WHERE status = 'pending') AS total_pending
             FROM suggestions s
             JOIN episodes e ON s.episode_id = e.episode_id
@@ -1298,6 +1299,7 @@ async def get_person_episodes(host_id: int):
         cur.execute("""
             SELECT p.title AS podcast_title,
                    p.cover_art_url,
+                   p.apple_podcast_id,
                    e.episode_id,
                    e.title AS episode_title,
                    e.published_date,
@@ -1317,6 +1319,7 @@ async def get_person_episodes(host_id: int):
         from collections import defaultdict
         by_podcast = defaultdict(list)
         covers = {}
+        apple_ids = {}
         for r in rows:
             by_podcast[r['podcast_title']].append({
                 'episode_id':    r['episode_id'],
@@ -1326,11 +1329,13 @@ async def get_person_episodes(host_id: int):
                 'data_source':   r['data_source'],
             })
             covers[r['podcast_title']] = r['cover_art_url']
+            apple_ids[r['podcast_title']] = r['apple_podcast_id']
 
         return [
             {
                 'podcast': show,
                 'cover_art_url': covers[show],
+                'apple_podcast_id': apple_ids[show],
                 'episodes': eps,
                 'count': len(eps),
             }
@@ -1490,14 +1495,14 @@ async def list_episodes(q: str = "", show: str = "", sort: str = "newest", limit
         cur.execute(f"""
             SELECT
                 e.episode_id, e.title, e.published_date,
-                p.podcast_id, p.title AS podcast_title, p.cover_art_url,
+                p.podcast_id, p.title AS podcast_title, p.cover_art_url, p.apple_podcast_id,
                 COUNT(DISTINCT eh.host_id) AS credit_count
             FROM episodes e
             JOIN podcasts p ON e.podcast_id = p.podcast_id
             LEFT JOIN episode_host eh ON eh.episode_id = e.episode_id
             WHERE (%(q)s = '' OR e.title ILIKE '%%' || %(q)s || '%%' OR p.title ILIKE '%%' || %(q)s || '%%')
               AND (%(show)s = '' OR p.title = %(show)s)
-            GROUP BY e.episode_id, e.title, e.published_date, p.podcast_id, p.title, p.cover_art_url
+            GROUP BY e.episode_id, e.title, e.published_date, p.podcast_id, p.title, p.cover_art_url, p.apple_podcast_id
             ORDER BY {order}
             LIMIT %(limit)s OFFSET %(offset)s;
         """, {"q": q, "show": show, "limit": limit, "offset": offset})
@@ -1526,7 +1531,7 @@ async def get_episode(episode_id: int):
         cur = conn.cursor()
         cur.execute("""
             SELECT e.episode_id, e.title, e.description, e.published_date,
-                   p.podcast_id, p.title AS podcast_title, p.cover_art_url
+                   p.podcast_id, p.title AS podcast_title, p.cover_art_url, p.apple_podcast_id
             FROM episodes e
             JOIN podcasts p ON e.podcast_id = p.podcast_id
             WHERE e.episode_id = %s

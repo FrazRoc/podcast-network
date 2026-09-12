@@ -126,7 +126,11 @@ export default function AdminImages() {
         <div className="max-w-xl mx-auto py-8 px-6">
 
           <div className="text-center mb-6">
-            <h2 className="text-3xl font-bold text-gray-900 mb-1">{person.host_name}</h2>
+            <h2 className="text-3xl font-bold text-gray-900 mb-1">
+              <a href={`/admin/people?host_id=${person.host_id}`} className="hover:text-teal-600">
+                {person.host_name}
+              </a>
+            </h2>
             <p className="text-gray-500 text-sm">
               {person.appearances} appearance{person.appearances !== 1 ? 's' : ''}
               {person.podcasts?.length > 0 && <span> · {person.podcasts.slice(0, 3).join(', ')}{person.podcasts.length > 3 ? '...' : ''}</span>}

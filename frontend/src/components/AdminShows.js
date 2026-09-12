@@ -234,6 +234,14 @@ export default function AdminShows() {
 
   useEffect(() => { fetchShows(); }, [fetchShows]);
 
+  // Deep-link support: /admin/shows?apple_podcast_id=X auto-opens that show
+  useEffect(() => {
+    const targetId = new URLSearchParams(window.location.search).get('apple_podcast_id');
+    if (!targetId || shows.length === 0) return;
+    const match = shows.find(s => s.apple_podcast_id === targetId);
+    if (match) setSelected(match);
+  }, [shows]);
+
   const visibleShows = useMemo(() => {
     let items = shows;
     if (filter !== 'all') items = items.filter(s => s.status === filter);

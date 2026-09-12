@@ -117,7 +117,10 @@ function EpisodePanel({ episodeId, onChanged }) {
                 className="w-12 h-12 rounded-lg flex-shrink-0 object-cover" />
             )}
             <div className="min-w-0">
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">{episode.podcast_title}</p>
+              <a href={`/admin/shows?apple_podcast_id=${episode.apple_podcast_id}`}
+                className="text-xs font-semibold text-gray-400 hover:text-teal-600 uppercase tracking-wide">
+                {episode.podcast_title}
+              </a>
               <h2 className="text-sm font-semibold text-gray-900 leading-snug">{episode.title}</h2>
               {episode.published_date && (
                 <p className="text-xs text-gray-400 mt-0.5">{formatDateOnly(episode.published_date)}</p>
@@ -145,7 +148,10 @@ function EpisodePanel({ episodeId, onChanged }) {
                       ) : (
                         <span className={`w-2 h-2 rounded-full flex-shrink-0 ${c.is_guest ? 'bg-blue-400' : 'bg-green-500'}`} />
                       )}
-                      <span className="font-medium text-gray-800 flex-1 truncate">{c.name}</span>
+                      <a href={`/admin/people?host_id=${c.host_id}`}
+                        className="font-medium text-gray-800 hover:text-teal-600 flex-1 truncate">
+                        {c.name}
+                      </a>
                       <span className="text-gray-400 text-xs flex-shrink-0">{c.is_guest ? 'Guest' : 'Host'}</span>
                       <span className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${badge.bg}`}>{badge.label}</span>
                       <button
@@ -223,7 +229,11 @@ export default function AdminEpisodes() {
   const [showFilter, setShowFilter] = useState('');
   const [showOptions, setShowOptions] = useState([]);
   const [sort, setSort] = useState('newest');
-  const [selectedId, setSelectedId] = useState(null);
+  // Deep-link support: /admin/episodes?episode_id=X auto-opens that episode
+  const [selectedId, setSelectedId] = useState(() => {
+    const id = new URLSearchParams(window.location.search).get('episode_id');
+    return id ? parseInt(id, 10) : null;
+  });
   const searchRef = useRef(null);
 
   const fetchEpisodes = useCallback(async (q, show, s, offset, append) => {
@@ -348,7 +358,11 @@ export default function AdminEpisodes() {
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium text-gray-900 truncate">{ep.title}</p>
                           <p className="text-xs text-gray-400 truncate">
-                            {ep.podcast_title}
+                            <a href={`/admin/shows?apple_podcast_id=${ep.apple_podcast_id}`}
+                              onClick={e => e.stopPropagation()}
+                              className="hover:text-teal-600">
+                              {ep.podcast_title}
+                            </a>
                             {ep.published_date && ` · ${formatDateOnly(ep.published_date)}`}
                             {' · '}{ep.credit_count} credit{ep.credit_count !== 1 ? 's' : ''}
                           </p>
