@@ -78,6 +78,8 @@ STRIP_AFTER_PATTERNS = [
     r'This episode (?:of [A-Za-z ]+ )?was (?:reported and )?(?:produced|fact.?checked)',  # How to Save a Planet / Gimlet production credits
     r'How to Save a Planet is (?:a Spotify|reported|produced|hosted)',  # How to Save a Planet / Gimlet show boilerplate
     r'\nCheck out our Calls to Action archive',          # How to Save a Planet footer
+    r'The show is produced by',                          # This Week in Cleantech production credits
+    r'\bwith research support from',                     # crew names, not participants
 ]
 
 
