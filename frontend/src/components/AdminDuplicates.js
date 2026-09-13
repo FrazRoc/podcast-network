@@ -61,9 +61,13 @@ export default function AdminDuplicates() {
     const flip = flipped[keyOf(pair)];
     return flip
       ? { keepId: pair.suggested_drop_id,  keepName: pair.suggested_drop_name,
-          dropId: pair.suggested_keep_id,  dropName: pair.suggested_keep_name }
+          keepCredits: pair.drop_credits,  keepShows: pair.drop_shows,
+          dropId: pair.suggested_keep_id,  dropName: pair.suggested_keep_name,
+          dropCredits: pair.keep_credits,  dropShows: pair.keep_shows }
       : { keepId: pair.suggested_keep_id,  keepName: pair.suggested_keep_name,
-          dropId: pair.suggested_drop_id,  dropName: pair.suggested_drop_name };
+          keepCredits: pair.keep_credits,  keepShows: pair.keep_shows,
+          dropId: pair.suggested_drop_id,  dropName: pair.suggested_drop_name,
+          dropCredits: pair.drop_credits,  dropShows: pair.drop_shows };
   };
 
   const handleMerge = async (pair) => {
@@ -149,8 +153,9 @@ export default function AdminDuplicates() {
             <div className="space-y-3">
               {list.map(pair => {
                 const k = keyOf(pair);
-                const { keepId, keepName, dropName } = resolve(pair);
+                const r = resolve(pair);
                 const busy = busyKey === k;
+                const flip = !!flipped[k];
                 return (
                   <div key={k} className="bg-white rounded-2xl border border-gray-200 p-4">
                     <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -160,18 +165,39 @@ export default function AdminDuplicates() {
                       <span className="text-xs text-gray-400">{KIND_LABEL[pair.kind] || pair.kind}</span>
                     </div>
 
-                    <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 mb-3">
-                      <a href={`/admin/people?host_id=${keepId}`}
-                         className="text-base font-semibold text-gray-900 hover:text-teal-700">
-                        {keepName}
-                      </a>
-                      <span className="text-xs text-gray-400">keeps</span>
+                    {/* Both names link out (new tab) so you can compare the two
+                        records before choosing which one survives. */}
+                    <div className="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-3 mb-2">
+                      <span className="flex items-baseline gap-2">
+                        <a href={`/admin/people?host_id=${r.keepId}`}
+                           target="_blank" rel="noopener noreferrer"
+                           className="text-base font-semibold text-gray-900 hover:text-teal-700 underline decoration-gray-300 underline-offset-2">
+                          {r.keepName}
+                        </a>
+                        <span className="text-xs text-gray-400">
+                          keeps · {r.keepCredits} ep, {r.keepShows} shows
+                        </span>
+                      </span>
                       <span className="text-gray-300 hidden sm:inline">←</span>
-                      <span className="text-base text-gray-500 line-through">{dropName}</span>
+                      <span className="flex items-baseline gap-2">
+                        <a href={`/admin/people?host_id=${r.dropId}`}
+                           target="_blank" rel="noopener noreferrer"
+                           className="text-base text-gray-500 line-through hover:text-red-600 underline decoration-gray-300 underline-offset-2">
+                          {r.dropName}
+                        </a>
+                        <span className="text-xs text-gray-400">
+                          merged · {r.dropCredits} ep, {r.dropShows} shows
+                        </span>
+                      </span>
                     </div>
 
-                    <p className="text-xs text-gray-500 mb-3">
-                      <Evidence pair={pair} /> · {pair.keep_credits} vs {pair.drop_credits} credits
+                    <p className="text-xs text-gray-500 mb-1">
+                      <Evidence pair={pair} />
+                    </p>
+                    <p className="text-xs text-gray-400 mb-3">
+                      {flip
+                        ? 'Keeping the other record (your choice).'
+                        : <>Suggested keep: {pair.keep_reason}.</>}
                     </p>
 
                     <div className="flex flex-wrap gap-2">

@@ -1246,6 +1246,36 @@ def _duplicate_kind(a_tokens: list, b_tokens: list):
     return None
 
 
+def _profile_richness(p) -> int:
+    return sum(1 for f in ('profile_image_url', 'twitter_handle', 'bluesky_handle') if p.get(f))
+
+
+def _suggest_survivor(a, b):
+    """Suggest which of two records to keep, and say why.
+
+    Only a suggestion — the reviewer can always keep the other one. Credit
+    count is the main signal because it reflects which spelling the sources
+    actually use, but plenty of pairs are 1-vs-1 and it settles nothing, so
+    the tiebreaks run all the way down to host_id. Without that last step the
+    suggestion would depend on row order and could flip between page loads.
+    """
+    if a['credits'] != b['credits']:
+        keep, drop = (a, b) if a['credits'] > b['credits'] else (b, a)
+        return keep, drop, f"more credits ({keep['credits']} vs {drop['credits']})"
+
+    if a['shows'] != b['shows']:
+        keep, drop = (a, b) if a['shows'] > b['shows'] else (b, a)
+        return keep, drop, f"same credits, but appears on more shows ({keep['shows']} vs {drop['shows']})"
+
+    ra, rb = _profile_richness(a), _profile_richness(b)
+    if ra != rb:
+        keep, drop = (a, b) if ra > rb else (b, a)
+        return keep, drop, "same credits, but has more profile detail (image or social links)"
+
+    keep, drop = (a, b) if a['host_id'] < b['host_id'] else (b, a)
+    return keep, drop, "nothing separates them — pick by name"
+
+
 @app.get("/api/admin/people/duplicates", dependencies=[Depends(verify_admin)])
 async def find_duplicate_people():
     """Surface possible duplicate people for a human to judge.
@@ -1262,8 +1292,13 @@ async def find_duplicate_people():
             SELECT h.host_id, h.first_name, h.last_name,
                    h.first_name || ' ' || h.last_name AS name,
                    h.twitter_handle, h.bluesky_handle, h.profile_image_url,
-                   (SELECT COUNT(*) FROM episode_host eh WHERE eh.host_id = h.host_id) AS credits
+                   h.data_source,
+                   (SELECT COUNT(*) FROM episode_host eh WHERE eh.host_id = h.host_id) AS credits,
+                   (SELECT COUNT(DISTINCT e.podcast_id) FROM episode_host eh
+                      JOIN episodes e ON e.episode_id = eh.episode_id
+                     WHERE eh.host_id = h.host_id) AS shows
             FROM hosts h
+            ORDER BY h.host_id
         """)
         people = cur.fetchall()
 
@@ -1339,7 +1374,7 @@ async def find_duplicate_people():
             else:
                 confidence = 'review'
 
-            keep, drop = (a, b) if a['credits'] >= b['credits'] else (b, a)
+            keep, drop, keep_reason = _suggest_survivor(a, b)
             items.append({
                 "kind": kind,
                 "confidence": confidence,
@@ -1347,8 +1382,11 @@ async def find_duplicate_people():
                 "suggested_keep_name": keep['name'],
                 "suggested_drop_id": drop['host_id'],
                 "suggested_drop_name": drop['name'],
+                "keep_reason": keep_reason,
                 "keep_credits": keep['credits'],
                 "drop_credits": drop['credits'],
+                "keep_shows": keep['shows'],
+                "drop_shows": drop['shows'],
                 "shared_episodes": eps,
                 "shared_shows": shows,
                 "same_social": same_social,
