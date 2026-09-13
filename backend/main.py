@@ -314,6 +314,54 @@ async def get_show_overlap_stats(top_n: int = 25):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/stats/show-timeline")
+async def get_show_timeline_stats():
+    """Per-show episode date range + every episode date — the data behind
+    the show lifespan Gantt chart on the public Stats page."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT p.podcast_id, p.apple_podcast_id, p.title, p.cover_art_url,
+                   MIN(e.published_date) AS earliest_episode_date,
+                   MAX(e.published_date) AS latest_episode_date,
+                   ARRAY_AGG(e.published_date ORDER BY e.published_date) AS episode_dates
+            FROM podcasts p
+            JOIN episodes e ON e.podcast_id = p.podcast_id
+            WHERE e.published_date IS NOT NULL
+            GROUP BY p.podcast_id, p.apple_podcast_id, p.title, p.cover_art_url
+            ORDER BY earliest_episode_date ASC;
+        """)
+        shows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return {"shows": shows}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/stats/episode-calendar")
+async def get_episode_calendar_stats():
+    """Episode count per day across all shows — the data behind the
+    calendar heatmap on the public Stats page."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT published_date, COUNT(*) AS count
+            FROM episodes
+            WHERE published_date IS NOT NULL
+            GROUP BY published_date
+            ORDER BY published_date;
+        """)
+        days = cur.fetchall()
+        cur.close()
+        conn.close()
+        return {"days": days}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

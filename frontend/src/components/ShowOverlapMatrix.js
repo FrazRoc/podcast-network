@@ -1,14 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { API_BASE_URL } from '../config';
+import { tealScale } from '../chartUtils';
 
 const CELL = 28;
-
-// Sequential single-hue scale (teal) — light to dark by magnitude.
-// Never a rainbow: identity isn't being encoded here, only magnitude.
-const tealScale = (t) => {
-  const lightness = 92 - t * 62; // 92% (near-white) -> 30% (deep teal)
-  return `hsl(173, 65%, ${lightness}%)`;
-};
 
 export default function ShowOverlapMatrix() {
   const [data, setData] = useState(null);
