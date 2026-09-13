@@ -227,6 +227,89 @@ async def get_podcasts():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/stats/guest-appearances")
+async def get_guest_appearance_stats(limit: int = 200):
+    """Sorted list of people by episode appearance count — the data
+    behind the guest appearance long-tail chart on the public Stats page."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT h.host_id,
+                   h.first_name || ' ' || h.last_name AS name,
+                   h.profile_image_url,
+                   COUNT(DISTINCT eh.episode_id) AS appearances
+            FROM hosts h
+            JOIN episode_host eh ON eh.host_id = h.host_id
+            GROUP BY h.host_id, h.first_name, h.last_name, h.profile_image_url
+            ORDER BY appearances DESC
+            LIMIT %s;
+        """, (limit,))
+        items = cur.fetchall()
+
+        cur.execute("""
+            SELECT COUNT(DISTINCT h.host_id) AS total_people
+            FROM hosts h JOIN episode_host eh ON eh.host_id = h.host_id;
+        """)
+        total_people = cur.fetchone()["total_people"]
+
+        cur.close()
+        conn.close()
+        return {"items": items, "total_people": total_people}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/stats/show-overlap")
+async def get_show_overlap_stats(top_n: int = 25):
+    """Pairwise shared-guest counts among the top_n most-connected shows —
+    the data behind the show overlap matrix on the public Stats page."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT p.podcast_id, p.title, p.cover_art_url,
+                   COUNT(DISTINCT eh.host_id) AS people_count
+            FROM podcasts p
+            JOIN episodes e ON e.podcast_id = p.podcast_id
+            JOIN episode_host eh ON eh.episode_id = e.episode_id
+            GROUP BY p.podcast_id, p.title, p.cover_art_url
+            ORDER BY people_count DESC
+            LIMIT %s;
+        """, (top_n,))
+        shows = cur.fetchall()
+        show_ids = [s["podcast_id"] for s in shows]
+
+        if not show_ids:
+            cur.close()
+            conn.close()
+            return {"shows": [], "pairs": []}
+
+        cur.execute("""
+            SELECT a.podcast_id AS podcast_a, b.podcast_id AS podcast_b,
+                   COUNT(DISTINCT a.host_id) AS shared
+            FROM (
+                SELECT DISTINCT eh.host_id, e.podcast_id
+                FROM episode_host eh JOIN episodes e ON eh.episode_id = e.episode_id
+                WHERE e.podcast_id = ANY(%(ids)s)
+            ) a
+            JOIN (
+                SELECT DISTINCT eh.host_id, e.podcast_id
+                FROM episode_host eh JOIN episodes e ON eh.episode_id = e.episode_id
+                WHERE e.podcast_id = ANY(%(ids)s)
+            ) b ON a.host_id = b.host_id AND a.podcast_id < b.podcast_id
+            GROUP BY a.podcast_id, b.podcast_id;
+        """, {"ids": show_ids})
+        pairs = cur.fetchall()
+
+        cur.close()
+        conn.close()
+        return {"shows": shows, "pairs": pairs}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

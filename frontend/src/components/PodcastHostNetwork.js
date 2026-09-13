@@ -736,6 +736,12 @@ const PodcastHostNetwork = () => {
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             <a
+              href="/stats"
+              className="text-xs text-gray-400 hover:text-gray-600 border border-gray-200 rounded px-2 py-1 mt-1"
+            >
+              📊 Stats
+            </a>
+            <a
               href="/admin"
               className="text-xs text-gray-400 hover:text-gray-600 border border-gray-200 rounded px-2 py-1 mt-1"
             >

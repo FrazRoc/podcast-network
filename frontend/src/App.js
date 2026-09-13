@@ -5,10 +5,13 @@ import AdminPeople from './components/AdminPeople';
 import AdminShows from './components/AdminShows';
 import AdminEpisodes from './components/AdminEpisodes';
 import AdminLoginGate from './components/AdminLoginGate';
+import Stats from './components/Stats';
 
 function App() {
   const path = window.location.pathname;
 
+  if (path === '/stats' || path.startsWith('/stats/'))
+    return <Stats />;
   if (path === '/admin/images' || path.startsWith('/admin/images/'))
     return <AdminLoginGate><div className="w-full min-h-screen"><AdminImages /></div></AdminLoginGate>;
   if (path === '/admin/people' || path.startsWith('/admin/people/'))
