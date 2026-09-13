@@ -1689,13 +1689,16 @@ async def merge_people(keep_id: int, drop_id: int):
         cur  = conn.cursor()
 
         cur.execute("""
-            SELECT host_id, first_name || ' ' || last_name AS name
+            SELECT host_id, first_name || ' ' || last_name AS name,
+                   profile_image_url, twitter_handle, bluesky_handle, linkedin_url,
+                   bio, wikipedia, website_url, email, podchaser_id
             FROM hosts WHERE host_id IN (%s, %s)
         """, (keep_id, drop_id))
-        names = {r['host_id']: r['name'] for r in cur.fetchall()}
-        if keep_id not in names or drop_id not in names:
+        rows = {r['host_id']: r for r in cur.fetchall()}
+        if keep_id not in rows or drop_id not in rows:
             raise HTTPException(status_code=404, detail="One or both people not found")
-        keep_name, drop_name = names[keep_id], names[drop_id]
+        keep_name, drop_name = rows[keep_id]['name'], rows[drop_id]['name']
+        drop_profile = rows[drop_id]
 
         # Where both are credited on the same episode, Apple's human-curated
         # label outranks anything we inferred, so let it win before we drop the
@@ -1725,26 +1728,23 @@ async def merge_people(keep_id: int, drop_id: int):
         cur.execute("UPDATE host_podcast SET host_id = %s WHERE host_id = %s", (keep_id, drop_id))
         shows_moved = cur.rowcount
 
-        for table in ('suggestions', 'image_suggestions', 'host_roles', 'host_social_links'):
+        cur.execute("UPDATE suggestions SET host_id = %s WHERE host_id = %s", (keep_id, drop_id))
+
+        # These three are unique per host on a second column, so drop the rows
+        # that would collide before re-pointing the rest — a bare UPDATE would
+        # hit the constraint and roll the whole merge back.
+        for table, col in (('image_suggestions', 'image_url'),
+                           ('host_social_links', 'platform'),
+                           ('host_roles', 'podcast_name')):
+            cur.execute(
+                f"DELETE FROM {table} d USING {table} k "
+                f"WHERE d.host_id = %s AND k.host_id = %s AND k.{col} IS NOT DISTINCT FROM d.{col}",
+                (drop_id, keep_id)
+            )
             cur.execute(f"UPDATE {table} SET host_id = %s WHERE host_id = %s", (keep_id, drop_id))
 
         # Any alias pointing at the dropped record has to follow it.
         cur.execute("UPDATE host_aliases SET host_id = %s WHERE host_id = %s", (keep_id, drop_id))
-
-        # Keep whatever profile detail the survivor is missing.
-        cur.execute("""
-            UPDATE hosts k SET
-                profile_image_url = COALESCE(k.profile_image_url, d.profile_image_url),
-                twitter_handle    = COALESCE(k.twitter_handle,    d.twitter_handle),
-                bluesky_handle    = COALESCE(k.bluesky_handle,    d.bluesky_handle),
-                linkedin_url      = COALESCE(k.linkedin_url,      d.linkedin_url),
-                bio               = COALESCE(k.bio,               d.bio),
-                wikipedia         = COALESCE(k.wikipedia,         d.wikipedia),
-                website_url       = COALESCE(k.website_url,       d.website_url),
-                email             = COALESCE(k.email,             d.email)
-            FROM hosts d
-            WHERE k.host_id = %s AND d.host_id = %s
-        """, (keep_id, drop_id))
 
         # Record the spelling we are about to delete, unless it normalizes to
         # the same string as the survivor's name (nothing to remember then).
@@ -1758,6 +1758,25 @@ async def merge_people(keep_id: int, drop_id: int):
             alias_added = cur.rowcount > 0
 
         cur.execute("DELETE FROM hosts WHERE host_id = %s", (drop_id,))
+
+        # Keep every piece of profile detail across both records: the survivor
+        # wins where it already has a value and picks up the rest from the
+        # record being merged away, so a handle on either one is preserved.
+        #
+        # This has to run after the delete. email and podchaser_id are UNIQUE,
+        # so copying them across while both rows still exist trips the
+        # constraint and rolls the whole merge back. NULLIF covers fields a
+        # form might submit as an empty string, which COALESCE would otherwise
+        # treat as a real value and keep over the other record's actual data.
+        profile_fields = ('profile_image_url', 'twitter_handle', 'bluesky_handle',
+                          'linkedin_url', 'bio', 'wikipedia', 'website_url',
+                          'email', 'podchaser_id')
+        cur.execute(
+            "UPDATE hosts SET " + ", ".join(
+                f"{f} = COALESCE(NULLIF({f}, ''), %s)" for f in profile_fields
+            ) + " WHERE host_id = %s",
+            tuple(drop_profile[f] for f in profile_fields) + (keep_id,)
+        )
 
         # A show-level host whose episode credits still say Guest is the
         # mislabelling we correct everywhere else; merging often exposes more.
