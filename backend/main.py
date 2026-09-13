@@ -229,8 +229,10 @@ async def get_podcasts():
 
 @app.get("/api/stats/guest-appearances")
 async def get_guest_appearance_stats(limit: int = 200):
-    """Sorted list of people by episode appearance count — the data
-    behind the guest appearance long-tail chart on the public Stats page."""
+    """Sorted list of people by GUEST episode appearance count — a
+    permanent show host would otherwise dominate this (they're credited
+    on every episode of their own show), which says nothing about how
+    sought-after someone is across the ecosystem the way guest spots do."""
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -241,6 +243,7 @@ async def get_guest_appearance_stats(limit: int = 200):
                    COUNT(DISTINCT eh.episode_id) AS appearances
             FROM hosts h
             JOIN episode_host eh ON eh.host_id = h.host_id
+            WHERE eh.is_guest = true
             GROUP BY h.host_id, h.first_name, h.last_name, h.profile_image_url
             ORDER BY appearances DESC
             LIMIT %s;
@@ -249,7 +252,8 @@ async def get_guest_appearance_stats(limit: int = 200):
 
         cur.execute("""
             SELECT COUNT(DISTINCT h.host_id) AS total_people
-            FROM hosts h JOIN episode_host eh ON eh.host_id = h.host_id;
+            FROM hosts h JOIN episode_host eh ON eh.host_id = h.host_id
+            WHERE eh.is_guest = true;
         """)
         total_people = cur.fetchone()["total_people"]
 
