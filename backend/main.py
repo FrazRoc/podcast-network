@@ -1696,10 +1696,28 @@ async def add_show_host(apple_podcast_id: str, body: AddShowHostRequest):
             VALUES (%s, %s, 'Host', 'manual')
             ON CONFLICT (host_id, podcast_id) DO UPDATE SET role = 'Host', data_source = 'manual'
         """, (body.host_id, row["podcast_id"]))
+
+        # Reconcile existing episode credits: someone who hosts this show was
+        # very likely mislabelled "Guest" on its episodes by the name scanner.
+        # apple_verified rows are left alone — Apple's explicit per-episode
+        # label is more trustworthy than this inference (a host really can
+        # appear as a guest on a special episode of their own show).
+        cur.execute("""
+            UPDATE episode_host eh
+            SET is_guest = false, role = 'Host'
+            FROM episodes e
+            WHERE eh.episode_id = e.episode_id
+              AND eh.host_id = %s
+              AND e.podcast_id = %s
+              AND eh.is_guest = true
+              AND eh.data_source <> 'apple_verified'
+        """, (body.host_id, row["podcast_id"]))
+        credits_updated = cur.rowcount
+
         conn.commit()
         cur.close()
         conn.close()
-        return {"success": True}
+        return {"success": True, "credits_updated": credits_updated}
     except HTTPException:
         raise
     except Exception as e:

@@ -100,10 +100,19 @@ function ShowPanel({ selected, onDone, onCancel }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ host_id: hostId }),
       });
-      if (!res.ok) throw new Error((await res.json()).detail || 'Failed to add host');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Failed to add host');
       setHostQ('');
       setHostResults([]);
+      if (data.credits_updated > 0) {
+        setResult({
+          title: `Host added — ${data.credits_updated} existing episode credit${data.credits_updated !== 1 ? 's' : ''} updated`,
+          scraping: false,
+          message: 'Switched from Guest to Host on this show. Credits on other shows were left as Guest.',
+        });
+      }
       fetchHosts();
+      onDone?.();
     } catch (e) {
       setError(e.message);
     } finally {
@@ -364,7 +373,9 @@ function ShowPanel({ selected, onDone, onCancel }) {
 
       {result && (
         <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-xl text-sm">
-          <p className="font-semibold text-green-800">✅ {isEdit ? 'Scrape started for' : 'Added'}: {result.name}</p>
+          <p className="font-semibold text-green-800">
+            ✅ {result.title || `${isEdit ? 'Scrape started for' : 'Added'}: ${result.name}`}
+          </p>
           <p className="text-green-700 text-xs mt-0.5">
             {result.scraping
               ? 'Scrape started — check back in a few minutes'
