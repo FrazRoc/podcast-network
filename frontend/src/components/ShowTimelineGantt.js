@@ -6,6 +6,7 @@ const ROW_H = 16;
 const LABEL_W = 200;
 const CHART_W = 600;
 const ACTIVE_WINDOW_DAYS = 90;
+const CHART_START = new Date(2019, 0, 1); // a handful of episodes predate this; not worth the noise
 
 const parseDate = (s) => {
   const [y, m, d] = s.split('-').map(Number);
@@ -26,15 +27,17 @@ export default function ShowTimelineGantt() {
 
   const { shows, minDate, maxDate } = useMemo(() => {
     if (!data) return { shows: [], minDate: null, maxDate: null };
-    const shows = data.shows.map(s => ({
-      ...s,
-      earliest: parseDate(s.earliest_episode_date),
-      latest: parseDate(s.latest_episode_date),
-      dates: s.episode_dates.map(parseDate),
-    }));
-    const min = new Date(Math.min(...shows.map(s => s.earliest.getTime())));
+    const shows = data.shows
+      .map(s => ({
+        ...s,
+        earliest: parseDate(s.earliest_episode_date),
+        latest: parseDate(s.latest_episode_date),
+        dates: s.episode_dates.map(parseDate).filter(d => d >= CHART_START),
+      }))
+      .filter(s => s.latest >= CHART_START) // a show entirely before the cutoff has nothing to show
+      .map(s => ({ ...s, earliest: s.earliest < CHART_START ? CHART_START : s.earliest }));
     const max = new Date(); // scale to today, not just the latest episode, so dormancy is visible
-    return { shows, minDate: min, maxDate: max };
+    return { shows, minDate: CHART_START, maxDate: max };
   }, [data]);
 
   if (error) return <p className="text-sm text-red-500">Couldn't load this chart: {error}</p>;
