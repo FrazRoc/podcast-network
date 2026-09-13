@@ -350,9 +350,12 @@ def run(dry_run: bool = True, title_only: bool = False, min_length: int = 7):
         for host in hosts:
             host_id   = host['host_id']
             full_name = host['full_name']
+            # A name match for someone already recorded as this show's
+            # official host means "Host", not "Guest" — previously this
+            # case was just skipped entirely, leaving the host with no
+            # episode-level credit at all rather than a wrong one.
+            is_show_host = host_id in show_host_ids
 
-            if host_id in show_host_ids:
-                continue
             if len(full_name) < min_length:
                 continue
 
@@ -361,6 +364,7 @@ def run(dry_run: bool = True, title_only: bool = False, min_length: int = 7):
                     'episode_id': episode_id, 'host_id': host_id,
                     'full_name': full_name, 'podcast_title': podcast_title,
                     'episode_title': title, 'source': 'parsed_title',
+                    'is_show_host': is_show_host,
                 })
                 continue
 
@@ -370,6 +374,7 @@ def run(dry_run: bool = True, title_only: bool = False, min_length: int = 7):
                     'episode_id': episode_id, 'host_id': host_id,
                     'full_name': full_name, 'podcast_title': podcast_title,
                     'episode_title': title, 'source': 'parsed_desc',
+                    'is_show_host': is_show_host,
                 })
 
     logger.info(f"Found {len(matches)} matches")
@@ -403,13 +408,15 @@ def run(dry_run: bool = True, title_only: bool = False, min_length: int = 7):
 
     for m in matches:
         try:
+            is_guest = not m['is_show_host']
+            role = 'Guest' if is_guest else 'Host'
             cur.execute(
                 """
                 INSERT INTO episode_host (episode_id, host_id, is_guest, role, data_source)
-                VALUES (%s, %s, true, 'Guest', %s)
+                VALUES (%s, %s, %s, %s, %s)
                 ON CONFLICT (episode_id, host_id) DO NOTHING
                 """,
-                (m['episode_id'], m['host_id'], m['source'])
+                (m['episode_id'], m['host_id'], is_guest, role, m['source'])
             )
             if cur.rowcount > 0:
                 inserted += 1
