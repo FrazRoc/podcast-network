@@ -3,7 +3,7 @@ import GuestAppearanceChart from './GuestAppearanceChart';
 
 export default function Stats() {
   return (
-    <div className="min-h-screen bg-gray-100 font-sans">
+    <div className="h-screen overflow-y-auto bg-gray-100 font-sans">
       <header className="bg-white border-b border-gray-200 px-4 py-3 sm:px-6 sm:py-4 flex items-center gap-4">
         <a href="/" className="text-gray-400 hover:text-gray-600 text-sm">← Network</a>
         <h1 className="text-lg font-semibold text-gray-900">Stats</h1>
