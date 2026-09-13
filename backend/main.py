@@ -1046,13 +1046,18 @@ async def create_person(body: CreatePersonRequest):
         """, (first_name, last_name, image_url, twitter_handle, bluesky_handle, linkedin_url))
         host_id = cur.fetchone()['host_id']
 
-        # Scan all episodes for name matches
+        # Scan all episodes for name matches. A match on a show where this
+        # person is already a recorded official host means "Host", not
+        # "Guest" — same fix as episode_name_scanner.py's run() command.
         cur.execute("""
-            SELECT e.episode_id, e.title, e.description, p.title AS podcast_title
+            SELECT e.episode_id, e.title, e.description, e.podcast_id, p.title AS podcast_title
             FROM episodes e
             JOIN podcasts p ON e.podcast_id = p.podcast_id
         """)
         all_episodes = cur.fetchall()
+
+        cur.execute("SELECT podcast_id FROM host_podcast WHERE host_id = %s", (host_id,))
+        show_host_podcast_ids = {r['podcast_id'] for r in cur.fetchall()}
 
         name_lower = full_name.lower()
         links = []
@@ -1065,11 +1070,14 @@ async def create_person(body: CreatePersonRequest):
                 matched_source = 'parsed_desc'
 
             if matched_source:
+                is_show_host = ep['podcast_id'] in show_host_podcast_ids
+                is_guest = not is_show_host
+                role = 'Guest' if is_guest else 'Host'
                 cur.execute("""
                     INSERT INTO episode_host (episode_id, host_id, is_guest, role, data_source)
-                    VALUES (%s, %s, true, 'Guest', %s)
+                    VALUES (%s, %s, %s, %s, %s)
                     ON CONFLICT (episode_id, host_id) DO NOTHING
-                """, (ep['episode_id'], host_id, matched_source))
+                """, (ep['episode_id'], host_id, is_guest, role, matched_source))
                 if cur.rowcount > 0:
                     links.append({'podcast': ep['podcast_title'], 'episode': ep['title']})
 
@@ -1368,10 +1376,13 @@ async def scan_person_episodes(host_id: int):
         name_lower = name.lower()
 
         cur.execute("""
-            SELECT e.episode_id, e.title, e.description, p.title AS podcast_title
+            SELECT e.episode_id, e.title, e.description, e.podcast_id, p.title AS podcast_title
             FROM episodes e JOIN podcasts p ON e.podcast_id = p.podcast_id
         """)
         all_episodes = cur.fetchall()
+
+        cur.execute("SELECT podcast_id FROM host_podcast WHERE host_id = %s", (host_id,))
+        show_host_podcast_ids = {r['podcast_id'] for r in cur.fetchall()}
 
         links = []
         for ep in all_episodes:
@@ -1381,11 +1392,14 @@ async def scan_person_episodes(host_id: int):
             elif name_lower in (ep['description'] or '').lower():
                 matched_source = 'parsed_desc'
             if matched_source:
+                is_show_host = ep['podcast_id'] in show_host_podcast_ids
+                is_guest = not is_show_host
+                role = 'Guest' if is_guest else 'Host'
                 cur.execute("""
                     INSERT INTO episode_host (episode_id, host_id, is_guest, role, data_source)
-                    VALUES (%s, %s, true, 'Guest', %s)
+                    VALUES (%s, %s, %s, %s, %s)
                     ON CONFLICT (episode_id, host_id) DO NOTHING
-                """, (ep['episode_id'], host_id, matched_source))
+                """, (ep['episode_id'], host_id, is_guest, role, matched_source))
                 if cur.rowcount > 0:
                     links.append({'podcast': ep['podcast_title']})
 
