@@ -3,6 +3,7 @@
 # source ~/.bash_profile
 # python3 -m uvicorn main:app --reload
 
+import re
 import secrets
 
 from fastapi import FastAPI, HTTPException, Header, Depends
@@ -53,6 +54,28 @@ def is_allowed_image_url(url: str) -> bool:
         return False
     host = (parsed.hostname or '').lower()
     return any(host == suffix or host.endswith('.' + suffix) for suffix in ALLOWED_IMAGE_HOST_SUFFIXES)
+
+
+# Where a name splits into first/last is a guess, and different sources guess
+# differently — Apple gave us "Amy Myers" + "Jaffe" while this admin UI stored
+# "Amy" + "Myers Jaffe", producing two records for one person. Match on the
+# whole name instead, ignoring case, spacing and punctuation.
+NORMALIZED_NAME_SQL = "lower(regexp_replace(first_name || ' ' || last_name, '[^A-Za-z]', '', 'g'))"
+
+
+def normalize_full_name(name: str) -> str:
+    return re.sub(r'[^A-Za-z]', '', name or '').lower()
+
+
+def find_host_by_full_name(cur, name: str):
+    """Return the existing host_id for this person, however their name is split."""
+    cur.execute(
+        f"SELECT host_id FROM hosts WHERE {NORMALIZED_NAME_SQL} = %s ORDER BY host_id LIMIT 1",
+        (normalize_full_name(name),)
+    )
+    row = cur.fetchone()
+    return row['host_id'] if row else None
+
 
 app = FastAPI()
 
@@ -525,14 +548,16 @@ async def approve_suggestion(suggestion_id: int, body: NameOverrideRequest = Non
             last_name  = parts[-1] if len(parts) > 1 else ''
 
         # 1. Create or get host record
-        cur.execute("""
-            INSERT INTO hosts (first_name, last_name, data_source, created_at)
-            VALUES (%s, %s, 'approved_suggestion', NOW())
-            ON CONFLICT (first_name, last_name) DO UPDATE
-                SET first_name = EXCLUDED.first_name
-            RETURNING host_id
-        """, (first_name, last_name))
-        host_id = cur.fetchone()['host_id']
+        host_id = find_host_by_full_name(cur, name)
+        if host_id is None:
+            cur.execute("""
+                INSERT INTO hosts (first_name, last_name, data_source, created_at)
+                VALUES (%s, %s, 'approved_suggestion', NOW())
+                ON CONFLICT (first_name, last_name) DO UPDATE
+                    SET first_name = EXCLUDED.first_name
+                RETURNING host_id
+            """, (first_name, last_name))
+            host_id = cur.fetchone()['host_id']
 
         # 2. Link to the source episode
         cur.execute("""
@@ -660,14 +685,16 @@ async def approve_suggestion_only(suggestion_id: int, body: NameOverrideRequest 
             last_name  = parts[-1] if len(parts) > 1 else ''
 
         # Create or get host record
-        cur.execute("""
-            INSERT INTO hosts (first_name, last_name, data_source, created_at)
-            VALUES (%s, %s, 'approved_suggestion', NOW())
-            ON CONFLICT (first_name, last_name) DO UPDATE
-                SET first_name = EXCLUDED.first_name
-            RETURNING host_id
-        """, (first_name, last_name))
-        host_id = cur.fetchone()['host_id']
+        host_id = find_host_by_full_name(cur, name)
+        if host_id is None:
+            cur.execute("""
+                INSERT INTO hosts (first_name, last_name, data_source, created_at)
+                VALUES (%s, %s, 'approved_suggestion', NOW())
+                ON CONFLICT (first_name, last_name) DO UPDATE
+                    SET first_name = EXCLUDED.first_name
+                RETURNING host_id
+            """, (first_name, last_name))
+            host_id = cur.fetchone()['host_id']
 
         # Scan ALL episodes EXCEPT the source episode
         cur.execute("""
@@ -1048,16 +1075,13 @@ async def create_person(body: CreatePersonRequest):
         conn = get_db_connection()
         cur  = conn.cursor()
 
-        # Check if already exists
-        cur.execute(
-            "SELECT host_id FROM hosts WHERE first_name = %s AND last_name = %s",
-            (first_name, last_name)
-        )
-        existing = cur.fetchone()
-        if existing:
+        # Check if already exists — by whole name, so splitting a compound
+        # surname differently doesn't slip a second record past this check.
+        existing_id = find_host_by_full_name(cur, full_name)
+        if existing_id:
             cur.close()
             conn.close()
-            raise HTTPException(status_code=409, detail=f"{full_name} already exists (host_id={existing['host_id']})")
+            raise HTTPException(status_code=409, detail=f"{full_name} already exists (host_id={existing_id})")
 
         # Fetch image if handle provided
         image_url     = None

@@ -283,6 +283,17 @@ _HONORIFIC_RE = re.compile(
 )
 
 
+def normalize_full_name(name: str) -> str:
+    """Key a person by their whole name, ignoring case, spacing and punctuation.
+
+    Where a name splits into first/last is a guess, and different sources guess
+    differently — Apple gave us "Amy Myers" + "Jaffe" while the admin UI stored
+    "Amy" + "Myers Jaffe". Comparing on this key instead means both find the
+    same person rather than creating two.
+    """
+    return re.sub(r'[^A-Za-z]', '', name).lower()
+
+
 def strip_honorific(name: str) -> str:
     stripped = _HONORIFIC_RE.sub('', name.strip()).strip()
     # Only accept the strip if a first + last name survives it. Otherwise the
@@ -296,9 +307,15 @@ def get_or_create_host(cur, name: str, data_source: str) -> int:
     first_name = ' '.join(parts[:-1]) if len(parts) > 1 else name
     last_name = parts[-1] if len(parts) > 1 else ''
 
+    # Match on the whole name rather than our guess at the split — see
+    # normalize_full_name.
     cur.execute(
-        "SELECT host_id FROM hosts WHERE first_name = %s AND last_name = %s",
-        (first_name, last_name)
+        """
+        SELECT host_id FROM hosts
+        WHERE lower(regexp_replace(first_name || ' ' || last_name, '[^A-Za-z]', '', 'g')) = %s
+        ORDER BY host_id LIMIT 1
+        """,
+        (normalize_full_name(name),)
     )
     row = cur.fetchone()
     if row:

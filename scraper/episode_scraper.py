@@ -1,3 +1,4 @@
+import re
 import requests
 from bs4 import BeautifulSoup
 import psycopg2
@@ -102,16 +103,33 @@ class EpisodeHostScraper:
             name_parts = person['name'].split(' ', 1)
             first_name = name_parts[0]
             last_name = name_parts[1] if len(name_parts) > 1 else ''
-            
+
+            # Find by whole name first — this file guesses the split at the
+            # first space while the other scrapers guess at the last, so a
+            # lookup on (first_name, last_name) misses people they created.
             cur.execute("""
-                INSERT INTO hosts (first_name, last_name, profile_image_url)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (first_name, last_name) 
-                DO UPDATE SET profile_image_url = EXCLUDED.profile_image_url
-                RETURNING host_id
-            """, (first_name, last_name, person.get('image_url')))
-            
-            host_id = cur.fetchone()[0]
+                SELECT host_id FROM hosts
+                WHERE lower(regexp_replace(first_name || ' ' || last_name, '[^A-Za-z]', '', 'g')) = %s
+                ORDER BY host_id LIMIT 1
+            """, (re.sub(r'[^A-Za-z]', '', person['name']).lower(),))
+            row = cur.fetchone()
+
+            if row:
+                host_id = row[0]
+                if person.get('image_url'):
+                    cur.execute(
+                        "UPDATE hosts SET profile_image_url = COALESCE(profile_image_url, %s) WHERE host_id = %s",
+                        (person['image_url'], host_id)
+                    )
+            else:
+                cur.execute("""
+                    INSERT INTO hosts (first_name, last_name, profile_image_url)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (first_name, last_name)
+                    DO UPDATE SET profile_image_url = EXCLUDED.profile_image_url
+                    RETURNING host_id
+                """, (first_name, last_name, person.get('image_url')))
+                host_id = cur.fetchone()[0]
             
             # Link to episode
             is_guest = 'guest' in person['role'].lower()
