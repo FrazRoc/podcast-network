@@ -96,13 +96,24 @@ def clean_description(text: str) -> str:
 # ------------------------------------------------------------------
 
 def get_hosts(conn) -> list[dict]:
-    """Load all known hosts, longest names first."""
+    """Load every name we can match, longest first.
+
+    Aliases come through as extra rows pointing at the same host_id, so an
+    episode that says "Nat Bullard" credits the same person as one that says
+    "Nathaniel Bullard" instead of creating a second record.
+    """
     cur = conn.cursor()
     cur.execute("""
         SELECT host_id, first_name, last_name,
                first_name || ' ' || last_name AS full_name
         FROM hosts
-        ORDER BY LENGTH(first_name || last_name) DESC
+        UNION ALL
+        SELECT a.host_id,
+               split_part(a.alias_name, ' ', 1) AS first_name,
+               NULLIF(substr(a.alias_name, strpos(a.alias_name, ' ') + 1), a.alias_name) AS last_name,
+               a.alias_name AS full_name
+        FROM host_aliases a
+        ORDER BY LENGTH(full_name) DESC
     """)
     rows = cur.fetchall()
     cur.close()
@@ -113,9 +124,17 @@ def get_hosts(conn) -> list[dict]:
 
 
 def get_known_names(conn) -> set[str]:
-    """Return lowercase set of all known host full names."""
+    """Return lowercase set of all known host full names, aliases included.
+
+    Without the aliases a merged-away spelling would be re-suggested as a new
+    person after every scan.
+    """
     cur = conn.cursor()
-    cur.execute("SELECT first_name || ' ' || last_name FROM hosts")
+    cur.execute("""
+        SELECT first_name || ' ' || last_name FROM hosts
+        UNION ALL
+        SELECT alias_name FROM host_aliases
+    """)
     names = {r[0].lower() for r in cur.fetchall()}
     cur.close()
     return names

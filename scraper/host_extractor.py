@@ -313,9 +313,11 @@ def get_or_create_host(cur, name: str, data_source: str) -> int:
         """
         SELECT host_id FROM hosts
         WHERE lower(regexp_replace(first_name || ' ' || last_name, '[^A-Za-z]', '', 'g')) = %s
-        ORDER BY host_id LIMIT 1
+        UNION ALL
+        SELECT host_id FROM host_aliases WHERE normalized_name = %s
+        LIMIT 1
         """,
-        (normalize_full_name(name),)
+        (normalize_full_name(name), normalize_full_name(name))
     )
     row = cur.fetchone()
     if row:

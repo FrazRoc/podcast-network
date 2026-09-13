@@ -38,6 +38,90 @@ const SORTS = [
 const emptyForm = { first_name: '', last_name: '', twitter_url: '', bluesky_url: '', linkedin_url: '' };
 
 // ─── Right panel: Add or Edit ──────────────────────────────────────────────────
+// Other spellings of this person's name. Scans match these as well as the
+// canonical name, so an episode saying "Nat Bullard" credits Nathaniel Bullard
+// instead of creating a second record.
+function AliasEditor({ hostId }) {
+  const [items, setItems] = useState([]);
+  const [value, setValue] = useState('');
+  const [busy, setBusy]   = useState(false);
+  const [error, setError] = useState('');
+
+  const load = useCallback(() => {
+    adminFetch(`${API}/people/${hostId}/aliases`)
+      .then(r => r.json())
+      .then(d => setItems(d.items || []))
+      .catch(console.error);
+  }, [hostId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const add = async () => {
+    const name = value.trim();
+    if (!name || busy) return;
+    setBusy(true); setError('');
+    try {
+      const res = await adminFetch(`${API}/people/${hostId}/aliases`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ alias_name: name }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || `API error ${res.status}`);
+      setValue('');
+      load();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (aliasId) => {
+    setBusy(true);
+    try {
+      await adminFetch(`${API}/people/aliases/${aliasId}`, { method: 'DELETE' });
+      load();
+    } catch (e) { console.error(e); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="mb-4">
+      <label className="block text-xs font-medium text-gray-500 mb-1">
+        Also known as
+      </label>
+      <p className="text-xs text-gray-400 mb-2">
+        Other spellings found in episode text. Scans match these too.
+      </p>
+      {items.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {items.map(a => (
+            <span key={a.alias_id}
+              className="inline-flex items-center gap-1 text-xs bg-gray-100 text-gray-700 rounded-full pl-2.5 pr-1 py-1">
+              {a.alias_name}
+              <button onClick={() => remove(a.alias_id)} disabled={busy}
+                className="text-gray-400 hover:text-red-600 px-1" title="Remove">×</button>
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="flex gap-1.5">
+        <input type="text" value={value}
+          onChange={e => setValue(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
+          placeholder="e.g. Nat Bullard"
+          className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none" />
+        <button onClick={add} disabled={busy || !value.trim()}
+          className="px-3 py-2 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50">
+          Add
+        </button>
+      </div>
+      {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+    </div>
+  );
+}
+
 function PersonPanel({ selected, onSaved, onCancel }) {
   const [form, setForm]         = useState(emptyForm);
   const [submitting, setSubmitting] = useState(false);
@@ -209,6 +293,8 @@ function PersonPanel({ selected, onSaved, onCancel }) {
           )}
         </div>
       )}
+
+      {isEdit && <AliasEditor hostId={selected.host_id} />}
 
       <div className="space-y-3 mb-4">
         <div className="grid grid-cols-2 gap-3">

@@ -4,6 +4,7 @@ const NAV_LINKS = [
   { href: '/admin/shows', label: 'Shows' },
   { href: '/admin/episodes', label: 'Episodes' },
   { href: '/admin/people', label: 'People' },
+  { href: '/admin/duplicates', label: 'Duplicates' },
 ];
 
 export default function AdminHeader({ active, right }) {

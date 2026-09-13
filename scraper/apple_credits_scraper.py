@@ -165,9 +165,15 @@ class AppleCreditsScraper:
             """
             SELECT host_id, profile_image_url FROM hosts
             WHERE lower(regexp_replace(first_name || ' ' || last_name, '[^A-Za-z]', '', 'g')) = %s
-            ORDER BY host_id LIMIT 1
+            UNION ALL
+            -- A recorded alias means this spelling belongs to someone we
+            -- already have; credit them rather than making a new record.
+            SELECT h.host_id, h.profile_image_url FROM host_aliases a
+            JOIN hosts h ON h.host_id = a.host_id
+            WHERE a.normalized_name = %s
+            LIMIT 1
             """,
-            (normalize_full_name(name),)
+            (normalize_full_name(name), normalize_full_name(name))
         )
         row = cur.fetchone()
         if row:

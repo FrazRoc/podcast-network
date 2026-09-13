@@ -68,16 +68,36 @@ def normalize_full_name(name: str) -> str:
 
 
 def find_host_by_full_name(cur, name: str):
-    """Return the existing host_id for this person, however their name is split."""
+    """Return the existing host_id for this person, however their name is written.
+
+    Checks recorded aliases as well as the canonical name, so a person merged
+    under one spelling is still found by the other — otherwise the next episode
+    using the old spelling would create the duplicate all over again.
+    """
+    key = normalize_full_name(name)
     cur.execute(
         f"SELECT host_id FROM hosts WHERE {NORMALIZED_NAME_SQL} = %s ORDER BY host_id LIMIT 1",
-        (normalize_full_name(name),)
+        (key,)
     )
+    row = cur.fetchone()
+    if row:
+        return row['host_id']
+
+    cur.execute("SELECT host_id FROM host_aliases WHERE normalized_name = %s", (key,))
     row = cur.fetchone()
     return row['host_id'] if row else None
 
 
 app = FastAPI()
+
+
+class AliasRequest(BaseModel):
+    alias_name: str = None
+
+
+class DismissPairRequest(BaseModel):
+    host_id_a: int
+    host_id_b: int
 
 
 class NameOverrideRequest(BaseModel):
@@ -1178,6 +1198,191 @@ async def create_person(body: CreatePersonRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# Diminutives that aren't simply a prefix of the full name, so the prefix rule
+# below can't catch them. Prefix handles Al/Albert, Nat/Nathaniel, Dan/Daniel,
+# Matt/Matthew and most of the rest on its own.
+_NICKNAMES = {
+    ('bob', 'robert'), ('bill', 'william'), ('dick', 'richard'), ('jack', 'john'),
+    ('peggy', 'margaret'), ('betty', 'elizabeth'), ('liz', 'elizabeth'),
+    ('hank', 'henry'), ('chuck', 'charles'), ('rick', 'richard'), ('ted', 'edward'),
+    ('ned', 'edward'), ('tony', 'anthony'), ('kate', 'katherine'),
+    ('kathy', 'katherine'), ('sandy', 'sandra'), ('jim', 'james'),
+    ('greg', 'gregory'), ('mike', 'michael'), ('joe', 'joseph'), ('tom', 'thomas'),
+}
+
+
+def _name_tokens(name: str) -> list:
+    return [t for t in re.split(r'[^A-Za-z]+', (name or '').lower()) if t]
+
+
+def _duplicate_kind(a_tokens: list, b_tokens: list):
+    """Classify two names as a possible same-person pair, or None.
+
+    Compares whole tokens, never substrings — an earlier substring-based pass
+    matched "Jordan Yates" to "Dan Yates" because "Jordan" contains "Dan".
+    """
+    if not a_tokens or not b_tokens or a_tokens[-1] != b_tokens[-1]:
+        return None  # require a shared surname
+
+    sa, sb = set(a_tokens), set(b_tokens)
+    if sa == sb:
+        return None
+
+    # One name carries a middle name or initial the other omits.
+    if sa < sb or sb < sa:
+        short, long_ = (a_tokens, b_tokens) if sa < sb else (b_tokens, a_tokens)
+        return 'middle_name' if short[0] == long_[0] else None
+
+    # Same shape, only the first name differs.
+    if len(a_tokens) == len(b_tokens) and a_tokens[1:] == b_tokens[1:]:
+        x, y = a_tokens[0], b_tokens[0]
+        if len(x) == 1 or len(y) == 1:
+            return 'initial' if x[0] == y[0] else None
+        short, long_ = (x, y) if len(x) < len(y) else (y, x)
+        if long_.startswith(short) and len(short) >= 2:
+            return 'shortened'
+        if (short, long_) in _NICKNAMES:
+            return 'nickname'
+    return None
+
+
+@app.get("/api/admin/people/duplicates", dependencies=[Depends(verify_admin)])
+async def find_duplicate_people():
+    """Surface possible duplicate people for a human to judge.
+
+    Never merges anything. Unlike an exact-name duplicate, a shortened first
+    name is not proof: "Jay Smith" and "Jayson Smith" may be two people, and
+    any rule loose enough to catch Al/Albert Gore also catches those.
+    """
+    try:
+        conn = get_db_connection()
+        cur  = conn.cursor()
+
+        cur.execute("""
+            SELECT h.host_id, h.first_name, h.last_name,
+                   h.first_name || ' ' || h.last_name AS name,
+                   h.twitter_handle, h.bluesky_handle, h.profile_image_url,
+                   (SELECT COUNT(*) FROM episode_host eh WHERE eh.host_id = h.host_id) AS credits
+            FROM hosts h
+        """)
+        people = cur.fetchall()
+
+        cur.execute("SELECT host_id_a, host_id_b FROM not_duplicate_pairs")
+        dismissed = {(r['host_id_a'], r['host_id_b']) for r in cur.fetchall()}
+
+        # Block on surname so this stays linear-ish rather than comparing all
+        # ~2,000 people against each other.
+        by_surname = {}
+        for p in people:
+            p['tokens'] = _name_tokens(p['name'])
+            if p['tokens']:
+                by_surname.setdefault(p['tokens'][-1], []).append(p)
+
+        candidates = []
+        for group in by_surname.values():
+            for i in range(len(group)):
+                for j in range(i + 1, len(group)):
+                    a, b = group[i], group[j]
+                    kind = _duplicate_kind(a['tokens'], b['tokens'])
+                    if not kind:
+                        continue
+                    pair = tuple(sorted((a['host_id'], b['host_id'])))
+                    if pair in dismissed:
+                        continue
+                    candidates.append((kind, a, b))
+
+        if not candidates:
+            cur.close()
+            conn.close()
+            return {"items": [], "total": 0}
+
+        pair_ids = [(a['host_id'], b['host_id']) for _, a, b in candidates]
+
+        cur.execute("""
+            SELECT p.a, p.b,
+                   COUNT(DISTINCT ea.episode_id) AS shared_episodes
+            FROM (SELECT * FROM unnest(%s::int[], %s::int[]) AS t(a, b)) p
+            JOIN episode_host ea ON ea.host_id = p.a
+            JOIN episode_host eb ON eb.host_id = p.b AND eb.episode_id = ea.episode_id
+            GROUP BY p.a, p.b
+        """, ([x for x, _ in pair_ids], [y for _, y in pair_ids]))
+        shared_eps = {(r['a'], r['b']): r['shared_episodes'] for r in cur.fetchall()}
+
+        cur.execute("""
+            SELECT p.a, p.b, COUNT(DISTINCT e1.podcast_id) AS shared_shows
+            FROM (SELECT * FROM unnest(%s::int[], %s::int[]) AS t(a, b)) p
+            JOIN episode_host h1 ON h1.host_id = p.a
+            JOIN episodes e1 ON e1.episode_id = h1.episode_id
+            JOIN episode_host h2 ON h2.host_id = p.b
+            JOIN episodes e2 ON e2.episode_id = h2.episode_id AND e2.podcast_id = e1.podcast_id
+            GROUP BY p.a, p.b
+        """, ([x for x, _ in pair_ids], [y for _, y in pair_ids]))
+        shared_shows = {(r['a'], r['b']): r['shared_shows'] for r in cur.fetchall()}
+
+        items = []
+        for kind, a, b in candidates:
+            key = (a['host_id'], b['host_id'])
+            eps   = shared_eps.get(key, 0)
+            shows = shared_shows.get(key, 0)
+            same_social = bool(
+                (a['twitter_handle'] and a['twitter_handle'] == b['twitter_handle']) or
+                (a['bluesky_handle'] and a['bluesky_handle'] == b['bluesky_handle']) or
+                (a['profile_image_url'] and a['profile_image_url'] == b['profile_image_url'])
+            )
+
+            # Both spellings credited on one episode almost always means one
+            # episode's text was read two ways, not that two people appeared.
+            if same_social or (eps > 0 and shows > 0):
+                confidence = 'strong'
+            elif eps > 0 or shows > 0:
+                confidence = 'likely'
+            else:
+                confidence = 'review'
+
+            keep, drop = (a, b) if a['credits'] >= b['credits'] else (b, a)
+            items.append({
+                "kind": kind,
+                "confidence": confidence,
+                "suggested_keep_id": keep['host_id'],
+                "suggested_keep_name": keep['name'],
+                "suggested_drop_id": drop['host_id'],
+                "suggested_drop_name": drop['name'],
+                "keep_credits": keep['credits'],
+                "drop_credits": drop['credits'],
+                "shared_episodes": eps,
+                "shared_shows": shows,
+                "same_social": same_social,
+            })
+
+        rank = {'strong': 0, 'likely': 1, 'review': 2}
+        items.sort(key=lambda i: (rank[i['confidence']], -(i['keep_credits'] + i['drop_credits'])))
+
+        cur.close()
+        conn.close()
+        return {"items": items, "total": len(items)}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/people/duplicates/dismiss", dependencies=[Depends(verify_admin)])
+async def dismiss_duplicate_pair(body: DismissPairRequest):
+    """Mark two people as genuinely different so the pair stops resurfacing."""
+    a, b = sorted((body.host_id_a, body.host_id_b))
+    if a == b:
+        raise HTTPException(status_code=400, detail="Need two different people")
+    conn = get_db_connection()
+    cur  = conn.cursor()
+    cur.execute("""
+        INSERT INTO not_duplicate_pairs (host_id_a, host_id_b)
+        VALUES (%s, %s) ON CONFLICT DO NOTHING
+    """, (a, b))
+    conn.commit()
+    cur.close()
+    conn.close()
+    return {"success": True}
+
+
 @app.get("/api/admin/people/{host_id}", dependencies=[Depends(verify_admin)])
 async def get_person(host_id: int):
     """Single-person summary — used for deep-linking to a person who may
@@ -1427,6 +1632,209 @@ async def delete_person(host_id: int):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/people/{keep_id}/merge/{drop_id}", dependencies=[Depends(verify_admin)])
+async def merge_people(keep_id: int, drop_id: int):
+    """Fold one person's record into another and keep their name matchable.
+
+    The dropped record's name is recorded as an alias in the same transaction.
+    That is the point of the whole operation: without it the next episode that
+    spells the person the old way would match nothing and the duplicate would
+    come straight back.
+    """
+    if keep_id == drop_id:
+        raise HTTPException(status_code=400, detail="Cannot merge a person into themselves")
+
+    try:
+        conn = get_db_connection()
+        cur  = conn.cursor()
+
+        cur.execute("""
+            SELECT host_id, first_name || ' ' || last_name AS name
+            FROM hosts WHERE host_id IN (%s, %s)
+        """, (keep_id, drop_id))
+        names = {r['host_id']: r['name'] for r in cur.fetchall()}
+        if keep_id not in names or drop_id not in names:
+            raise HTTPException(status_code=404, detail="One or both people not found")
+        keep_name, drop_name = names[keep_id], names[drop_id]
+
+        # Where both are credited on the same episode, Apple's human-curated
+        # label outranks anything we inferred, so let it win before we drop the
+        # duplicate row.
+        cur.execute("""
+            UPDATE episode_host k
+            SET is_guest = d.is_guest, role = d.role, data_source = d.data_source
+            FROM episode_host d
+            WHERE k.host_id = %s AND d.host_id = %s AND k.episode_id = d.episode_id
+              AND d.data_source = 'apple_verified' AND k.data_source <> 'apple_verified'
+        """, (keep_id, drop_id))
+        labels_corrected = cur.rowcount
+
+        cur.execute("""
+            DELETE FROM episode_host d USING episode_host k
+            WHERE d.host_id = %s AND k.host_id = %s AND k.episode_id = d.episode_id
+        """, (drop_id, keep_id))
+        duplicate_credits = cur.rowcount
+
+        cur.execute("UPDATE episode_host SET host_id = %s WHERE host_id = %s", (keep_id, drop_id))
+        credits_moved = cur.rowcount
+
+        cur.execute("""
+            DELETE FROM host_podcast d USING host_podcast k
+            WHERE d.host_id = %s AND k.host_id = %s AND k.podcast_id = d.podcast_id
+        """, (drop_id, keep_id))
+        cur.execute("UPDATE host_podcast SET host_id = %s WHERE host_id = %s", (keep_id, drop_id))
+        shows_moved = cur.rowcount
+
+        for table in ('suggestions', 'image_suggestions', 'host_roles', 'host_social_links'):
+            cur.execute(f"UPDATE {table} SET host_id = %s WHERE host_id = %s", (keep_id, drop_id))
+
+        # Any alias pointing at the dropped record has to follow it.
+        cur.execute("UPDATE host_aliases SET host_id = %s WHERE host_id = %s", (keep_id, drop_id))
+
+        # Keep whatever profile detail the survivor is missing.
+        cur.execute("""
+            UPDATE hosts k SET
+                profile_image_url = COALESCE(k.profile_image_url, d.profile_image_url),
+                twitter_handle    = COALESCE(k.twitter_handle,    d.twitter_handle),
+                bluesky_handle    = COALESCE(k.bluesky_handle,    d.bluesky_handle),
+                linkedin_url      = COALESCE(k.linkedin_url,      d.linkedin_url),
+                bio               = COALESCE(k.bio,               d.bio),
+                wikipedia         = COALESCE(k.wikipedia,         d.wikipedia),
+                website_url       = COALESCE(k.website_url,       d.website_url),
+                email             = COALESCE(k.email,             d.email)
+            FROM hosts d
+            WHERE k.host_id = %s AND d.host_id = %s
+        """, (keep_id, drop_id))
+
+        # Record the spelling we are about to delete, unless it normalizes to
+        # the same string as the survivor's name (nothing to remember then).
+        alias_added = False
+        if normalize_full_name(drop_name) != normalize_full_name(keep_name):
+            cur.execute("""
+                INSERT INTO host_aliases (host_id, alias_name, normalized_name, source)
+                VALUES (%s, %s, %s, 'merge')
+                ON CONFLICT (normalized_name) DO NOTHING
+            """, (keep_id, drop_name, normalize_full_name(drop_name)))
+            alias_added = cur.rowcount > 0
+
+        cur.execute("DELETE FROM hosts WHERE host_id = %s", (drop_id,))
+
+        # A show-level host whose episode credits still say Guest is the
+        # mislabelling we correct everywhere else; merging often exposes more.
+        cur.execute("""
+            UPDATE episode_host eh
+            SET is_guest = false, role = 'Host'
+            FROM episodes e, host_podcast hp
+            WHERE eh.episode_id = e.episode_id
+              AND hp.host_id = eh.host_id AND hp.podcast_id = e.podcast_id
+              AND eh.host_id = %s
+              AND eh.is_guest = true AND eh.data_source <> 'apple_verified'
+        """, (keep_id,))
+        roles_reconciled = cur.rowcount
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return {
+            "success": True,
+            "kept": keep_name,
+            "merged": drop_name,
+            "alias_added": alias_added,
+            "credits_moved": credits_moved,
+            "duplicate_credits_removed": duplicate_credits,
+            "labels_corrected": labels_corrected,
+            "shows_moved": shows_moved,
+            "roles_reconciled": roles_reconciled,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/people/{host_id}/aliases", dependencies=[Depends(verify_admin)])
+async def list_aliases(host_id: int):
+    conn = get_db_connection()
+    cur  = conn.cursor()
+    cur.execute("""
+        SELECT alias_id, alias_name, source, created_at
+        FROM host_aliases WHERE host_id = %s ORDER BY alias_name
+    """, (host_id,))
+    items = cur.fetchall()
+    cur.close()
+    conn.close()
+    return {"items": items}
+
+
+@app.post("/api/admin/people/{host_id}/aliases", dependencies=[Depends(verify_admin)])
+async def add_alias(host_id: int, body: AliasRequest):
+    """Record another spelling for someone, so scans pick up either form."""
+    name = (body.alias_name or '').strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="alias_name is required")
+
+    key = normalize_full_name(name)
+    if not key:
+        raise HTTPException(status_code=400, detail="alias_name must contain letters")
+
+    try:
+        conn = get_db_connection()
+        cur  = conn.cursor()
+
+        cur.execute("SELECT 1 FROM hosts WHERE host_id = %s", (host_id,))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Person not found")
+
+        # An alias must not collide with a real person, or scans would credit
+        # the wrong record.
+        cur.execute(
+            f"SELECT host_id, first_name || ' ' || last_name AS name FROM hosts WHERE {NORMALIZED_NAME_SQL} = %s",
+            (key,)
+        )
+        clash = cur.fetchone()
+        if clash and clash['host_id'] != host_id:
+            raise HTTPException(
+                status_code=409,
+                detail=f"{name} is already a person ({clash['name']}, host_id={clash['host_id']}). Merge them instead."
+            )
+
+        cur.execute("""
+            INSERT INTO host_aliases (host_id, alias_name, normalized_name, source)
+            VALUES (%s, %s, %s, 'manual')
+            ON CONFLICT (normalized_name) DO NOTHING
+            RETURNING alias_id
+        """, (host_id, name, key))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=409, detail=f"{name} is already an alias of someone")
+
+        conn.commit()
+        cur.close()
+        conn.close()
+        return {"success": True, "alias_id": row['alias_id'], "alias_name": name}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/admin/people/aliases/{alias_id}", dependencies=[Depends(verify_admin)])
+async def delete_alias(alias_id: int):
+    conn = get_db_connection()
+    cur  = conn.cursor()
+    cur.execute("DELETE FROM host_aliases WHERE alias_id = %s RETURNING alias_name", (alias_id,))
+    row = cur.fetchone()
+    conn.commit()
+    cur.close()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Alias not found")
+    return {"success": True, "alias_name": row['alias_name']}
 
 
 @app.post("/api/admin/people/{host_id}/scan", dependencies=[Depends(verify_admin)])

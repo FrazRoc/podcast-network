@@ -107,11 +107,14 @@ class EpisodeHostScraper:
             # Find by whole name first — this file guesses the split at the
             # first space while the other scrapers guess at the last, so a
             # lookup on (first_name, last_name) misses people they created.
+            norm = re.sub(r'[^A-Za-z]', '', person['name']).lower()
             cur.execute("""
                 SELECT host_id FROM hosts
                 WHERE lower(regexp_replace(first_name || ' ' || last_name, '[^A-Za-z]', '', 'g')) = %s
-                ORDER BY host_id LIMIT 1
-            """, (re.sub(r'[^A-Za-z]', '', person['name']).lower(),))
+                UNION ALL
+                SELECT host_id FROM host_aliases WHERE normalized_name = %s
+                LIMIT 1
+            """, (norm, norm))
             row = cur.fetchone()
 
             if row:
