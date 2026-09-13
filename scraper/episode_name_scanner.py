@@ -257,6 +257,23 @@ _FALSE_POSITIVE_WORDS = {
 }
 
 
+# Honorifics that show up glued to the front of a captured name. The capture
+# regexes each try to skip these, but they only cover the forms they list —
+# "Professor" slipped past a list containing "Prof" and created a separate
+# "Professor Tristan Smith" person. Stripping here catches every path.
+_HONORIFIC_RE = re.compile(
+    r'^(?:(?:Dr|Prof|Professor|Mr|Ms|Mrs|Miss|Sir|Dame|Rev|Senator|Sen|'
+    r'Representative|Rep|Congressman|Congresswoman|Governor|Gov|Mayor|'
+    r'President|Secretary|Ambassador|Admiral|General|Captain|Lord|Lady)\.?\s+)+',
+    re.IGNORECASE
+)
+
+
+def strip_honorific(name: str) -> str:
+    """Remove any leading titles so "Dr. Leah Stokes" and "Leah Stokes" are one person."""
+    return _HONORIFIC_RE.sub('', name.strip()).strip()
+
+
 def _valid_name(name: str) -> bool:
     if not name or len(name) < 7: return False
     words = name.split()
@@ -276,7 +293,7 @@ def extract_candidate_names(text: str) -> list[tuple[str, str]]:
     seen = set()
 
     def add(name, pos):
-        name = name.strip()
+        name = strip_honorific(name)
         if _valid_name(name) and name.lower() not in seen:
             seen.add(name.lower())
             start = max(0, pos - 60)
@@ -574,171 +591,4 @@ examples:
             dry_run=(args.command == 'dry-run'),
             title_only=args.title_only,
             min_length=args.min_length,
-        )# ------------------------------------------------------------------
-# NAME EXTRACTION (for suggest mode)
-# ------------------------------------------------------------------
-
-_TITLE_WORDS = {
-    'dr', 'prof', 'mr', 'ms', 'mrs', 'senator', 'sen', 'rep', 'representative',
-    'ceo', 'cto', 'cfo', 'coo', 'governor', 'gov', 'secretary', 'director',
-    'mayor', 'president', 'hawaii', 'california', 'zero', 'energyhub', 'homes',
-    'camus', 'google', 'amazon', 'microsoft', 'apple', 'meta',
-}
-
-_FALSE_POSITIVE_WORDS = {
-    'how', 'why', 'what', 'when', 'where', 'clean', 'green', 'solar', 'wind',
-    'grid', 'power', 'energy', 'climate', 'carbon', 'hydrogen', 'nuclear',
-    'data', 'center', 'tech', 'market', 'global', 'local', 'state', 'federal',
-    'new', 'old', 'big', 'small', 'me', 'us', 'the', 'this', 'that', 'an', 'a',
-    'taming', 'virtual', 'rewiring', 'electric', 'renewable', 'battery',
-}
-
-_INTRO_RE = re.compile(
-    r'(?:with|joined by|featuring|speaks?\s+with|talks?\s+(?:to|with)|'
-    r'interviews?|welcomes?|sits?\s+down\s+with|chats?\s+with|'
-    r'talk(?:s|ed)?\s+(?:to|with))\s+'
-    r'((?:[A-Z][A-Za-z\u00C0-\u017E-]+\s+){1,5}[A-Z][A-Za-z\u00C0-\u017E-]+)',
-    re.IGNORECASE
-)
-
-
-
-_JOINS_RE = re.compile(
-    # Exactly 2 words (First Last) — orgs tend to be 3+ words like "Good Food Institute"
-    r'([A-Z][a-z]+\s+[A-Z][a-z]+(?:-[A-Z][a-z]+)?)\s+joins?\s+(?:me|us|host|the\s+show)',
-    re.IGNORECASE
-)
-
-
-
-
-def _extract_name(raw: str):
-    """Strip title prefixes and trailing noise, return clean 2-3 word name or None."""
-    words = raw.strip().split()
-    # Strip leading title words
-    while words and words[0].lower().rstrip('.') in _TITLE_WORDS:
-        words = words[1:]
-    if not words:
-        return None
-    # Take words until we hit a stop condition
-    name_words = []
-    for w in words[:4]:
-        clean = w.rstrip('.,').lower()
-        if clean in _FALSE_POSITIVE_WORDS or clean in _TITLE_WORDS or clean == 'of':
-            break
-        if not (w[0].isupper() or ord(w[0]) > 127):
-            break
-        name_words.append(w.rstrip('.,'))
-    if len(name_words) < 2:
-        return None
-    return ' '.join(name_words[:3])
-
-
-# ------------------------------------------------------------------
-# SCANNING — known names (run mode)
-# ------------------------------------------------------------------
-
-def name_in_text(full_name: str, text: str) -> bool:
-    return full_name.lower() in text.lower()
-
-
-def run(dry_run: bool = True, title_only: bool = False, min_length: int = 7):
-    conn = psycopg2.connect(DB)
-    hosts = get_hosts(conn)
-    episodes = get_uncredited_episodes(conn)
-    show_hosts = get_show_hosts(conn)
-
-    logger.info(f"Scanning {len(episodes)} uncredited episodes against {len(hosts)} known people...")
-
-    matches = []
-
-    for episode in episodes:
-        episode_id    = episode['episode_id']
-        podcast_id    = episode['podcast_id']
-        podcast_title = episode['podcast_title']
-        title         = episode['title'] or ''
-        description   = episode['description'] or ''
-        show_host_ids = show_hosts.get(podcast_id, set())
-        clean_desc    = clean_description(description) if not title_only else ''
-
-        for host in hosts:
-            host_id   = host['host_id']
-            full_name = host['full_name']
-
-            if host_id in show_host_ids:
-                continue
-            if len(full_name) < min_length:
-                continue
-
-            if name_in_text(full_name, title):
-                matches.append({
-                    'episode_id': episode_id, 'host_id': host_id,
-                    'full_name': full_name, 'podcast_title': podcast_title,
-                    'episode_title': title, 'source': 'parsed_title',
-                })
-                continue
-
-            if not title_only and clean_desc and podcast_title not in DESC_SCAN_SKIP_SHOWS \
-                    and name_in_text(full_name, clean_desc):
-                matches.append({
-                    'episode_id': episode_id, 'host_id': host_id,
-                    'full_name': full_name, 'podcast_title': podcast_title,
-                    'episode_title': title, 'source': 'parsed_desc',
-                })
-
-    logger.info(f"Found {len(matches)} matches")
-
-    if not matches:
-        print("No matches found.")
-        conn.close()
-        return
-
-    by_person = defaultdict(list)
-    for m in matches:
-        by_person[m['full_name']].append(m)
-
-    print(f"\n{'DRY RUN — ' if dry_run else ''}Found {len(matches)} matches across {len(by_person)} people:\n")
-
-    for name, person_matches in sorted(by_person.items(), key=lambda x: -len(x[1])):
-        shows = set(m['podcast_title'] for m in person_matches)
-        print(f"\n  {name} ({len(person_matches)} episodes across {len(shows)} show(s)):")
-        for m in person_matches[:5]:
-            print(f"    [{m['source']}] {m['podcast_title']}: {m['episode_title'][:70]}")
-        if len(person_matches) > 5:
-            print(f"    ... and {len(person_matches) - 5} more")
-
-    if dry_run:
-        print(f"\nDry run complete. Run with 'run' to insert {len(matches)} credits into DB.")
-        conn.close()
-        return
-
-    cur = conn.cursor()
-    inserted = skipped = 0
-
-    for m in matches:
-        try:
-            cur.execute(
-                """
-                INSERT INTO episode_host (episode_id, host_id, is_guest, role, data_source)
-                VALUES (%s, %s, true, 'Guest', %s)
-                ON CONFLICT (episode_id, host_id) DO NOTHING
-                """,
-                (m['episode_id'], m['host_id'], m['source'])
-            )
-            if cur.rowcount > 0:
-                inserted += 1
-            else:
-                skipped += 1
-        except Exception as e:
-            logger.error(f"Error inserting {m['full_name']} on episode {m['episode_id']}: {e}")
-            conn.rollback()
-
-    conn.commit()
-    cur.close()
-    conn.close()
-    print(f"\nDone: {inserted} credits inserted, {skipped} already existed")
-
-
-# ------------------------------------------------------------------
-# SUGGEST — find new names, write to suggestions queue
-# ------------------------------------------------------------------
+        )

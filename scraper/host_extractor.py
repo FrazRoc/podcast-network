@@ -273,7 +273,25 @@ def get_existing_host_names(conn) -> set[str]:
     return names
 
 
+# Leading titles are part of how a name is written, not part of the person —
+# left in, they create a second "Dr. Melissa Lott" alongside "Melissa Lott".
+_HONORIFIC_RE = re.compile(
+    r'^(?:(?:Dr|Prof|Professor|Mr|Ms|Mrs|Miss|Sir|Dame|Rev|Senator|Sen|'
+    r'Representative|Rep|Congressman|Congresswoman|Governor|Gov|Mayor|'
+    r'President|Secretary|Ambassador|Admiral|General|Captain|Lord|Lady)\.?\s+)+',
+    re.IGNORECASE
+)
+
+
+def strip_honorific(name: str) -> str:
+    stripped = _HONORIFIC_RE.sub('', name.strip()).strip()
+    # Only accept the strip if a first + last name survives it. Otherwise the
+    # leading word was part of the name, not a title ("General Motors").
+    return stripped if len(stripped.split()) >= 2 else name.strip()
+
+
 def get_or_create_host(cur, name: str, data_source: str) -> int:
+    name = strip_honorific(name)
     parts = name.strip().split(' ')
     first_name = ' '.join(parts[:-1]) if len(parts) > 1 else name
     last_name = parts[-1] if len(parts) > 1 else ''
