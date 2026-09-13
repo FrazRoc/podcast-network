@@ -76,7 +76,7 @@ STRIP_AFTER_PATTERNS = [
     r'\nhttps://www.linkedin.com/in/',                  # CORE Knowledge LinkedIn footer
     r'\nBlue Spark\n',                                  # CORE Knowledge company links section
     r'This episode (?:of [A-Za-z ]+ )?was (?:reported and )?(?:produced|fact.?checked)',  # How to Save a Planet / Gimlet production credits
-    r'How to Save a Planet is (?:a Spotify|reported|produced)',  # How to Save a Planet / Gimlet show boilerplate
+    r'How to Save a Planet is (?:a Spotify|reported|produced|hosted)',  # How to Save a Planet / Gimlet show boilerplate
     r'\nCheck out our Calls to Action archive',          # How to Save a Planet footer
 ]
 
