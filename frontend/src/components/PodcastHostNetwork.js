@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { ForceGraph2D } from 'react-force-graph';
-import { forceX, forceY } from 'd3-force';
+import { forceX, forceY, forceCollide } from 'd3-force';
 import { API_BASE_URL } from '../config';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -16,6 +16,11 @@ const getGraphWidth = () =>
   window.innerWidth >= MOBILE_BREAKPOINT ? window.innerWidth - SIDEBAR_WIDTH : window.innerWidth;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+// How big a node is drawn. Used by the renderer, the pointer hit area and the
+// collision force, which have to agree or nodes overlap despite the force.
+const RING_WIDTH = 1.5;
+const nodeRadius = (node) => (node.val <= 1 ? 3.5 : 4 + Math.sqrt(node.val) * 2.2);
 
 const getAvatarUrl = (name) =>
   `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}&backgroundColor=65c9ff,92a1c6,dd6b7f,58c9b9,ade498`;
@@ -666,7 +671,7 @@ const PodcastHostNetwork = () => {
   // (a ref) causes stale closure bugs where nodes render with wrong color/font
   const nodeCanvasObjectRef = useRef(null);
   nodeCanvasObjectRef.current = (node, ctx, globalScale) => {
-    const size = node.val <= 1 ? 3.5 : 4 + Math.sqrt(node.val) * 2.2;
+    const size = nodeRadius(node);
     const isSelected = selectedNode?.id === node.id;
     const isHighlighted = highlightNodes.has(node.id);
 
@@ -742,7 +747,7 @@ const PodcastHostNetwork = () => {
   }, []); // stable reference, always calls fresh painter via ref
 
   const nodePointerAreaPaint = useCallback((node, color, ctx) => {
-    const size = node.val <= 1 ? 3.5 : 4 + Math.sqrt(node.val) * 2.2;
+    const size = nodeRadius(node);
     ctx.beginPath();
     ctx.arc(node.x, node.y, size + 4, 0, 2 * Math.PI);
     ctx.fillStyle = color;
@@ -906,6 +911,17 @@ const PodcastHostNetwork = () => {
             if (!graphRef.current._forcesSet) {
               graphRef.current.d3Force('x', forceX(0).strength(0.08));
               graphRef.current.d3Force('y', forceY(0).strength(0.08));
+              // Nothing previously kept two nodes from occupying the same
+              // point, so the default view settled with 103 pairs permanently
+              // overlapping, the worst of them 60% buried. Radius is what gets
+              // drawn plus the ring, and a 6u gap — swept against the live
+              // graph as the smallest padding that leaves every node clear
+              // space. It rearranges locally: the bounding box, and so the
+              // zoom the graph settles at, is unchanged.
+              graphRef.current.d3Force(
+                'collide',
+                forceCollide(node => nodeRadius(node) + RING_WIDTH + 6).iterations(1)
+              );
               graphRef.current._forcesSet = true;
             }
           }}
