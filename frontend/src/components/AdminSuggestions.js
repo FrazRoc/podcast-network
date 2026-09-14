@@ -56,9 +56,17 @@ export default function AdminSuggestions() {
   const [lastResult, setLastResult] = useState(null);
   const [editedName, setEditedName] = useState('');
   const [done, setDone] = useState(false);
+  const [notFound, setNotFound] = useState(null);
+  const [copiedId, setCopiedId] = useState(null);
+  // A ?suggestion_id= in the URL opens that one instead of the queue, so a
+  // specific suggestion can be linked to rather than described.
+  const [pinnedId, setPinnedId] = useState(
+    () => new URLSearchParams(window.location.search).get('suggestion_id')
+  );
 
   const fetchNext = useCallback(async (clearResult = true) => {
     setLoading(true);
+    setNotFound(null);
     if (clearResult) setLastResult(null);
     try {
       const res = await adminFetch(`${API}/suggestions/next`);
@@ -78,6 +86,36 @@ export default function AdminSuggestions() {
     }
   }, []);
 
+  const fetchById = useCallback(async (id) => {
+    setLoading(true);
+    setNotFound(null);
+    setLastResult(null);
+    try {
+      const res = await adminFetch(`${API}/suggestions/id/${id}`);
+      if (res.status === 404) {
+        setNotFound(id);
+        setSuggestion(null);
+        return;
+      }
+      const data = await res.json();
+      setSuggestion(data);
+      setEditedName('');
+      setDone(false);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Leaving the pinned suggestion drops the parameter, so the queue doesn't
+  // reopen the same one on the next reload.
+  const backToQueue = useCallback(() => {
+    setPinnedId(null);
+    window.history.replaceState({}, '', window.location.pathname);
+    fetchNext();
+  }, [fetchNext]);
+
   const fetchStats = useCallback(async () => {
     try {
       const res = await adminFetch(`${API}/suggestions/stats`);
@@ -86,9 +124,10 @@ export default function AdminSuggestions() {
   }, []);
 
   useEffect(() => {
-    fetchNext();
+    if (pinnedId) fetchById(pinnedId);
+    else fetchNext();
     fetchStats();
-  }, [fetchNext, fetchStats]);
+  }, [pinnedId, fetchById, fetchNext, fetchStats]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -118,6 +157,12 @@ export default function AdminSuggestions() {
       const result = await res.json();
       setLastResult({ action, ...result });
       await fetchStats();
+      // Acting on a linked suggestion resolves it, so drop the parameter and
+      // carry on with the queue rather than reloading the one just handled.
+      if (pinnedId) {
+        setPinnedId(null);
+        window.history.replaceState({}, '', window.location.pathname);
+      }
       await fetchNext(false); // don't clear result when loading next
     } catch (e) {
       console.error(e);
@@ -151,8 +196,31 @@ export default function AdminSuggestions() {
         </div>
       )}
 
+      {/* Opened from a link rather than the queue */}
+      {pinnedId && suggestion && !loading && (
+        <div className="bg-teal-50 border-b border-teal-200 px-4 sm:px-6 py-2 flex flex-wrap items-center gap-3 text-sm">
+          <span className="text-teal-900">
+            Viewing suggestion <span className="font-mono">#{pinnedId}</span> directly.
+          </span>
+          <button onClick={backToQueue} className="text-teal-700 underline hover:text-teal-900">
+            Back to the review queue
+          </button>
+        </div>
+      )}
+
+      {/* Linked to a suggestion that no longer exists */}
+      {notFound && !loading && (
+        <div className="flex flex-col items-center justify-center h-96 gap-3">
+          <p className="text-xl font-semibold text-gray-700">No suggestion #{notFound}</p>
+          <p className="text-gray-400 text-sm">It may have been removed since the link was made.</p>
+          <button onClick={backToQueue} className="text-teal-700 underline hover:text-teal-900 text-sm">
+            Back to the review queue
+          </button>
+        </div>
+      )}
+
       {/* Done */}
-      {done && !loading && (
+      {done && !loading && !notFound && (
         <div className="flex flex-col items-center justify-center h-96 gap-3">
           <div className="text-4xl">🎉</div>
           <p className="text-xl font-semibold text-gray-700">Queue is empty!</p>
@@ -248,11 +316,32 @@ export default function AdminSuggestions() {
 
             {/* Candidate */}
             <div className="px-6 py-5 border-b border-gray-200 bg-white">
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
-                Suggested Person
-              </p>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+                  Suggested Person
+                </p>
+                {/* Copyable link to this exact suggestion, so a problem case can
+                    be passed on by URL rather than described or screenshotted. */}
+                <button
+                  onClick={() => {
+                    const url = `${window.location.origin}${window.location.pathname}?suggestion_id=${suggestion.suggestion_id}`;
+                    navigator.clipboard?.writeText(url);
+                    setCopiedId(suggestion.suggestion_id);
+                    setTimeout(() => setCopiedId(null), 1500);
+                  }}
+                  title="Copy a link to this suggestion"
+                  className="text-xs text-gray-400 hover:text-teal-700 font-mono"
+                >
+                  {copiedId === suggestion.suggestion_id ? 'link copied' : `#${suggestion.suggestion_id} · copy link`}
+                </button>
+              </div>
               <div className="flex items-baseline gap-3 mb-2">
                 <SourceBadge source={suggestion.source} />
+                {suggestion.status && suggestion.status !== 'pending' && (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200">
+                    already {suggestion.status}
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-2 mb-2">
                 <input

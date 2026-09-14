@@ -414,17 +414,17 @@ if __name__ == "__main__":
 # ADMIN ENDPOINTS — Suggestions queue
 # ==================================================================
 
-@app.get("/api/admin/suggestions/next", dependencies=[Depends(verify_admin)])
-async def get_next_suggestion():
-    """
-    Get the next pending suggestion for review.
-    Returns the suggestion with full episode context.
-    """
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
+def _load_suggestion(cur, suggestion_id: int = None):
+    """Fetch one suggestion with its episode context.
 
-        cur.execute("""
+    With no id this is the review queue: the oldest still-pending one. With an
+    id it is that specific suggestion whatever its status, so a link to one
+    keeps working after it has been approved or rejected.
+    """
+    where, params = ("s.status = 'pending'", ()) if suggestion_id is None \
+        else ("s.suggestion_id = %s", (suggestion_id,))
+
+    cur.execute(f"""
             SELECT
                 s.suggestion_id,
                 s.candidate_name,
@@ -444,66 +444,94 @@ async def get_next_suggestion():
             FROM suggestions s
             JOIN episodes e ON s.episode_id = e.episode_id
             JOIN podcasts p ON e.podcast_id = p.podcast_id
-            WHERE s.status = 'pending'
+            WHERE {where}
             ORDER BY s.created_at ASC
             LIMIT 1
-        """)
+    """, params)
 
-        row = cur.fetchone()
+    row = cur.fetchone()
+    if not row:
+        return None
 
-        if not row:
-            cur.close()
-            conn.close()
-            return {"done": True, "message": "No more suggestions to review!"}
+    # Get existing credits for this episode
+    cur.execute("""
+        SELECT
+            h.host_id,
+            h.first_name || ' ' || h.last_name AS name,
+            h.profile_image_url,
+            eh.is_guest,
+            eh.role,
+            eh.data_source
+        FROM episode_host eh
+        JOIN hosts h ON h.host_id = eh.host_id
+        WHERE eh.episode_id = %s
+        ORDER BY eh.is_guest ASC, h.last_name ASC
+    """, (row['episode_id'],))
+    existing_credits = cur.fetchall()
 
-        # Get existing credits for this episode
-        cur.execute("""
-            SELECT
-                h.host_id,
-                h.first_name || ' ' || h.last_name AS name,
-                h.profile_image_url,
-                eh.is_guest,
-                eh.role,
-                eh.data_source
-            FROM episode_host eh
-            JOIN hosts h ON h.host_id = eh.host_id
-            WHERE eh.episode_id = %s
-            ORDER BY eh.is_guest ASC, h.last_name ASC
-        """, (row['episode_id'],))
-        existing_credits = cur.fetchall()
+    # Also get how many other episodes this person has been suggested for
+    cur.execute("""
+        SELECT COUNT(*) as other_suggestions
+        FROM suggestions
+        WHERE LOWER(candidate_name) = LOWER(%s)
+          AND episode_id != %s
+          AND status = 'pending'
+    """, (row['candidate_name'], row['episode_id']))
+    other_count = cur.fetchone()['other_suggestions']
 
-        # Also get how many other episodes this person has been suggested for
-        cur.execute("""
-            SELECT COUNT(*) as other_suggestions
-            FROM suggestions
-            WHERE LOWER(candidate_name) = LOWER(%s)
-              AND episode_id != %s
-              AND status = 'pending'
-        """, (row['candidate_name'], row['episode_id']))
-        other_count = cur.fetchone()['other_suggestions']
+    # Other names already queued for review on this same episode, so the
+    # admin UI can distinguish "still pending" names from unhandled ones
+    cur.execute("""
+        SELECT DISTINCT candidate_name
+        FROM suggestions
+        WHERE episode_id = %s
+          AND suggestion_id != %s
+          AND status = 'pending'
+    """, (row['episode_id'], row['suggestion_id']))
+    other_pending_names = [r['candidate_name'] for r in cur.fetchall()]
 
-        # Other names already queued for review on this same episode, so the
-        # admin UI can distinguish "still pending" names from unhandled ones
-        cur.execute("""
-            SELECT DISTINCT candidate_name
-            FROM suggestions
-            WHERE episode_id = %s
-              AND suggestion_id != %s
-              AND status = 'pending'
-        """, (row['episode_id'], row['suggestion_id']))
-        other_pending_names = [r['candidate_name'] for r in cur.fetchall()]
+    return {
+        "done": False,
+        **row,
+        "existing_credits": existing_credits,
+        "other_pending_suggestions": other_count,
+        "other_pending_names": other_pending_names,
+    }
 
+
+@app.get("/api/admin/suggestions/next", dependencies=[Depends(verify_admin)])
+async def get_next_suggestion():
+    """Next pending suggestion for review, with full episode context."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        result = _load_suggestion(cur)
         cur.close()
         conn.close()
+        return result or {"done": True, "message": "No more suggestions to review!"}
+    except Exception as e:
+        print(str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
-        return {
-            "done": False,
-            **row,
-            "existing_credits": existing_credits,
-            "other_pending_suggestions": other_count,
-            "other_pending_names": other_pending_names,
-        }
 
+@app.get("/api/admin/suggestions/id/{suggestion_id}", dependencies=[Depends(verify_admin)])
+async def get_suggestion_by_id(suggestion_id: int):
+    """One specific suggestion, so a link to it can be shared and reopened.
+
+    Returns it whatever its status — a link to an already-handled suggestion
+    should still show what it was, rather than 404.
+    """
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        result = _load_suggestion(cur, suggestion_id)
+        cur.close()
+        conn.close()
+        if not result:
+            raise HTTPException(status_code=404, detail=f"No suggestion with id {suggestion_id}")
+        return result
+    except HTTPException:
+        raise
     except Exception as e:
         print(str(e))
         raise HTTPException(status_code=500, detail=str(e))
