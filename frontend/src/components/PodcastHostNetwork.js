@@ -3,7 +3,8 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 // four renderers at module scope, so three.js, A-Frame and AR.js were bundled
 // and shipped on every load despite nothing here being able to reach them.
 import ForceGraph2D from 'react-force-graph-2d';
-import { forceX, forceY, forceCollide } from 'd3-force';
+import { forceX, forceY, forceCollide, forceManyBody } from 'd3-force';
+import { getAdminPassword } from '../adminAuth';
 import { API_BASE_URL } from '../config';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -362,7 +363,7 @@ const ConnectionDetails = ({ connection, onClose }) => (
   </div>
 );
 
-const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuery, onSearchChange, loading }) => (
+const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuery, onSearchChange, loading, isAdmin }) => (
   <div className="space-y-4">
     <div className="grid grid-cols-3 gap-2">
       {[
@@ -443,21 +444,47 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
       </p>
     </div>
 
-    {/* Min cluster size */}
-    <div className="space-y-1">
-      <label className="block text-sm font-medium text-gray-700">
-        Minimum Cluster Size: {currentFilters.minClusterSize}
-      </label>
-      <input
-        type="range" min="1" max="20"
-        value={currentFilters.minClusterSize}
-        onChange={e => onFiltersChange({ minClusterSize: parseInt(e.target.value) })}
-        className="w-full"
-      />
-      <div className="flex justify-between text-xs text-gray-400">
-        <span>1</span><span>20</span>
+    {/* Layout controls — only useful if you are tuning the graph itself */}
+    {isAdmin && (
+    <div className="space-y-4 border-t border-gray-200 pt-4">
+      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Admin</p>
+
+      <div className="space-y-1">
+        <label className="block text-sm font-medium text-gray-700">
+          Minimum Cluster Size: {currentFilters.minClusterSize}
+        </label>
+        <input
+          type="range" min="1" max="20"
+          value={currentFilters.minClusterSize}
+          onChange={e => onFiltersChange({ minClusterSize: parseInt(e.target.value) })}
+          className="w-full"
+        />
+        <div className="flex justify-between text-xs text-gray-400">
+          <span>1</span><span>20</span>
+        </div>
+      </div>
+
+      <div className="space-y-1">
+        <label className="block text-sm font-medium text-gray-700">
+          Repulsion: {currentFilters.repulsion}
+        </label>
+        <input
+          type="range" min="10" max="400" step="10"
+          value={currentFilters.repulsion}
+          onChange={e => onFiltersChange({ repulsion: parseInt(e.target.value) })}
+          className="w-full"
+        />
+        <div className="flex justify-between text-xs text-gray-400">
+          <span>10</span><span>400</span>
+        </div>
+        <p className="text-xs text-gray-400">
+          How hard nodes push each other apart. Re-runs the layout. At 30 the
+          centre is 77% covered in circles; 60 halves that, 180 reaches 15% but
+          spreads the graph twice as wide.
+        </p>
       </div>
     </div>
+    )}
 
     {/* Roles */}
     <div className="flex items-center gap-4">
@@ -511,7 +538,7 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
       onClick={() => onFiltersChange({
         minConnections: 2, minPodcasts: 1,
         minEpisodes: 1,
-        minClusterSize: 8,
+        minClusterSize: 8, repulsion: 60,
         selectedRoles: ['Host', 'Guest'],
         selectedChannel: 'all', selectedGenre: 'all',
       })}
@@ -569,6 +596,7 @@ const PodcastHostNetwork = () => {
     minPodcasts: 1,
     minEpisodes: 1,
     minClusterSize: 8,
+    repulsion: 60,
     selectedRoles: ['Host', 'Guest'],
     selectedChannel: 'all',
     selectedGenre: 'all',
@@ -582,6 +610,11 @@ const PodcastHostNetwork = () => {
   // Image cache — pre-loads all node images once
   const graphRef = useRef(null);
   const hasAutoFitted = useRef(false);
+  const repulsionRef = useRef(60);
+
+  // Admin is localStorage-only and unverified until the server rejects it, so
+  // this reveals controls and nothing more — never anything worth protecting.
+  const isAdmin = useMemo(() => !!getAdminPassword(), []);
 
   // Installed via the ref rather than on the first engine tick: a tick-1 install
   // means tick 0 lays out under different forces and then visibly reorganises.
@@ -589,6 +622,16 @@ const PodcastHostNetwork = () => {
   const installForces = useCallback(graph => {
     graphRef.current = graph;
     if (!graph || graph._forcesSet) return;
+    // Repulsion. force-graph builds forceManyBody() unconfigured, so this ran
+    // at d3's default of -30 — far too weak for 1,192 nodes, which is why the
+    // centre packed into an unreadable mass: circles covered 77% of the central
+    // disc, near-tiling it. The coverage figure is zoom-independent, so
+    // lowering it thins the middle out rather than just drawing it larger.
+    //
+    // -60 halves that to 42%. The dead d3ForceStrength prop asked for -180,
+    // which reaches 15% but flings the graph into a sparse web 2.4x wider —
+    // legible, and much less like a network.
+    graph.d3Force('charge', forceManyBody().strength(-repulsionRef.current));
     graph.d3Force('x', forceX(0).strength(0.08));
     graph.d3Force('y', forceY(0).strength(0.08));
     // Nothing previously kept two nodes from occupying the same point, so the
@@ -661,6 +704,18 @@ const PodcastHostNetwork = () => {
     const genres = [...new Set(graphData.nodes.map(n => n.genre).filter(Boolean))].sort();
     setNetworkStats(prev => ({ ...prev, maxConnections, maxPodcasts, channels, genres }));
   }, [graphData]);
+
+  // Repulsion is the one filter that changes the simulation rather than the
+  // data, so it is applied to the live force and the layout reheated. The fit
+  // is re-armed because the graph's extent changes a lot with it.
+  useEffect(() => {
+    repulsionRef.current = currentFilters.repulsion;
+    const graph = graphRef.current;
+    if (!graph?.d3Force) return;
+    graph.d3Force('charge', forceManyBody().strength(-currentFilters.repulsion));
+    hasAutoFitted.current = false;
+    graph.d3ReheatSimulation();
+  }, [currentFilters.repulsion]);
 
   // Filtered graph — recomputed when filters or data change
   const filteredGraphData = useMemo(() => {
@@ -920,6 +975,7 @@ const PodcastHostNetwork = () => {
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}
             loading={loading}
+            isAdmin={isAdmin}
           />
         )}
 
