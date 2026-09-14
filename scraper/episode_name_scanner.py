@@ -151,6 +151,13 @@ REMOVE_PATTERNS = [
     r'(?:episode|ep\.?)\s*#?\d*\s*(?:with|featuring|w/)[^.\n]{0,70}',
     r'(?i)our episodes? featuring[^.\n]{0,90}',
     r'(?i)(?:podcast )?interview with[^.\n]{0,50}(?=\s*(?:https?://|\n|$))',
+    # Sponsor blocks and promotions for upcoming events name people who are not
+    # in this episode. "Catalyst is supported by Origami Solar. Join Latitude
+    # Media's Stephen Lacey and Origami's CEO Gregg Patterson for a live
+    # Frontier Forum on May 30th" credited Lacey on three episodes he has no
+    # part in.
+    r'(?i)\bjoin\b[^.\n]{0,110}\bfor (?:a|our|the) (?:live|free|virtual|upcoming|special)\b[^.\n]{0,90}',
+    r'(?i)[A-Z][A-Za-z\x27 ]{0,40} is supported by[^.\n]{0,70}',
 ]
 
 
