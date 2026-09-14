@@ -42,8 +42,36 @@ const podcastColor = (title) => {
   return `hsla(${Math.abs(hash) % 360}, 65%, 55%, 0.85)`;
 };
 
+// The API already merges duplicate people and resolves their role; this only
+// adds the per-node tallies the force graph needs.
+const processNormalised = ({ nodes: rawNodes, links: rawLinks }) => {
+  const nodes = new Map(
+    rawNodes.map(n => [n.id, { ...n, val: 0, podcasts: new Set() }])
+  );
+  const links = [];
+  rawLinks.forEach(l => {
+    const src = nodes.get(l.source);
+    const tgt = nodes.get(l.target);
+    if (!src || !tgt) return;          // ignore an edge naming an unknown node
+    src.podcasts.add(l.podcast); src.val++;
+    tgt.podcasts.add(l.podcast); tgt.val++;
+    links.push({ source: l.source, target: l.target, value: l.value, podcast: l.podcast });
+  });
+  return {
+    nodes: [...nodes.values()].map(n => ({ ...n, podcasts: [...n.podcasts] })),
+    links,
+  };
+};
+
 // Process raw API data into graph nodes/links — defined OUTSIDE component
+//
+// Accepts both shapes the API has served: the current {nodes, links}, and the
+// older row-per-edge array. The two deploy separately, so during a rollout the
+// page may meet either one.
 const processData = (data) => {
+  if (data && !Array.isArray(data) && Array.isArray(data.nodes)) {
+    return processNormalised(data);
+  }
   const nodes = new Map();
   const links = [];
 

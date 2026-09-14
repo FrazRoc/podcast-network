@@ -164,8 +164,6 @@ async def get_host_connections():
                     c1.name as target_channel,
                     g1.name as target_genre,
                     p.title as podcast_title,
-                    p.focus_area,
-                    p.target_audience,
                     COUNT(DISTINCT e.episode_id) as episodes_together
                 FROM hosts h1
                 JOIN episode_host eh1 ON h1.host_id = eh1.host_id
@@ -183,7 +181,7 @@ async def get_host_connections():
                     h1.host_id, h1.first_name, h1.last_name, h1.profile_image_url,
                     psr1.role, c1.name, g1.name,
                     h2.host_id, h2.first_name, h2.last_name, h2.profile_image_url,
-                    psr2.role, p.title, p.focus_area, p.target_audience
+                    psr2.role, p.title
             )
             SELECT *
             FROM host_connections
@@ -193,7 +191,41 @@ async def get_host_connections():
         results = cur.fetchall()
         cur.close()
         conn.close()
-        return results
+
+        # Return nodes and links separately rather than a row per edge. Every
+        # row repeated both people's name, image, channel and genre in full, so
+        # the same 1,952 people were described 5,133 times over: 2.6MB where
+        # 0.55MB carries the same information.
+        nodes = {}
+        links = []
+        for row in results:
+            for side in ("source", "target"):
+                node_id = row[f"{side}_id"]
+                node = nodes.get(node_id)
+                if node is None:
+                    node = nodes[node_id] = {
+                        "id": node_id,
+                        "name": row[f"{side}_name"],
+                        "image": row[f"{side}_image"],
+                        "role": row[f"{side}_role"] or "Guest",
+                        "channel": row[f"{side}_channel"],
+                        "genre": row[f"{side}_genre"],
+                    }
+                # Someone who presents one show and guests on another is a host:
+                # the alternative is letting row order decide.
+                if row[f"{side}_role"] == "Host":
+                    node["role"] = "Host"
+                node.setdefault("channel", row[f"{side}_channel"])
+                node.setdefault("genre", row[f"{side}_genre"])
+
+            links.append({
+                "source": row["source_id"],
+                "target": row["target_id"],
+                "podcast": row["podcast_title"],
+                "value": row["episodes_together"],
+            })
+
+        return {"nodes": list(nodes.values()), "links": links}
 
     except Exception as e:
         print(str(e))
