@@ -138,6 +138,8 @@ function PersonPanel({ selected, onSaved, onCancel }) {
       .then(r => r.json())
       .then(setEpisodes)
       .catch(console.error);
+  // Keyed on the id rather than the object, which is a new reference each render.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected?.host_id]);
 
   const toggleShow = (show) =>
@@ -480,6 +482,7 @@ export default function AdminPeople() {
     finally { setLoading(false); }
   }, []);
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchPeople(searchQ, filter, sort); }, [fetchPeople]);
 
   // Deep-link support: /admin/people?host_id=X auto-opens that person.

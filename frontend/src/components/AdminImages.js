@@ -15,7 +15,8 @@ export default function AdminImages() {
   const [submitting, setSubmitting] = useState(false);
   const [lastResult, setLastResult] = useState(null);
   const [done, setDone] = useState(false);
-  const [skippedIds, setSkippedIds] = useState(new Set());
+  // Only the ref is read; this state exists to trigger a re-render.
+  const [, setSkippedIds] = useState(new Set());
   const skippedIdsRef = useRef(new Set());
 
   const fetchNext = useCallback(async (clearResult = true) => {

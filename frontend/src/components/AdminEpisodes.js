@@ -260,6 +260,9 @@ export default function AdminEpisodes() {
     }
   }, []);
 
+  // Runs once: the filters are read at call time and applied by the
+  // controls themselves, so depending on them would refetch per keystroke.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchEpisodes(searchQ, showFilter, sort, 0, false); }, [fetchEpisodes]);
 
   useEffect(() => {

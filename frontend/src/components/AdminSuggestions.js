@@ -150,6 +150,9 @@ export default function AdminSuggestions() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
+  // handleAction is defined below and closes over current state; adding it
+  // would re-register the key listener on every render.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [suggestion, actionLoading]);
 
   const handleAction = async (action) => {
