@@ -374,18 +374,13 @@ const ConnectionDetails = ({ connection, onClose }) => (
 
 const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuery, onSearchChange, loading, isAdmin }) => (
   <div className="space-y-4">
-    <div className="grid grid-cols-4 gap-2">
+    <div className="grid grid-cols-3 gap-2">
       {[
         // "People", not "Hosts": 1,825 of the 1,952 in the graph appear only
         // as guests.
         { label: 'Podcasts', value: networkStats.visiblePodcasts },
         { label: 'People', value: networkStats.visibleNodes },
         { label: 'Connections', value: networkStats.visibleLinks },
-        // Not "Episodes". value is COUNT(DISTINCT episode_id) per PAIR, so an
-        // episode crediting three people is counted by all three of its pairs.
-        // Summing gives times two people shared an episode, which is a real
-        // figure and not an episode count.
-        { label: 'Co-appearances', value: networkStats.visibleCoAppearances },
       ].map(({ label, value }) => (
         <div key={label} className="bg-teal-50 rounded-lg text-center py-2">
           <p className="text-lg font-bold text-gray-900 leading-tight">{loading ? ' ' : value}</p>
@@ -843,13 +838,11 @@ const PodcastHostNetwork = () => {
   // Update visible stats when filtered data changes
   useEffect(() => {
     const visiblePodcasts = new Set(filteredGraphData.links.map(l => l.podcast)).size;
-    const visibleCoAppearances = filteredGraphData.links.reduce((a, l) => a + l.value, 0);
     setNetworkStats(prev => ({
       ...prev,
       visibleNodes: filteredGraphData.nodes.length,
       visibleLinks: filteredGraphData.links.length,
       visiblePodcasts,
-      visibleCoAppearances,
     }));
   }, [filteredGraphData]);
 
