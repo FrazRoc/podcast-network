@@ -64,6 +64,13 @@ export default function AdminSuggestions() {
     () => new URLSearchParams(window.location.search).get('suggestion_id')
   );
 
+  // Keep the address bar pointed at whatever is on screen. Reloading then
+  // returns to the same suggestion, and the URL can be copied at any moment
+  // without pressing the button first.
+  const syncUrl = (id) => {
+    window.history.replaceState({}, '', `${window.location.pathname}?suggestion_id=${id}`);
+  };
+
   const fetchNext = useCallback(async (clearResult = true) => {
     setLoading(true);
     setNotFound(null);
@@ -74,10 +81,12 @@ export default function AdminSuggestions() {
       if (data.done) {
         setDone(true);
         setSuggestion(null);
+        window.history.replaceState({}, '', window.location.pathname);
       } else {
         setSuggestion(data);
         setEditedName('');
         setDone(false);
+        syncUrl(data.suggestion_id);
       }
     } catch (e) {
       console.error(e);
@@ -101,6 +110,7 @@ export default function AdminSuggestions() {
       setSuggestion(data);
       setEditedName('');
       setDone(false);
+      syncUrl(data.suggestion_id);
     } catch (e) {
       console.error(e);
     } finally {
@@ -159,10 +169,7 @@ export default function AdminSuggestions() {
       await fetchStats();
       // Acting on a linked suggestion resolves it, so drop the parameter and
       // carry on with the queue rather than reloading the one just handled.
-      if (pinnedId) {
-        setPinnedId(null);
-        window.history.replaceState({}, '', window.location.pathname);
-      }
+      if (pinnedId) setPinnedId(null);
       await fetchNext(false); // don't clear result when loading next
     } catch (e) {
       console.error(e);
@@ -193,18 +200,6 @@ export default function AdminSuggestions() {
       {loading && (
         <div className="flex items-center justify-center h-96 text-gray-400">
           Loading...
-        </div>
-      )}
-
-      {/* Opened from a link rather than the queue */}
-      {pinnedId && suggestion && !loading && (
-        <div className="bg-teal-50 border-b border-teal-200 px-4 sm:px-6 py-2 flex flex-wrap items-center gap-3 text-sm">
-          <span className="text-teal-900">
-            Viewing suggestion <span className="font-mono">#{pinnedId}</span> directly.
-          </span>
-          <button onClick={backToQueue} className="text-teal-700 underline hover:text-teal-900">
-            Back to the review queue
-          </button>
         </div>
       )}
 

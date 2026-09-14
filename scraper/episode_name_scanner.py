@@ -341,6 +341,15 @@ _ORG_WORDS = {
     'agency', 'department', 'ministry', 'commission', 'logistics', 'software',
     'minerals', 'mining', 'pharma', 'airlines', 'aviation', 'shipping',
     'utilities', 'computing', 'management', 'advisory', 'enterprises',
+    # Job-function words. "Director of Digital Transformation and Enterprise
+    # Architecture at ..." makes "Enterprise Architecture" look exactly like a
+    # second guest to the "X and Y" pattern. Checked against every known
+    # person: the only match was "Chief Marketing", itself a bad record.
+    'architecture', 'transformation', 'operations', 'development', 'engineering',
+    'marketing', 'communications', 'affairs', 'relations', 'innovation',
+    'sustainability', 'procurement', 'compliance', 'governance', 'infrastructure',
+    'excellence', 'initiatives', 'partnerships', 'acquisition', 'intelligence',
+    'experience', 'enablement', 'insights',
 }
 
 
