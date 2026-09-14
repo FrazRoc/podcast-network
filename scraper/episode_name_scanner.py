@@ -64,7 +64,11 @@ DESC_SCAN_MAX_CHARS = 2500
 # ------------------------------------------------------------------
 
 STRIP_AFTER_PATTERNS = [
-    r'\nCredits:',
+    # A credits block that opens with "Hosted by ..." names the hosts, and 136
+    # of the 193 blocks do; cutting there threw those away. Blocks that go
+    # straight to crew are still cut, and the crew tail is removed below.
+    r'\nCredits:(?![^\n]{0,60}Hosted by)',
+    r'(?i)(?:\.|\n)\s*Produced by[^.\n]{0,80}',
     r'\n[A-Z][a-z]+ [A-Z][a-z]+ is the co-host',
     r'\n[A-Z][a-z]+ [A-Z][a-z]+ is the host',
     r'\n[A-Z][a-z]+ [A-Z][a-z]+ is the .{0,30} editor',
@@ -89,7 +93,11 @@ STRIP_AFTER_PATTERNS = [
     r'\nLinks\n',                                       # Cleaning Up: Leadership links section
     r'\nLinks and Related Episodes',                      # Cleaning Up: Leadership combined footer
     r'\nRelevant Guest & Topic Links',                   # Cleaning Up: Leadership links variant
-    r'\nGuest Bio',                                      # Cleaning Up: Leadership guest bio section
+    # Cleaning Up writes "Guest Bio" then prose about the guest's career, which
+    # names companies rather than people. Electrify This! writes "Guest Bios:"
+    # and then each guest's full name — truncating there threw away the best
+    # guest information on that show, so the colon form is left alone.
+    r'\nGuest Bio(?!s?\s*:)',
     r'\nFor show notes',                               # Climate One footer
     r'\nLearn more about your ad choices',             # Megaphone universal footer
     r'megaphone.fm/adchoices',                          # Megaphone universal footer
@@ -146,9 +154,12 @@ def strip_html(text: str) -> str:
 # this week, Katie Eder!". The name belongs to the episode being linked to, not
 # this one.
 REMOVE_PATTERNS = [
+    # Up to three words may sit between the verb and "episode" — Reversing
+    # Climate Change writes "Listen to the RCC episode with Ryan Covington",
+    # and that one line, repeated across 62 episodes, gave him 39 credits for
+    # a single appearance.
     r'(?i)(?:click here to\s+)?(?:listen to|watch|hear|check out|revisit)\s+'
-    r'(?:a|our|the|this)?\s*(?:previous|past|earlier|related|full|entire)?\s*'
-    r'(?:episode|ep\.?)\s*#?\d*\s*(?:with|featuring|w/)[^.\n]{0,70}',
+    r'(?:\w+\s+){0,3}(?:episode|ep\.?)\s*#?\d*\s*(?:with|featuring|w/)[^.\n]{0,70}',
     r'(?i)our episodes? featuring[^.\n]{0,90}',
     r'(?i)(?:podcast )?interview with[^.\n]{0,50}(?=\s*(?:https?://|\n|$))',
     # Sponsor blocks and promotions for upcoming events name people who are not
@@ -521,8 +532,10 @@ def extract_labelled_credits(text: str) -> list[tuple[str, bool]]:
         # label — requiring the line to begin with it missed 349 episodes'
         # worth of stated credits, including Joe Manchin's real appearance.
         match = re.match(
-            r"\s*(?:Episode|Show|Today\x27s|This\s+week\x27s|Featured)?\s*"
-            r"(Hosts?|Moderators?|Guests?|Interviewee)\s*:\s*(.*)$",
+            r"\s*(?:Episode|Show|Our|My|The|Today\x27s|This\s+week\x27s|Featured)?\s*"
+            r"(Hosts?|Moderators?|Guests?|Interviewee)"
+            # "Guests included:", "Our guests were:", "Host is:"
+            r"(?:\s+(?:included|include|are|were|is|was|this\s+week|today))?\s*:\s*(.*)$",
             line, re.IGNORECASE)
         if not match:
             continue
