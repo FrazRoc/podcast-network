@@ -1,0 +1,99 @@
+name: Back up database
+
+# The episodes in this database can be rebuilt by re-running the scrapers.
+# The curation cannot: which people are the same person, who hosts which show,
+# which names are production crew rather than participants. That is human
+# judgement stored as rows, and it has no other copy.
+
+on:
+  schedule:
+    # Daily, offset from the top of the hour — GitHub documents :00 as the
+    # most congested slot, where scheduled runs get delayed or dropped.
+    - cron: '41 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Install a client matching the server
+        run: |
+          # pg_dump refuses to dump a server newer than itself, and Render is
+          # on PostgreSQL 18 while ubuntu-latest ships an older client.
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            --fail https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+            https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-18
+          pg_dump --version
+
+      - name: Dump
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "DATABASE_URL secret is not set — nothing to back up." >&2
+            exit 1
+          fi
+          stamp=$(date -u +%Y%m%d-%H%M)
+          # Custom format: compressed, and restorable table-by-table with
+          # pg_restore rather than all-or-nothing.
+          pg_dump --format=custom --no-owner --no-privileges \
+                  --file="podcast_db-${stamp}.dump" "$DATABASE_URL"
+          # Plain SQL alongside it, so a backup stays readable and diffable
+          # even without the matching pg_restore to hand.
+          pg_dump --format=plain --no-owner --no-privileges "$DATABASE_URL" \
+            | gzip -9 > "podcast_db-${stamp}.sql.gz"
+          echo "STAMP=$stamp" >> "$GITHUB_ENV"
+          ls -lh podcast_db-${stamp}.*
+
+      - name: Verify the dump restores and is complete
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          # A dump that is missing rows is worse than a failed one, because it
+          # looks like a backup until the day it is needed. Restore it into a
+          # throwaway local server and compare every table against the live
+          # database — counting rows in the dump file itself is fragile, and
+          # proving it restores is the property actually worth having.
+          sudo systemctl stop postgresql 2>/dev/null || true
+          export PATH=/usr/lib/postgresql/18/bin:$PATH
+          initdb -D /tmp/verify/data -U postgres --auth=trust > /dev/null
+          pg_ctl -D /tmp/verify/data -o "-p 55499" -l /tmp/verify/server.log start
+          for i in $(seq 30); do pg_isready -h 127.0.0.1 -p 55499 -q && break; sleep 1; done
+
+          LOCAL="postgresql://postgres@127.0.0.1:55499"
+          psql "$LOCAL/postgres" -q -c "CREATE DATABASE verify;"
+          pg_restore --no-owner --no-privileges -d "$LOCAL/verify" "podcast_db-${STAMP}.dump"
+
+          fail=0
+          for t in $(psql "$DATABASE_URL" -t -A -c \
+                "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY 1;"); do
+            live=$(psql "$DATABASE_URL" -t -A -c "SELECT COUNT(*) FROM \"$t\";")
+            back=$(psql "$LOCAL/verify" -t -A -c "SELECT COUNT(*) FROM \"$t\";" 2>/dev/null || echo MISSING)
+            if [ "$live" != "$back" ]; then
+              echo "::error::$t — live=$live restored=$back"
+              fail=1
+            else
+              echo "  $t: $live rows OK"
+            fi
+          done
+          pg_ctl -D /tmp/verify/data stop -m immediate > /dev/null 2>&1 || true
+          exit $fail
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: podcast-db-${{ env.STAMP }}
+          path: podcast_db-${{ env.STAMP }}.*
+          # GitHub's maximum. The free Postgres instance expires sooner than
+          # this, so a backup must outlive the database it came from.
+          retention-days: 90
+          compression-level: 0   # already compressed
