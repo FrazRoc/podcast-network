@@ -307,6 +307,48 @@ async def get_guest_appearance_stats(limit: int = 200):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/stats/guest-reach")
+async def get_guest_reach():
+    """Each guest's appearances against the number of distinct shows.
+
+    Separates two things a single count hides: people who turn up once on many
+    different shows, and people who return repeatedly to the same one. Guests
+    with a single appearance are the large majority and all sit on the same
+    point, so they are counted rather than listed.
+    """
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT h.host_id,
+                   h.first_name || ' ' || h.last_name AS name,
+                   COUNT(*)                            AS appearances,
+                   COUNT(DISTINCT e.podcast_id)        AS shows
+            FROM episode_host eh
+            JOIN hosts h    ON h.host_id = eh.host_id
+            JOIN episodes e ON e.episode_id = eh.episode_id
+            WHERE eh.is_guest
+            GROUP BY h.host_id, h.first_name, h.last_name
+            HAVING COUNT(*) >= 2
+            ORDER BY COUNT(DISTINCT e.podcast_id) DESC, COUNT(*) DESC
+        """)
+        guests = cur.fetchall()
+
+        cur.execute("""
+            SELECT COUNT(*) AS single_appearance FROM (
+                SELECT eh.host_id FROM episode_host eh
+                WHERE eh.is_guest GROUP BY eh.host_id HAVING COUNT(*) = 1
+            ) one_off
+        """)
+        single = cur.fetchone()["single_appearance"]
+
+        cur.close()
+        conn.close()
+        return {"guests": guests, "single_appearance_guests": single}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/stats/show-overlap")
 async def get_show_overlap_stats(top_n: int = 25):
     """Pairwise shared-guest counts among the top_n most-connected shows —
