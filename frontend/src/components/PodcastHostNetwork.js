@@ -527,6 +527,25 @@ const PodcastHostNetwork = () => {
 
   // Image cache — pre-loads all node images once
   const graphRef = useRef(null);
+  const hasAutoFitted = useRef(false);
+
+  // Installed via the ref rather than on the first engine tick: a tick-1 install
+  // means tick 0 lays out under different forces and then visibly reorganises.
+  // force-graph keeps one simulation across data changes, so this runs once.
+  const installForces = useCallback(graph => {
+    graphRef.current = graph;
+    if (!graph || graph._forcesSet) return;
+    graph.d3Force('x', forceX(0).strength(0.08));
+    graph.d3Force('y', forceY(0).strength(0.08));
+    // Nothing previously kept two nodes from occupying the same point, so the
+    // default view settled with 103 pairs permanently overlapping, the worst
+    // 60% buried. Radius is what gets drawn plus the ring, and a 6u gap —
+    // swept against the live graph as the smallest padding that leaves every
+    // node clear space. It rearranges locally: the bounding box, and so the
+    // zoom the graph settles at, is unchanged.
+    graph.d3Force('collide', forceCollide(node => nodeRadius(node) + RING_WIDTH + 6).iterations(1));
+    graph._forcesSet = true;
+  }, []);
   const imageCache = useImageCache(graphData.nodes);
 
   // Window resize
@@ -865,7 +884,7 @@ const PodcastHostNetwork = () => {
 
         {!loading && !error && (
         <ForceGraph2D
-          ref={graphRef}
+          ref={installForces}
           graphData={filteredGraphData}
 
           // Node rendering
@@ -892,8 +911,16 @@ const PodcastHostNetwork = () => {
 
           // Forces
           d3ForceStrength={-180}
-          d3AlphaDecay={0.01}
+          // Was 0.01, which needs ~690 ticks to converge. d3's own default gets
+          // there in 300 with an identical result — measured on the live graph,
+          // same zero overlaps, same zero crowding.
+          d3AlphaDecay={0.0228}
           d3VelocityDecay={0.4}
+          // The engine stopped only on cooldownTime, so it churned for the full
+          // 15s default no matter how settled the layout was — the drifting and
+          // wiggling. alphaMin lets it stop when it converges instead; nodes are
+          // moving 0.014u/tick by then, so there is no visible snap.
+          d3AlphaMin={0.001}
           linkDistance={70}
           linkStrength={0.2}
           cooldownTicks={Infinity}
@@ -905,25 +932,14 @@ const PodcastHostNetwork = () => {
           enablePanInteraction
           minZoom={0.05}
           maxZoom={4}
-          onEngineTick={() => {
-            // Set centering forces on first tick — onEngineStart doesn't exist in v1.46
-            if (!graphRef.current) return;
-            if (!graphRef.current._forcesSet) {
-              graphRef.current.d3Force('x', forceX(0).strength(0.08));
-              graphRef.current.d3Force('y', forceY(0).strength(0.08));
-              // Nothing previously kept two nodes from occupying the same
-              // point, so the default view settled with 103 pairs permanently
-              // overlapping, the worst of them 60% buried. Radius is what gets
-              // drawn plus the ring, and a 6u gap — swept against the live
-              // graph as the smallest padding that leaves every node clear
-              // space. It rearranges locally: the bounding box, and so the
-              // zoom the graph settles at, is unchanged.
-              graphRef.current.d3Force(
-                'collide',
-                forceCollide(node => nodeRadius(node) + RING_WIDTH + 6).iterations(1)
-              );
-              graphRef.current._forcesSet = true;
-            }
+          onEngineStop={() => {
+            // The graph was never fitted to the canvas, which is where the wide
+            // empty margin came from. Only on the first settle — refitting on
+            // every filter change would yank the view out from under anyone who
+            // had zoomed in.
+            if (hasAutoFitted.current) return;
+            hasAutoFitted.current = true;
+            graphRef.current?.zoomToFit(400, 60);
           }}
 
           // Events
