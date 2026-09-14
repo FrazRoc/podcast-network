@@ -1,6 +1,6 @@
 import json
 import psycopg2
-from datetime import datetime
+from datetime import datetime, date
 from typing import List, Dict, Optional
 import logging
 import time
@@ -278,6 +278,78 @@ class PodcastManager:
                 logger.error(f"  Error backfilling {title}: {e}")
 
 
+    def backfill_from_rss(self, since: date = None, show: str = None,
+                          dry_run: bool = False, max_shows: int = None,
+                          refresh_existing: bool = False):
+        """Pull the back catalogue that iTunes' 200-episode cap hides from us.
+
+        Run this on its own, not from the scheduled scrape — it is a one-off
+        catch-up, and the regular run already keeps up with new episodes.
+        """
+        conn = self._get_connection()
+        cur = conn.cursor()
+
+        if show:
+            cur.execute("""
+                SELECT apple_podcast_id, title FROM podcasts
+                WHERE title = %s AND apple_podcast_id IS NOT NULL
+            """, (show,))
+        else:
+            # Biggest shows first: those are the ones pinned at the cap.
+            cur.execute("""
+                SELECT p.apple_podcast_id, p.title
+                FROM podcasts p
+                LEFT JOIN episodes e ON e.podcast_id = p.podcast_id
+                WHERE p.apple_podcast_id IS NOT NULL
+                GROUP BY p.podcast_id, p.apple_podcast_id, p.title
+                ORDER BY COUNT(e.episode_id) DESC
+            """)
+        shows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        if not shows:
+            logger.error(f"No show found matching {show!r}" if show else "No shows found")
+            return
+
+        if max_shows:
+            shows = shows[:max_shows]
+
+        label = "DRY RUN — nothing will be written" if dry_run else "LIVE"
+        logger.info(f"RSS backfill ({label}) over {len(shows)} show(s)"
+                    + (f", ignoring episodes before {since}" if since else ""))
+
+        totals = {'inserted': 0, 'refreshed': 0, 'considered': 0, 'existing': 0,
+                  'skipped_old': 0, 'failed': 0, 'shows_failed': 0}
+
+        for apple_id, title in shows:
+            try:
+                scraper = PodcastScraper(self.db_connection_string, episode_limit=200)
+                r = scraper.backfill_from_rss(apple_id, since=since, dry_run=dry_run,
+                                              refresh_existing=refresh_existing)
+                verb = 'would add' if dry_run else 'added'
+                logger.info(
+                    f"  {title}: feed={r['feed_total']} already-had={r['existing']} "
+                    f"too-old={r['skipped_old']} {verb}={r['considered'] if dry_run else r['inserted']}"
+                    + (f" refreshed={r['refreshed']}" if r['refreshed'] else "")
+                    + (f" failed={r['failed']}" if r['failed'] else "")
+                )
+                for k in ('inserted', 'refreshed', 'considered', 'existing', 'skipped_old', 'failed'):
+                    totals[k] += r[k]
+            except Exception as e:
+                # One dead or moved feed must not take down the whole run.
+                logger.error(f"  {title}: FEED ERROR — {e}")
+                totals['shows_failed'] += 1
+            time.sleep(1)
+
+        verb = 'Would add' if dry_run else 'Added'
+        logger.info(
+            f"\n{verb} {totals['considered'] if dry_run else totals['inserted']} episodes "
+            f"across {len(shows) - totals['shows_failed']} shows "
+            f"(already had {totals['existing']}, skipped {totals['skipped_old']} as too old, "
+            f"{totals['failed']} insert errors, {totals['shows_failed']} feeds unreachable)"
+        )
+
     # ------------------------------------------------------------------
     # REFRESH DESCRIPTIONS
     # ------------------------------------------------------------------
@@ -399,6 +471,7 @@ commands:
   status      Print tracking summary
   reset       Reset failed/stuck podcasts to pending (skips PERMANENT failures)
   backfill    Re-scrape shows where iTunes has more episodes than our DB
+  backfill-rss  Add older episodes from the RSS feed that iTunes' 200 cap hides
 
 examples:
   python3 manager.py scrape
@@ -412,10 +485,14 @@ examples:
   python3 manager.py backfill
   python3 manager.py backfill --min-gap 50 --limit 200
   python3 manager.py refresh-descriptions
+  python3 manager.py backfill-rss --dry-run --show "Catalyst with Shayle Kann"
+  python3 manager.py backfill-rss --show "Catalyst with Shayle Kann"
+  python3 manager.py backfill-rss --since 2019-01-01
         """
     )
 
-    parser.add_argument('command', choices=['scrape', 'add', 'status', 'reset', 'backfill', 'refresh-descriptions'],
+    parser.add_argument('command', choices=['scrape', 'add', 'status', 'reset', 'backfill',
+                                            'backfill-rss', 'refresh-descriptions'],
                         help='What to do')
     parser.add_argument('--db', type=str, default='postgresql://localhost/podcast_db',
                         help='Database connection string')
@@ -435,6 +512,16 @@ examples:
                         help='Minimum episode gap before backfilling a show (default: 10)')
     parser.add_argument('--limit', type=int, default=200,
                         help='Episode fetch limit for backfill (max 200, default: 200)')
+    parser.add_argument('--since', type=str, default='2019-01-01',
+                        help='Ignore RSS episodes published before this date '
+                             '(YYYY-MM-DD, default: 2019-01-01; "none" for no cutoff)')
+    parser.add_argument('--dry-run', action='store_true', default=False,
+                        help='Show what backfill-rss would add without writing')
+    parser.add_argument('--show', type=str, default=None,
+                        help='Limit backfill-rss to a single show title')
+    parser.add_argument('--refresh-existing', action='store_true', default=False,
+                        help='Also re-upsert episodes already stored, to fill in '
+                             'metadata they are missing (never clears existing values)')
 
     args = parser.parse_args()
     manager = PodcastManager(args.db)
@@ -472,6 +559,17 @@ examples:
 
     elif args.command == 'backfill':
         manager.backfill_episodes(min_gap=args.min_gap, limit=args.limit)
+
+    elif args.command == 'backfill-rss':
+        since = None
+        if args.since and args.since.lower() != 'none':
+            try:
+                since = datetime.strptime(args.since, '%Y-%m-%d').date()
+            except ValueError:
+                parser.error("--since must be YYYY-MM-DD or 'none'")
+        manager.backfill_from_rss(since=since, show=args.show,
+                                  dry_run=args.dry_run, max_shows=args.max,
+                                  refresh_existing=args.refresh_existing)
 
     elif args.command == 'refresh-descriptions':
         manager.refresh_descriptions()

@@ -1,6 +1,6 @@
 import requests
 import psycopg2
-from datetime import datetime
+from datetime import datetime, date
 import logging
 import json
 import time
@@ -214,15 +214,19 @@ class PodcastScraper:
             season_number, apple_episode_id
         )
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (podcast_id, title) DO UPDATE 
-        SET 
-            description = EXCLUDED.description,
-            audio_url = EXCLUDED.audio_url,
-            duration_seconds = EXCLUDED.duration_seconds,
-            published_date = EXCLUDED.published_date,
-            episode_number = EXCLUDED.episode_number,
-            season_number = EXCLUDED.season_number,
-            apple_episode_id = EXCLUDED.apple_episode_id
+        ON CONFLICT (podcast_id, title) DO UPDATE
+        SET
+            description = COALESCE(NULLIF(EXCLUDED.description, ''), episodes.description),
+            audio_url = COALESCE(EXCLUDED.audio_url, episodes.audio_url),
+            duration_seconds = COALESCE(EXCLUDED.duration_seconds, episodes.duration_seconds),
+            published_date = COALESCE(EXCLUDED.published_date, episodes.published_date),
+            episode_number = COALESCE(EXCLUDED.episode_number, episodes.episode_number),
+            season_number = COALESCE(EXCLUDED.season_number, episodes.season_number),
+            -- Never clear an Apple episode id with a NULL. An RSS-sourced row
+            -- has no trackId, and this column is what gates the Apple credits
+            -- scraper (WHERE apple_episode_id IS NOT NULL) — overwriting it
+            -- would silently switch off our best source of host/guest labels.
+            apple_episode_id = COALESCE(EXCLUDED.apple_episode_id, episodes.apple_episode_id)
         RETURNING episode_id
         """
         
@@ -242,16 +246,26 @@ class PodcastScraper:
         else:
             duration = duration // 1000 if duration else None
         
+        # Written out rather than as a conditional expression: the previous
+        # one-liner parsed as "(published_date or releaseDate) if releaseDate
+        # else None", so an RSS episode — which has published_date and no
+        # releaseDate — always came out None, silently dropping the date.
+        published_date = episode_data.get('published_date')
+        if not published_date and episode_data.get('releaseDate'):
+            try:
+                published_date = datetime.strptime(
+                    episode_data['releaseDate'], '%Y-%m-%dT%H:%M:%SZ'
+                ).date()
+            except ValueError:
+                published_date = None
+
         values = (
             podcast_id,
             episode_data.get('trackName') or episode_data.get('title'),
             episode_data.get('description', ''),
             episode_data.get('episodeUrl') or episode_data.get('link'),
             duration,
-            episode_data.get('published_date') or datetime.strptime(
-                episode_data.get('releaseDate', ''), 
-                '%Y-%m-%dT%H:%M:%SZ'
-            ).date() if episode_data.get('releaseDate') else None,
+            published_date,
             episode_data.get('episode_number'),
             episode_data.get('season_number'),
             episode_data.get('trackId')
@@ -260,6 +274,99 @@ class PodcastScraper:
         self.cursor.execute(query, values)
         episode_id = self.cursor.fetchone()[0]
         return episode_id
+
+    def backfill_from_rss(self, apple_podcast_id: str, since: Optional[date] = None,
+                          dry_run: bool = False, refresh_existing: bool = False) -> Dict:
+        """Add episodes the RSS feed has but iTunes never returned.
+
+        iTunes' Lookup API caps at 200 episodes per show, so process_podcast()
+        can only ever see the most recent 200 — everything older is invisible
+        to it. The RSS feed usually carries the full back catalogue (Climate
+        One serves 914 where iTunes gives 200), so this fills the gap.
+
+        Episodes added here have no apple_episode_id, since that only comes
+        from iTunes. The Apple credits scraper skips them by design; they get
+        credits from description parsing only.
+        """
+        result = {'title': None, 'feed_total': 0, 'considered': 0, 'inserted': 0,
+                  'refreshed': 0, 'existing': 0, 'skipped_old': 0, 'failed': 0}
+        try:
+            return self._backfill_from_rss(apple_podcast_id, since, dry_run,
+                                           refresh_existing, result)
+        except Exception:
+            self.conn.rollback()
+            raise
+        finally:
+            # Same single-use lifecycle as process_podcast: the caller builds
+            # one scraper per show.
+            self.cursor.close()
+            self.conn.close()
+
+    def _backfill_from_rss(self, apple_podcast_id: str, since, dry_run: bool,
+                           refresh_existing: bool, result: Dict) -> Dict:
+        itunes_data = self.fetch_itunes_data(apple_podcast_id)
+        result['title'] = itunes_data['podcast'].get('trackName')
+
+        feed_url = itunes_data['podcast'].get('feedUrl')
+        if not feed_url:
+            raise ValueError("Could not find RSS feed URL")
+
+        rss_data = self.parse_rss_feed(feed_url)
+        result['feed_total'] = len(rss_data['episodes'])
+        if not rss_data['episodes']:
+            logger.warning(f"Feed returned no episodes: {feed_url}")
+            return result
+
+        podcast_id = self.insert_podcast(
+            itunes_data['podcast'], rss_description=rss_data.get('description', '')
+        )
+
+        # Titles already stored for this show — the same key the episodes table
+        # uniquely constrains on, so this predicts exactly what would conflict.
+        self.cursor.execute(
+            "SELECT title FROM episodes WHERE podcast_id = %s", (podcast_id,)
+        )
+        existing_titles = {r[0] for r in self.cursor.fetchall()}
+
+        for rss_episode in rss_data['episodes']:
+            title = (rss_episode.get('title') or '').strip()
+            if not title:
+                continue
+
+            published = rss_episode.get('published_date')
+            if since and published and published < since:
+                result['skipped_old'] += 1
+                continue
+
+            if title in existing_titles and not refresh_existing:
+                result['existing'] += 1
+                continue
+
+            result['considered'] += 1
+            if dry_run:
+                logger.info(f"  [dry-run] would add: {published} — {title[:80]}")
+                continue
+
+            try:
+                # Passed as both arguments on purpose: the first supplies the
+                # RSS-shaped fields, the second makes insert_episode take its
+                # RSS branch for duration ("HH:MM:SS" rather than millis).
+                was_present = title in existing_titles
+                self.insert_episode(rss_episode, podcast_id, rss_episode)
+                existing_titles.add(title)   # feeds can repeat a title
+                if was_present:
+                    result['refreshed'] += 1
+                else:
+                    result['inserted'] += 1
+            except Exception as e:
+                logger.error(f"  Failed to add '{title[:60]}': {e}")
+                result['failed'] += 1
+
+        if dry_run:
+            self.conn.rollback()
+        else:
+            self.conn.commit()
+        return result
 
     def process_podcast(self, apple_podcast_id: str):
         """Main method to process a podcast"""
