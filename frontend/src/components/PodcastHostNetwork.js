@@ -270,7 +270,7 @@ const HostProfileCard = ({ host, connections, onClose }) => {
       </div>
 
       <div>
-        <h4 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">Top Co-Hosts</h4>
+        <h4 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">Appeared Most With</h4>
         <div className="space-y-2">
           {connections
             .sort((a, b) => b.value - a.value)
@@ -297,7 +297,7 @@ const ConnectionDetails = ({ connection, onClose }) => (
     <h3 className="text-xl font-bold mb-4">Connection Details</h3>
     <div className="space-y-4">
       <div>
-        <h4 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">Hosts</h4>
+        <h4 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">People</h4>
         <div className="bg-teal-50 p-3 rounded space-y-2">
           <p className="font-medium">{connection.source.name}</p>
           <div className="flex items-center">
@@ -325,9 +325,11 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
   <div className="space-y-4">
     <div className="grid grid-cols-3 gap-2">
       {[
-        { label: 'Hosts', value: networkStats.visibleNodes },
-        { label: 'Connections', value: networkStats.visibleLinks },
+        // "People", not "Hosts": 1,825 of the 1,952 in the graph appear only
+        // as guests.
         { label: 'Podcasts', value: networkStats.visiblePodcasts },
+        { label: 'People', value: networkStats.visibleNodes },
+        { label: 'Connections', value: networkStats.visibleLinks },
       ].map(({ label, value }) => (
         <div key={label} className="bg-teal-50 rounded-lg text-center py-2">
           <p className="text-lg font-bold text-gray-900 leading-tight">{loading ? ' ' : value}</p>
