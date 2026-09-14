@@ -37,6 +37,13 @@ DESC_SCAN_SKIP_SHOWS = {
 # Minimum word length to consider as a name candidate in suggest mode
 MIN_NAME_LENGTH = 8
 
+# How much of a description to scan. Who is on an episode is established in the
+# opening summary; what follows is links, boilerplate — or, for Volts, a full
+# transcript averaging 18,000 characters and running to 111,000. Scanning those
+# credits everyone the guests merely talked about: Joe Manchin picks up 34
+# Volts credits without ever appearing on the show.
+DESC_SCAN_MAX_CHARS = 2500
+
 # ------------------------------------------------------------------
 # DESCRIPTION CLEANING
 # ------------------------------------------------------------------
@@ -83,14 +90,15 @@ STRIP_AFTER_PATTERNS = [
 ]
 
 
-def clean_description(text: str) -> str:
+def clean_description(text: str, max_chars: int = DESC_SCAN_MAX_CHARS) -> str:
     if not text:
         return ''
     for pattern in STRIP_AFTER_PATTERNS:
         match = re.search(pattern, text)
         if match:
             text = text[:match.start()]
-    return text.strip()
+    text = text.strip()
+    return text[:max_chars] if max_chars else text
 
 
 # ------------------------------------------------------------------
@@ -196,20 +204,25 @@ def get_all_episodes(conn, show: str = None) -> list[dict]:
     ]
 
 
-def get_uncredited_episodes(conn, scan_all: bool = False) -> list[dict]:
-    """Episodes to scan: by default only those with no credits at all.
+def get_episodes_to_scan(conn, uncredited_only: bool = False) -> list[dict]:
+    """Episodes to scan — every episode by default.
 
-    That default exists for speed, and it leaves a real gap — an episode
-    already carrying a host credit is never looked at again, so a guest we
-    failed to spot the first time stays missing forever. scan_all lifts it;
-    inserts are ON CONFLICT DO NOTHING, so existing credits are untouched and
-    only genuinely new ones are added.
+    Scanning only episodes with no credits used to be the default, purely for
+    speed, and it quietly capped what the scanner could ever find: an episode
+    that already had one credit was never looked at again, so a name missed
+    the first time stayed missing. That matters most as the scanner improves —
+    every fix to the matching should be able to reach the whole archive, not
+    just episodes that happen to have no credits yet. The surname index made
+    full scans cheap enough that there is no longer a reason to restrict it.
+
+    Inserts are ON CONFLICT DO NOTHING, so re-scanning never disturbs an
+    existing credit; it only adds ones we missed.
     """
     cur = conn.cursor()
-    where = "" if scan_all else """
+    where = """
         WHERE NOT EXISTS (
             SELECT 1 FROM episode_host eh WHERE eh.episode_id = e.episode_id
-        )"""
+        )""" if uncredited_only else ""
     cur.execute(f"""
         SELECT e.episode_id, e.title, e.description,
                p.podcast_id, p.title AS podcast_title
@@ -434,14 +447,16 @@ def candidate_hosts(text: str, index: dict) -> list:
 
 
 def run(dry_run: bool = True, title_only: bool = False, min_length: int = 7,
-        scan_all: bool = False):
+        uncredited_only: bool = False):
     conn = psycopg2.connect(DB)
     hosts = get_hosts(conn)
-    episodes = get_uncredited_episodes(conn, scan_all=scan_all)
+    episodes = get_episodes_to_scan(conn, uncredited_only=uncredited_only)
     show_hosts = get_show_hosts(conn)
     surname_index = build_surname_index(hosts)
 
-    logger.info(f"Scanning {len(episodes)} uncredited episodes against {len(hosts)} known people...")
+    scope = "uncredited episodes" if uncredited_only else "episodes"
+    logger.info(f"Scanning {len(episodes)} {scope} against {len(hosts)} known names "
+                f"({'titles only' if title_only else 'titles + descriptions'})...")
 
     matches = []
 
@@ -689,9 +704,10 @@ examples:
     )
     parser.add_argument('command', choices=['dry-run', 'run', 'suggest'])
     parser.add_argument('--title-only', action='store_true', default=False)
-    parser.add_argument('--scan-all', action='store_true', default=False,
-                        help='Also re-scan episodes that already have credits, to pick '
-                             'up people missed the first time (existing credits are kept)')
+    parser.add_argument('--uncredited-only', action='store_true', default=False,
+                        help='Only scan episodes with no credits at all. Faster, but the '
+                             'scanner can then never find a name it missed on an episode '
+                             'that already has one credit.')
     parser.add_argument('--min-length', type=int, default=7)
     parser.add_argument('--limit', type=int, default=None,
                         help='Limit number of episodes to scan (suggest mode)')
@@ -709,5 +725,5 @@ examples:
             dry_run=(args.command == 'dry-run'),
             title_only=args.title_only,
             min_length=args.min_length,
-            scan_all=args.scan_all,
+            uncredited_only=args.uncredited_only,
         )
