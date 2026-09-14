@@ -395,6 +395,26 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
       </div>
     </div>
 
+    {/* Min episodes per connection — filters relationships, not people */}
+    <div className="space-y-1">
+      <label className="block text-sm font-medium text-gray-700">
+        Minimum Episodes Together: {currentFilters.minEpisodes}
+      </label>
+      <input
+        type="range" min="1" max="10"
+        value={currentFilters.minEpisodes}
+        onChange={e => onFiltersChange({ minEpisodes: parseInt(e.target.value) })}
+        className="w-full"
+      />
+      <div className="flex justify-between text-xs text-gray-400">
+        <span>1</span><span>10</span>
+      </div>
+      <p className="text-xs text-gray-400">
+        82% of connections are a single shared episode. Raising this leaves only
+        recurring working relationships, which pulls the dense middle apart.
+      </p>
+    </div>
+
     {/* Min cluster size */}
     <div className="space-y-1">
       <label className="block text-sm font-medium text-gray-700">
@@ -462,6 +482,7 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
     <button
       onClick={() => onFiltersChange({
         minConnections: 2, minPodcasts: 1,
+        minEpisodes: 1,
         minClusterSize: 8,
         selectedRoles: ['Host', 'Guest'],
         selectedChannel: 'all', selectedGenre: 'all',
@@ -518,6 +539,7 @@ const PodcastHostNetwork = () => {
   const [currentFilters, setCurrentFilters] = useState({
     minConnections: 2,
     minPodcasts: 1,
+    minEpisodes: 1,
     minClusterSize: 8,
     selectedRoles: ['Host', 'Guest'],
     selectedChannel: 'all',
@@ -630,6 +652,11 @@ const PodcastHostNetwork = () => {
 
     const validIds = new Set(filteredNodes.map(n => n.id));
     const filteredLinks = graphData.links.filter(l => {
+      // Weak ties are the webbing that holds the middle together: 82% of links
+      // are one shared episode, and each pulls as hard as a 350-episode
+      // co-hosting bond. Dropping them is the only thing that separates the
+      // clusters — no force setting comes close.
+      if (l.value < currentFilters.minEpisodes) return false;
       const src = l.source?.id ?? l.source;
       const tgt = l.target?.id ?? l.target;
       return validIds.has(src) && validIds.has(tgt);
