@@ -374,13 +374,18 @@ const ConnectionDetails = ({ connection, onClose }) => (
 
 const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuery, onSearchChange, loading, isAdmin }) => (
   <div className="space-y-4">
-    <div className="grid grid-cols-3 gap-2">
+    <div className="grid grid-cols-4 gap-2">
       {[
         // "People", not "Hosts": 1,825 of the 1,952 in the graph appear only
         // as guests.
         { label: 'Podcasts', value: networkStats.visiblePodcasts },
         { label: 'People', value: networkStats.visibleNodes },
         { label: 'Connections', value: networkStats.visibleLinks },
+        // Not "Episodes". value is COUNT(DISTINCT episode_id) per PAIR, so an
+        // episode crediting three people is counted by all three of its pairs.
+        // Summing gives times two people shared an episode, which is a real
+        // figure and not an episode count.
+        { label: 'Co-appearances', value: networkStats.visibleCoAppearances },
       ].map(({ label, value }) => (
         <div key={label} className="bg-teal-50 rounded-lg text-center py-2">
           <p className="text-lg font-bold text-gray-900 leading-tight">{loading ? ' ' : value}</p>
@@ -455,33 +460,6 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
       ))}
     </div>
 
-    {/* Genre & Channel */}
-    <div className="grid grid-cols-2 gap-3">
-      <div className="space-y-1">
-        <label className="block text-sm font-medium text-gray-700">Genre</label>
-        <select
-          value={currentFilters.selectedGenre}
-          onChange={e => onFiltersChange({ selectedGenre: e.target.value })}
-          className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm shadow-sm focus:border-teal-500 focus:outline-none"
-        >
-          <option value="all">All Genres</option>
-          {networkStats.genres?.map(g => <option key={g} value={g}>{g}</option>)}
-        </select>
-      </div>
-
-      <div className="space-y-1">
-        <label className="block text-sm font-medium text-gray-700">Channel</label>
-        <select
-          value={currentFilters.selectedChannel}
-          onChange={e => onFiltersChange({ selectedChannel: e.target.value })}
-          className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm shadow-sm focus:border-teal-500 focus:outline-none"
-        >
-          <option value="all">All Channels</option>
-          {networkStats.channels?.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
-      </div>
-    </div>
-
     <button
       onClick={() => onFiltersChange({
         minConnections: 2, minPodcasts: 1,
@@ -501,6 +479,35 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
     {isAdmin && (
     <div className="space-y-4 border-t border-gray-200 pt-4">
       <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Admin</p>
+
+      {/* Genre and Channel are podcast properties shown against people, so a
+          person's genre is whichever show happened to be listed first. Hidden
+          until that is fixed. */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <label className="block text-sm font-medium text-gray-700">Genre</label>
+          <select
+            value={currentFilters.selectedGenre}
+            onChange={e => onFiltersChange({ selectedGenre: e.target.value })}
+            className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm shadow-sm focus:border-teal-500 focus:outline-none"
+          >
+            <option value="all">All Genres</option>
+            {networkStats.genres?.map(g => <option key={g} value={g}>{g}</option>)}
+          </select>
+        </div>
+
+        <div className="space-y-1">
+          <label className="block text-sm font-medium text-gray-700">Channel</label>
+          <select
+            value={currentFilters.selectedChannel}
+            onChange={e => onFiltersChange({ selectedChannel: e.target.value })}
+            className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm shadow-sm focus:border-teal-500 focus:outline-none"
+          >
+            <option value="all">All Channels</option>
+            {networkStats.channels?.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+      </div>
 
       {/* Min episodes per connection — filters relationships, not people */}
       <div className="space-y-1">
@@ -836,11 +843,13 @@ const PodcastHostNetwork = () => {
   // Update visible stats when filtered data changes
   useEffect(() => {
     const visiblePodcasts = new Set(filteredGraphData.links.map(l => l.podcast)).size;
+    const visibleCoAppearances = filteredGraphData.links.reduce((a, l) => a + l.value, 0);
     setNetworkStats(prev => ({
       ...prev,
       visibleNodes: filteredGraphData.nodes.length,
       visibleLinks: filteredGraphData.links.length,
       visiblePodcasts,
+      visibleCoAppearances,
     }));
   }, [filteredGraphData]);
 
