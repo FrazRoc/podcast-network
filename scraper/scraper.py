@@ -51,6 +51,66 @@ def normalize_episode_title(title: str, strip_numbering: bool = True) -> str:
     return re.sub(r'[^a-z0-9]+', '', t.lower())
 
 
+def compute_duration_seconds(episode_data: Dict, rss_data: Optional[Dict] = None) -> Optional[int]:
+    """Convert an episode's duration to seconds, from RSS ("HH:MM:SS") or iTunes (millis)."""
+    duration = rss_data.get('duration', '') if rss_data else episode_data.get('trackTimeMillis', 0)
+    if isinstance(duration, str):
+        try:
+            parts = duration.split(':')
+            if len(parts) == 3:
+                return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+            elif len(parts) == 2:
+                return int(parts[0]) * 60 + int(parts[1])
+            else:
+                return int(duration)
+        except (ValueError, IndexError):
+            return None
+    return duration // 1000 if duration else None
+
+
+def compute_published_date(episode_data: Dict) -> Optional[date]:
+    """Pick an episode's published date from RSS or iTunes fields.
+
+    Written out rather than as a conditional expression: the previous
+    one-liner parsed as "(published_date or releaseDate) if releaseDate
+    else None", so an RSS episode — which has published_date and no
+    releaseDate — always came out None, silently dropping the date.
+    """
+    published_date = episode_data.get('published_date')
+    if not published_date and episode_data.get('releaseDate'):
+        try:
+            return datetime.strptime(
+                episode_data['releaseDate'], '%Y-%m-%dT%H:%M:%SZ'
+            ).date()
+        except ValueError:
+            return None
+    return published_date
+
+
+def compute_match_gate(stored_titles: List[str], feed_titles: List[str], key_of,
+                        force: bool = False):
+    """Decide whether an RSS feed's titles line up well enough with what we
+    already have to dedupe safely.
+
+    Returns (existing_by_key, existing_titles, matched, skip). See
+    `_backfill_from_rss` for why: SunCast's feed numbers every episode, so
+    only 10 of 210 stored titles matched and an unguarded run would have
+    inserted 831 duplicates.
+    """
+    existing_by_key = {}
+    for t in stored_titles:
+        k = key_of(t)
+        if k:
+            existing_by_key.setdefault(k, t)
+    existing_titles = set(existing_by_key)
+
+    feed_keys = {key_of(t or '') for t in feed_titles}
+    matched = len(existing_titles & feed_keys)
+    skip = (not force and len(stored_titles) >= MIN_EPISODES_FOR_MATCH_CHECK and
+            matched < len(stored_titles) * MIN_TITLE_MATCH_RATIO)
+    return existing_by_key, existing_titles, matched, skip
+
+
 def pick_title_key(feed_titles):
     """Choose how to key this show's episodes, then return that key function.
 
@@ -286,34 +346,8 @@ class PodcastScraper:
         RETURNING episode_id
         """
         
-        # Convert duration string to seconds if from RSS
-        duration = rss_data.get('duration', '') if rss_data else episode_data.get('trackTimeMillis', 0)
-        if isinstance(duration, str):
-            try:
-                parts = duration.split(':')
-                if len(parts) == 3:
-                    duration = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
-                elif len(parts) == 2:
-                    duration = int(parts[0]) * 60 + int(parts[1])
-                else:
-                    duration = int(duration)
-            except (ValueError, IndexError):
-                duration = None
-        else:
-            duration = duration // 1000 if duration else None
-        
-        # Written out rather than as a conditional expression: the previous
-        # one-liner parsed as "(published_date or releaseDate) if releaseDate
-        # else None", so an RSS episode — which has published_date and no
-        # releaseDate — always came out None, silently dropping the date.
-        published_date = episode_data.get('published_date')
-        if not published_date and episode_data.get('releaseDate'):
-            try:
-                published_date = datetime.strptime(
-                    episode_data['releaseDate'], '%Y-%m-%dT%H:%M:%SZ'
-                ).date()
-            except ValueError:
-                published_date = None
+        duration = compute_duration_seconds(episode_data, rss_data)
+        published_date = compute_published_date(episode_data)
 
         values = (
             podcast_id,
@@ -393,25 +427,13 @@ class PodcastScraper:
         # the title already there — iTunes titles carry stray characters the
         # feed lacks (one ends in a U+202F narrow no-break space), and inserting
         # the feed's spelling would quietly create a second row for the episode.
-        existing_by_key = {}
-        for t in stored:
-            k = key_of(t)
-            if k:
-                existing_by_key.setdefault(k, t)
-        existing_titles = set(existing_by_key)
-
-        # Safety gate. Dedupe rests entirely on titles lining up, and some
-        # feeds title episodes quite differently from iTunes — SunCast's feed
-        # numbers every episode, so only 10 of our 210 matched and a run would
-        # have inserted 831 duplicates of episodes we already had. If the feed
-        # cannot account for most of what we hold, we cannot tell new episodes
-        # from ones we already have, so refuse rather than guess.
-        feed_keys = {key_of(e.get('title') or '') for e in rss_data['episodes']}
-        matched = len(existing_titles & feed_keys)
+        feed_titles = [e.get('title') or '' for e in rss_data['episodes']]
+        existing_by_key, existing_titles, matched, skip = compute_match_gate(
+            stored, feed_titles, key_of, force=force
+        )
         result['stored'] = len(stored)
         result['matched'] = matched
-        if not force and len(stored) >= MIN_EPISODES_FOR_MATCH_CHECK and \
-                matched < len(stored) * MIN_TITLE_MATCH_RATIO:
+        if skip:
             result['skipped_show'] = True
             logger.warning(
                 f"  Skipping: feed titles match only {matched}/{len(stored)} stored "
