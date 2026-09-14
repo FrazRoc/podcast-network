@@ -44,6 +44,11 @@ def verify_admin(x_admin_password: str = Header(default=None)):
 # used as an open proxy / SSRF vector.
 ALLOWED_IMAGE_HOST_SUFFIXES = ('mzstatic.com', 'unavatar.io', 'bsky.app')
 
+# Whether /api/host-connections returns {nodes, links} (about a quarter of the
+# size) or the legacy row-per-edge array. Turn on only once a frontend that
+# understands both shapes is deployed.
+GRAPH_PAYLOAD_NORMALISED = os.getenv("GRAPH_PAYLOAD_NORMALISED", "false").lower() == "true"
+
 
 def is_allowed_image_url(url: str) -> bool:
     try:
@@ -191,6 +196,14 @@ async def get_host_connections():
         results = cur.fetchall()
         cur.close()
         conn.close()
+
+        # Serve the row-per-edge array until every client can read {nodes,
+        # links}. The browser bundle and this service deploy independently and
+        # the backend lands first, so changing the shape here first left the
+        # old frontend calling .forEach on an object and the graph empty. Flip
+        # this once the deployed frontend is known to handle both.
+        if not GRAPH_PAYLOAD_NORMALISED:
+            return results
 
         # Return nodes and links separately rather than a row per edge. Every
         # row repeated both people's name, image, channel and genre in full, so
