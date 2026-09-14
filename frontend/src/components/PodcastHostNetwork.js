@@ -1177,7 +1177,7 @@ const PodcastHostNetwork = () => {
             // had zoomed in.
             if (hasAutoFitted.current) return;
             hasAutoFitted.current = true;
-            graphRef.current?.zoomToFit(400, 60);
+            graphRef.current?.zoomToFit(400, 30);
           }}
 
           // Events
