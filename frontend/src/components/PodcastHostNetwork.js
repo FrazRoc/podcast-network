@@ -424,67 +424,6 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
       </div>
     </div>
 
-    {/* Min episodes per connection — filters relationships, not people */}
-    <div className="space-y-1">
-      <label className="block text-sm font-medium text-gray-700">
-        Minimum Episodes Together: {currentFilters.minEpisodes}
-      </label>
-      <input
-        type="range" min="1" max="10"
-        value={currentFilters.minEpisodes}
-        onChange={e => onFiltersChange({ minEpisodes: parseInt(e.target.value) })}
-        className="w-full"
-      />
-      <div className="flex justify-between text-xs text-gray-400">
-        <span>1</span><span>10</span>
-      </div>
-      <p className="text-xs text-gray-400">
-        82% of connections are a single shared episode. Raising this leaves only
-        recurring working relationships, which pulls the dense middle apart.
-      </p>
-    </div>
-
-    {/* Layout controls — only useful if you are tuning the graph itself */}
-    {isAdmin && (
-    <div className="space-y-4 border-t border-gray-200 pt-4">
-      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Admin</p>
-
-      <div className="space-y-1">
-        <label className="block text-sm font-medium text-gray-700">
-          Minimum Cluster Size: {currentFilters.minClusterSize}
-        </label>
-        <input
-          type="range" min="1" max="20"
-          value={currentFilters.minClusterSize}
-          onChange={e => onFiltersChange({ minClusterSize: parseInt(e.target.value) })}
-          className="w-full"
-        />
-        <div className="flex justify-between text-xs text-gray-400">
-          <span>1</span><span>20</span>
-        </div>
-      </div>
-
-      <div className="space-y-1">
-        <label className="block text-sm font-medium text-gray-700">
-          Repulsion: {currentFilters.repulsion}
-        </label>
-        <input
-          type="range" min="10" max="400" step="10"
-          value={currentFilters.repulsion}
-          onChange={e => onFiltersChange({ repulsion: parseInt(e.target.value) })}
-          className="w-full"
-        />
-        <div className="flex justify-between text-xs text-gray-400">
-          <span>10</span><span>400</span>
-        </div>
-        <p className="text-xs text-gray-400">
-          How hard nodes push each other apart. Re-runs the layout. At 30 the
-          centre is 77% covered in circles; 60 halves that, 180 reaches 15% but
-          spreads the graph twice as wide.
-        </p>
-      </div>
-    </div>
-    )}
 
     {/* Roles */}
     <div className="flex items-center gap-4">
@@ -546,6 +485,69 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
     >
       Reset Filters
     </button>
+
+    {/* Everything below Reset is for tuning the graph, not exploring it, so the
+        public panel and the admin panel are the same view plus a tail. */}
+    {isAdmin && (
+    <div className="space-y-4 border-t border-gray-200 pt-4">
+      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Admin</p>
+
+      {/* Min episodes per connection — filters relationships, not people */}
+      <div className="space-y-1">
+        <label className="block text-sm font-medium text-gray-700">
+          Minimum Episodes Together: {currentFilters.minEpisodes}
+        </label>
+        <input
+          type="range" min="1" max="10"
+          value={currentFilters.minEpisodes}
+          onChange={e => onFiltersChange({ minEpisodes: parseInt(e.target.value) })}
+          className="w-full"
+        />
+        <div className="flex justify-between text-xs text-gray-400">
+          <span>1</span><span>10</span>
+        </div>
+        <p className="text-xs text-gray-400">
+          82% of connections are a single shared episode. Raising this leaves only
+          recurring working relationships, which pulls the dense middle apart.
+        </p>
+      </div>
+
+      <div className="space-y-1">
+        <label className="block text-sm font-medium text-gray-700">
+          Minimum Cluster Size: {currentFilters.minClusterSize}
+        </label>
+        <input
+          type="range" min="1" max="20"
+          value={currentFilters.minClusterSize}
+          onChange={e => onFiltersChange({ minClusterSize: parseInt(e.target.value) })}
+          className="w-full"
+        />
+        <div className="flex justify-between text-xs text-gray-400">
+          <span>1</span><span>20</span>
+        </div>
+      </div>
+
+      <div className="space-y-1">
+        <label className="block text-sm font-medium text-gray-700">
+          Repulsion: {currentFilters.repulsion}
+        </label>
+        <input
+          type="range" min="10" max="400" step="10"
+          value={currentFilters.repulsion}
+          onChange={e => onFiltersChange({ repulsion: parseInt(e.target.value) })}
+          className="w-full"
+        />
+        <div className="flex justify-between text-xs text-gray-400">
+          <span>10</span><span>400</span>
+        </div>
+        <p className="text-xs text-gray-400">
+          How hard nodes push each other apart. Re-runs the layout. At 30 the
+          centre is 77% covered in circles; 60 halves that, 180 reaches 15% but
+          spreads the graph twice as wide.
+        </p>
+      </div>
+    </div>
+    )}
   </div>
 );
 
