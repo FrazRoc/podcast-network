@@ -71,7 +71,7 @@ const processNormalised = ({ nodes: rawNodes, links: rawLinks }) => {
   });
   return {
     nodes: [...nodes.values()].map(n => ({ ...n, podcasts: [...n.podcasts] })),
-    links,
+    links: fanOutParallelLinks(links),
   };
 };
 
@@ -80,6 +80,31 @@ const processNormalised = ({ nodes: rawNodes, links: rawLinks }) => {
 // Accepts both shapes the API has served: the current {nodes, links}, and the
 // older row-per-edge array. The two deploy separately, so during a rollout the
 // page may meet either one.
+// 153 pairs of people are joined by more than one link — Stephen Lacey and
+// Katherine Hamilton by six, across four different shows — and every one of
+// them was drawn along the same straight line, so four working relationships
+// looked like one. Spreading them over a range of curvatures fans them into a
+// visible bundle. The sign is taken from the lower id so that a link stored
+// A->B and one stored B->A bow the same way instead of cancelling out.
+const MAX_CURVE = 0.32;
+const fanOutParallelLinks = (links) => {
+  const byPair = new Map();
+  links.forEach(l => {
+    const key = l.source < l.target ? `${l.source}|${l.target}` : `${l.target}|${l.source}`;
+    if (!byPair.has(key)) byPair.set(key, []);
+    byPair.get(key).push(l);
+  });
+  byPair.forEach(group => {
+    if (group.length === 1) { group[0].curvature = 0; return; }
+    const half = (group.length - 1) / 2;
+    group.forEach((l, i) => {
+      const offset = ((i - half) / half) * MAX_CURVE;
+      l.curvature = l.source <= l.target ? offset : -offset;
+    });
+  });
+  return links;
+};
+
 const processData = (data) => {
   if (data && !Array.isArray(data) && Array.isArray(data.nodes)) {
     return processNormalised(data);
@@ -140,7 +165,7 @@ const processData = (data) => {
   // Convert Sets to Arrays
   nodes.forEach(node => { node.podcasts = Array.from(node.podcasts); });
 
-  return { nodes: Array.from(nodes.values()), links };
+  return { nodes: Array.from(nodes.values()), links: fanOutParallelLinks(links) };
 };
 
 // ─── Connected component filter ───────────────────────────────────────────────
@@ -689,6 +714,11 @@ const PodcastHostNetwork = () => {
   );
 
   // Interaction handlers
+  const clearSelection = useCallback(() => {
+    setSelectedNode(null); setSelectedNodeConnections([]); setSelectedLink(null);
+    setHighlightNodes(new Set()); setHighlightLinks(new Set()); setSelectedLinks(new Set());
+  }, []);
+
   const handleNodeClick = useCallback(node => {
     if (selectedNode?.id === node.id) {
       setSelectedNode(null); setSelectedNodeConnections([]);
@@ -947,6 +977,9 @@ const PodcastHostNetwork = () => {
             selectedLinks.has(link) || highlightLinks.has(link) ? 3 : 0
           }
           linkDirectionalParticleWidth={2}
+          linkCurvature={link => link.curvature || 0}
+          // Links are thin and crowded; the 4px default makes them fiddly to hit.
+          linkHoverPrecision={8}
 
           // Forces
           // No linkDistance / linkStrength / d3ForceStrength here: force-graph
@@ -986,6 +1019,7 @@ const PodcastHostNetwork = () => {
           }}
 
           // Events
+          onBackgroundClick={clearSelection}
           onNodeClick={handleNodeClick}
           onNodeHover={handleNodeHover}
           onLinkClick={handleLinkClick}
