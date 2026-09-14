@@ -8,7 +8,7 @@
     "d3-force": "^3.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-force-graph": "^1.46.0",
+    "react-force-graph-2d": "^1.29.1",
     "react-scripts": "5.0.1",
     "web-vitals": "^4.2.4"
   },

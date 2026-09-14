@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { ForceGraph2D } from 'react-force-graph';
+// The 2D entry point, not the 'react-force-graph' barrel: that one imports all
+// four renderers at module scope, so three.js, A-Frame and AR.js were bundled
+// and shipped on every load despite nothing here being able to reach them.
+import ForceGraph2D from 'react-force-graph-2d';
 import { forceX, forceY, forceCollide } from 'd3-force';
 import { API_BASE_URL } from '../config';
 
@@ -574,7 +577,7 @@ const PodcastHostNetwork = () => {
     // tight) and the spread of spacing around the outer nodes falls from 0.93
     // to 0.74, flattening the periphery into an even ring. At 1u both match an
     // uncollided layout to two decimal places, and no pair overlaps.
-    graph.d3Force('collide', forceCollide(node => nodeRadius(node) + RING_WIDTH + 1).iterations(1));
+    graph.d3Force('collide', forceCollide(node => nodeRadius(node) + RING_WIDTH + 1).iterations(2));
     graph._forcesSet = true;
   }, []);
   const imageCache = useImageCache(graphData.nodes);
@@ -946,7 +949,13 @@ const PodcastHostNetwork = () => {
           linkDirectionalParticleWidth={2}
 
           // Forces
-          d3ForceStrength={-180}
+          // No linkDistance / linkStrength / d3ForceStrength here: force-graph
+          // has never had those props — it builds forceLink() and
+          // forceManyBody() with no arguments, so the layout has always run on
+          // d3's defaults (link distance 30, charge -30) and the three values
+          // set here were read by nothing. To really change them, reach the
+          // force through d3Force('link') / d3Force('charge') as installForces
+          // does above, and re-measure: they move the layout a long way.
           // Was 0.01, which needs ~690 ticks to converge. d3's own default gets
           // there in 300 with an identical result — measured on the live graph,
           // same zero overlaps, same zero crowding.
@@ -957,8 +966,6 @@ const PodcastHostNetwork = () => {
           // wiggling. alphaMin lets it stop when it converges instead; nodes are
           // moving 0.014u/tick by then, so there is no visible snap.
           d3AlphaMin={0.001}
-          linkDistance={70}
-          linkStrength={0.2}
           cooldownTicks={Infinity}
 
           // Dimensions & interaction
