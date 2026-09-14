@@ -32,7 +32,21 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
           sudo apt-get update -qq
           sudo apt-get install -y -qq postgresql-client-18
-          pg_dump --version
+          # The runner ships its own client at /usr/bin, which wins on PATH and
+          # is older — the first run installed 18 correctly and still dumped
+          # with 16.15. Put the new one first for every later step.
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
+          export PATH=/usr/lib/postgresql/18/bin:$PATH
+
+          # Assert rather than print: `pg_dump --version` exits 0 whatever it
+          # reports, so printing it let the wrong client through unnoticed.
+          server_major=$(psql "${{ secrets.DATABASE_URL }}" -t -A -c "SHOW server_version;" | cut -d. -f1)
+          client_major=$(pg_dump --version | grep -oE '[0-9]+' | head -1)
+          echo "server=$server_major client=$client_major"
+          if [ "$client_major" -lt "$server_major" ]; then
+            echo "::error::pg_dump $client_major cannot dump a PostgreSQL $server_major server"
+            exit 1
+          fi
 
       - name: Dump
         env:
@@ -64,7 +78,7 @@ jobs:
           # database — counting rows in the dump file itself is fragile, and
           # proving it restores is the property actually worth having.
           sudo systemctl stop postgresql 2>/dev/null || true
-          export PATH=/usr/lib/postgresql/18/bin:$PATH
+          mkdir -p /tmp/verify
           initdb -D /tmp/verify/data -U postgres --auth=trust > /dev/null
           pg_ctl -D /tmp/verify/data -o "-p 55499" -l /tmp/verify/server.log start
           for i in $(seq 30); do pg_isready -h 127.0.0.1 -p 55499 -q && break; sleep 1; done
