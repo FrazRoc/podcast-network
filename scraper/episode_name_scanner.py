@@ -397,6 +397,11 @@ _ORG_WORDS = {
     # Show-note furniture that reads as a second name after "and"/"with".
     'transcript', 'bonus', 'takeaways', 'highlights', 'recap', 'roundup',
     'edition', 'special', 'series', 'episode', 'newsletter', 'webinar',
+    # Title nouns that survive the role-prefix strip: "Chief Revenue Officer"
+    # loses "Chief" and the rest reads as a name.
+    'officer', 'president', 'chair', 'chairman', 'chairwoman', 'treasurer',
+    'fellow', 'scholar', 'ambassador', 'counsel', 'administrator', 'commissioner',
+    'director', 'directors', 'manager', 'strategist', 'advisor',
 }
 
 
@@ -429,6 +434,64 @@ def _valid_name(name: str) -> bool:
     for w in words:
         if not (w[0].isupper() or ord(w[0]) > 127): return False
     return True
+
+
+# Some shows state the line-up outright — "Moderator: Michael Eyman, Managing
+# Director, Origis Services" / "Guest: Dr. Charles Sims, Director for ...".
+# That is a statement of role, not a shape to infer one from, and it covers
+# roughly 645 episodes including 354 of Climate One's.
+_LABEL_RE = re.compile(
+    r'(?:^|\n)[ \t]*(Hosts?|Moderators?|Guests?|Interviewee)[ \t]*:[ \t]*(.+)',
+    re.IGNORECASE
+)
+_HOST_LABELS = {'host', 'hosts', 'moderator', 'moderators'}
+
+
+# A line that is itself a section heading ends the list of people under a
+# label: Climate One follows its guests with "Highlights:" and timestamps.
+_SECTION_RE = re.compile(r'^\s*[A-Z][A-Za-z /&\'-]{0,28}:\s*$')
+_TIMESTAMP_RE = re.compile(r'^\s*\d{1,2}:\d{2}')
+
+
+def _names_from_entry(entry: str, is_guest: bool, found: list):
+    for part in re.split(r';|\s+(?:and|&|with)\s+', entry):
+        # Everything after the first comma is the person's job title.
+        name = strip_honorific(part.strip().split(',')[0].strip(' .'))
+        if _valid_name(name):
+            found.append((name, is_guest))
+
+
+def extract_labelled_credits(text: str) -> list[tuple[str, bool]]:
+    """Names from explicit Host:/Guest: labels, as (name, is_guest).
+
+    Handles both shapes seen in the feeds: the names on the same line as the
+    label, and the label alone on its line with one person per line beneath —
+    Climate One writes 354 episodes the second way.
+    """
+    found = []
+    lines = (text or '').split('\n')
+    for i, line in enumerate(lines):
+        match = re.match(r'\s*(Hosts?|Moderators?|Guests?|Interviewee)\s*:\s*(.*)$',
+                         line, re.IGNORECASE)
+        if not match:
+            continue
+        is_guest = match.group(1).lower() not in _HOST_LABELS
+
+        if match.group(2).strip():
+            _names_from_entry(match.group(2), is_guest, found)
+            continue
+
+        # Label alone: take the people listed beneath it.
+        for following in lines[i + 1:]:
+            if not following.strip():
+                continue
+            if _SECTION_RE.match(following) or _TIMESTAMP_RE.match(following):
+                break
+            before = len(found)
+            _names_from_entry(following, is_guest, found)
+            if len(found) == before:      # a line that is not a person ends the list
+                break
+    return found
 
 
 def extract_candidate_names(text: str) -> list[tuple[str, str]]:
@@ -549,6 +612,38 @@ def candidate_hosts(text: str, index: dict) -> list:
     return out
 
 
+def show_host_first_names(conn) -> dict:
+    """First names of each show's registered hosts, keyed by podcast_id.
+
+    Shows refer to their own hosts by first name — Redefining Energy writes
+    "Gerard and Laurent welcome ..." — so matching full names alone credited
+    Gerard Reid on 7 of 205 episodes. A registered host is already known to
+    belong to the show, which makes a first name enough inside it.
+
+    A first name shared by two of the same show's hosts is left out: there is
+    no way to tell which one is meant.
+    """
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT hp.podcast_id, hp.host_id, h.first_name
+        FROM host_podcast hp JOIN hosts h ON h.host_id = hp.host_id
+        WHERE h.first_name IS NOT NULL AND length(h.first_name) >= 3
+    """)
+    by_show = {}
+    for podcast_id, host_id, first_name in cur.fetchall():
+        by_show.setdefault(podcast_id, []).append((host_id, first_name))
+    cur.close()
+
+    result = {}
+    for podcast_id, entries in by_show.items():
+        seen = defaultdict(int)
+        for _, first_name in entries:
+            seen[first_name.lower()] += 1
+        result[podcast_id] = [(host_id, first_name) for host_id, first_name in entries
+                              if seen[first_name.lower()] == 1]
+    return result
+
+
 def run(dry_run: bool = True, title_only: bool = False, min_length: int = 7,
         uncredited_only: bool = False):
     conn = psycopg2.connect(DB)
@@ -556,6 +651,7 @@ def run(dry_run: bool = True, title_only: bool = False, min_length: int = 7,
     episodes = get_episodes_to_scan(conn, uncredited_only=uncredited_only)
     show_hosts = get_show_hosts(conn)
     surname_index = build_surname_index(hosts)
+    host_first_names = show_host_first_names(conn)
 
     scope = "uncredited episodes" if uncredited_only else "episodes"
     logger.info(f"Scanning {len(episodes)} {scope} against {len(hosts)} known names "
@@ -578,6 +674,8 @@ def run(dry_run: bool = True, title_only: bool = False, min_length: int = 7,
             title + ('\n' + clean_desc if scan_desc else ''), surname_index
         )
 
+        matched_here = set()
+
         for host in candidates:
             host_id   = host['host_id']
             full_name = host['full_name']
@@ -591,6 +689,7 @@ def run(dry_run: bool = True, title_only: bool = False, min_length: int = 7,
                 continue
 
             if name_in_text(full_name, title):
+                matched_here.add(host_id)
                 matches.append({
                     'episode_id': episode_id, 'host_id': host_id,
                     'full_name': full_name, 'podcast_title': podcast_title,
@@ -600,11 +699,26 @@ def run(dry_run: bool = True, title_only: bool = False, min_length: int = 7,
                 continue
 
             if scan_desc and name_in_text(full_name, clean_desc):
+                matched_here.add(host_id)
                 matches.append({
                     'episode_id': episode_id, 'host_id': host_id,
                     'full_name': full_name, 'podcast_title': podcast_title,
                     'episode_title': title, 'source': 'parsed_desc',
                     'is_show_host': is_show_host,
+                })
+
+        # A registered host named only by their first name still counts, but
+        # only where their full name did not already match on this episode.
+        haystack = title + ('\n' + clean_desc if scan_desc else '')
+        for host_id, first_name in host_first_names.get(podcast_id, ()):
+            if host_id in matched_here:
+                continue
+            if name_in_text(first_name, haystack):
+                matches.append({
+                    'episode_id': episode_id, 'host_id': host_id,
+                    'full_name': first_name, 'podcast_title': podcast_title,
+                    'episode_title': title, 'source': 'host_first_name',
+                    'is_show_host': True,
                 })
 
     logger.info(f"Found {len(matches)} matches")
@@ -705,7 +819,10 @@ def suggest(title_only: bool = False, limit: int = None, show: str = None,
                 sources.append(('parsed_desc', clean_desc))
 
         for source, text in sources:
-            candidates = extract_candidate_names(text)
+            # A "Guest:"/"Moderator:" label states the line-up rather than
+            # implying it, so take those as well as the inferred matches.
+            candidates = [(n, text[:160]) for n, _ in extract_labelled_credits(text)]
+            candidates += extract_candidate_names(text)
 
             for name, context in candidates:
                 name_lower = name.lower()
