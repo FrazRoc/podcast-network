@@ -538,12 +538,17 @@ const PodcastHostNetwork = () => {
     graph.d3Force('x', forceX(0).strength(0.08));
     graph.d3Force('y', forceY(0).strength(0.08));
     // Nothing previously kept two nodes from occupying the same point, so the
-    // default view settled with 103 pairs permanently overlapping, the worst
-    // 60% buried. Radius is what gets drawn plus the ring, and a 6u gap —
-    // swept against the live graph as the smallest padding that leaves every
-    // node clear space. It rearranges locally: the bounding box, and so the
-    // zoom the graph settles at, is unchanged.
-    graph.d3Force('collide', forceCollide(node => nodeRadius(node) + RING_WIDTH + 6).iterations(1));
+    // default view settled with 107 pairs permanently overlapping, the worst
+    // 60% buried. Radius is what gets drawn plus the ring, and 1u of margin.
+    //
+    // Keep that margin small. Uneven density is signal here — it is what shows
+    // a group as poorly connected to the rest — and a wider collision radius
+    // erases it. At 6u the clear space inside the dense core more than doubles
+    // (5.5u to 11.9u, inflating exactly the clusters that should read as
+    // tight) and the spread of spacing around the outer nodes falls from 0.93
+    // to 0.74, flattening the periphery into an even ring. At 1u both match an
+    // uncollided layout to two decimal places, and no pair overlaps.
+    graph.d3Force('collide', forceCollide(node => nodeRadius(node) + RING_WIDTH + 1).iterations(1));
     graph._forcesSet = true;
   }, []);
   const imageCache = useImageCache(graphData.nodes);
