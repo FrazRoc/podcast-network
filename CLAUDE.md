@@ -162,6 +162,67 @@ production build at a domain root needs `PUBLIC_URL=/`.
 **Scheduled jobs:** `scrape.yml` at `17 */6 * * *`, `backup.yml` at
 `41 4 * * *`. Backups are verified restorable.
 
+### Reaching the production database
+
+The scrapers read `DATABASE_URL` through `os.getenv` and **do not load a .env
+file themselves**, so putting one in place is not enough — it has to be
+exported:
+
+```
+set -a; source .env; set +a          # repo-root .env, gitignored, mode 600
+psql "$DATABASE_URL" -c '\dt'
+```
+
+`manager.py` also takes the connection string directly, which is what the
+workflow does:
+
+```
+python3 manager.py status --db "$DATABASE_URL"
+python3 manager.py scrape --new-only --db "$DATABASE_URL"
+```
+
+Commands: `scrape`, `add`, `status`, `reset`, `backfill`, `backfill-rss`,
+`refresh-descriptions`. Useful flags: `--new-only`, `--podcast <exact title>`,
+`--max`, `--dry-run`, `--limit`, `--since`, `--force`.
+
+This is the **live production database**. There is no staging copy. The
+read-only checks are free; anything that writes falls under the
+quantify-and-approve rule above, and the `lock_timeout` rule applies to every
+migration.
+
+### Triggering the remote jobs
+
+`gh` is authenticated as FrazRoc and its token carries the `workflow` scope,
+and both workflows declare `workflow_dispatch`, so they can be started by
+hand:
+
+```
+gh workflow run scrape.yml                                   # full sweep
+gh workflow run scrape.yml -f podcast_title="Catalyst with Shayle Kann"
+gh workflow run backup.yml
+
+gh run list --workflow scrape.yml --limit 5
+gh run watch <run-id>
+gh run view <run-id> --log-failed
+```
+
+Runs fire against **`main`**, not whatever branch is checked out locally, so
+scraper changes have to be pushed and mirrored before a dispatched run picks
+them up. A full sweep takes 20-45 minutes.
+
+### Two sessions, one database
+
+Work happens in two git worktrees against one production database and one
+repo. Git keeps the branches apart; nothing keeps the database apart.
+
+- Only one session runs migrations or bulk writes at a time. The `ALTER TABLE`
+  lock cascade above is exactly what concurrent schema work reproduces, and it
+  is much harder to diagnose with two actors.
+- Don't start a scrape while the other session is mid-migration, or vice
+  versa.
+- After the other session pushes, `git pull --ff-only` before committing, or
+  the branches diverge and need a merge that neither of you intended.
+
 ## Open threads
 
 - Free Postgres expires around 2026-10-11 — migration decision needed
