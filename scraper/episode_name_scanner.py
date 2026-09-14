@@ -87,6 +87,13 @@ STRIP_AFTER_PATTERNS = [
     r'\nCheck out our Calls to Action archive',          # How to Save a Planet footer
     r'The show is produced by',                          # This Week in Cleantech production credits
     r'\bwith research support from',                     # crew names, not participants
+    # "Stephen Lacey is our executive editor" / "is executive producer" sits in
+    # the sign-off of both Catalyst and Columbia Energy Exchange and was about
+    # to credit him on 52 episodes he has no part in. Same shape as the
+    # research-support credit above: crew, not participants.
+    r'[A-Z][a-z]+ [A-Z][a-z]+ is (?:our |the )?executive (?:editor|producer)',
+    r'\bEngineering by\b',                               # audio crew sign-off
+    r'\bOriginal music (?:and|by)\b',                    # composer credit
 ]
 
 
