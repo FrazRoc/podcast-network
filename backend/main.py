@@ -45,9 +45,9 @@ def verify_admin(x_admin_password: str = Header(default=None)):
 ALLOWED_IMAGE_HOST_SUFFIXES = ('mzstatic.com', 'unavatar.io', 'bsky.app')
 
 # Whether /api/host-connections returns {nodes, links} (about a quarter of the
-# size) or the legacy row-per-edge array. Turn on only once a frontend that
-# understands both shapes is deployed.
-GRAPH_PAYLOAD_NORMALISED = os.getenv("GRAPH_PAYLOAD_NORMALISED", "false").lower() == "true"
+# size) or the legacy row-per-edge array. On since the deployed frontend was
+# confirmed to read both shapes; set to "false" to fall back without a deploy.
+GRAPH_PAYLOAD_NORMALISED = os.getenv("GRAPH_PAYLOAD_NORMALISED", "true").lower() == "true"
 
 
 def is_allowed_image_url(url: str) -> bool:
