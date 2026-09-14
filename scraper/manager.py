@@ -280,7 +280,7 @@ class PodcastManager:
 
     def backfill_from_rss(self, since: date = None, show: str = None,
                           dry_run: bool = False, max_shows: int = None,
-                          refresh_existing: bool = False):
+                          refresh_existing: bool = False, force: bool = False):
         """Pull the back catalogue that iTunes' 200-episode cap hides from us.
 
         Run this on its own, not from the scheduled scrape — it is a one-off
@@ -320,13 +320,19 @@ class PodcastManager:
                     + (f", ignoring episodes before {since}" if since else ""))
 
         totals = {'inserted': 0, 'refreshed': 0, 'considered': 0, 'existing': 0,
-                  'skipped_old': 0, 'failed': 0, 'shows_failed': 0}
+                  'skipped_old': 0, 'failed': 0, 'shows_failed': 0, 'shows_skipped': 0}
 
         for apple_id, title in shows:
             try:
                 scraper = PodcastScraper(self.db_connection_string, episode_limit=200)
                 r = scraper.backfill_from_rss(apple_id, since=since, dry_run=dry_run,
-                                              refresh_existing=refresh_existing)
+                                              refresh_existing=refresh_existing, force=force)
+                if r['skipped_show']:
+                    logger.warning(f"  {title}: SKIPPED — only {r['matched']}/{r['stored']} "
+                                   f"stored episodes found in feed (titles differ)")
+                    totals['shows_skipped'] += 1
+                    time.sleep(1)
+                    continue
                 verb = 'would add' if dry_run else 'added'
                 logger.info(
                     f"  {title}: feed={r['feed_total']} already-had={r['existing']} "
@@ -347,7 +353,8 @@ class PodcastManager:
             f"\n{verb} {totals['considered'] if dry_run else totals['inserted']} episodes "
             f"across {len(shows) - totals['shows_failed']} shows "
             f"(already had {totals['existing']}, skipped {totals['skipped_old']} as too old, "
-            f"{totals['failed']} insert errors, {totals['shows_failed']} feeds unreachable)"
+            f"{totals['failed']} insert errors, {totals['shows_failed']} feeds unreachable, "
+            f"{totals['shows_skipped']} shows skipped on title mismatch)"
         )
 
     # ------------------------------------------------------------------
@@ -522,6 +529,9 @@ examples:
     parser.add_argument('--refresh-existing', action='store_true', default=False,
                         help='Also re-upsert episodes already stored, to fill in '
                              'metadata they are missing (never clears existing values)')
+    parser.add_argument('--force', action='store_true', default=False,
+                        help='Backfill even when feed titles do not line up with stored '
+                             'episodes (risks duplicates — check a dry run first)')
 
     args = parser.parse_args()
     manager = PodcastManager(args.db)
@@ -569,7 +579,8 @@ examples:
                 parser.error("--since must be YYYY-MM-DD or 'none'")
         manager.backfill_from_rss(since=since, show=args.show,
                                   dry_run=args.dry_run, max_shows=args.max,
-                                  refresh_existing=args.refresh_existing)
+                                  refresh_existing=args.refresh_existing,
+                                  force=args.force)
 
     elif args.command == 'refresh-descriptions':
         manager.refresh_descriptions()

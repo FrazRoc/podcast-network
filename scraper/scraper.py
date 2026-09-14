@@ -9,8 +9,64 @@ import re
 from typing import Dict, List, Optional
 from bs4 import BeautifulSoup
 
+# A feed must account for this much of what we already store before its
+# episodes can be trusted to dedupe by title.
+MIN_TITLE_MATCH_RATIO = 0.8
+MIN_EPISODES_FOR_MATCH_CHECK = 20
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Episode markers some feeds wrap around the title that iTunes doesn't carry:
+# "966: Title", "[Episode #282] - Title", "Ep 12: Title", "Title, Ep #136".
+# Used only to decide whether two titles denote the same episode; the stored
+# title is never rewritten.
+_TITLE_PREFIX_RE = re.compile(
+    r'^\s*(?:\[?\s*(?:ep(?:isode)?\.?\s*)?#?\d+\s*\]?)\s*[:.–—-]\s*', re.IGNORECASE
+)
+_TITLE_SUFFIX_RE = re.compile(
+    r'\s*[,–—-]?\s*(?:\[[^\]]*\]|\((?:ep(?:isode)?\.?\s*)?#?\d+\)|'
+    r'(?:ep(?:isode)?\.?\s*)#?\d+)\s*$', re.IGNORECASE
+)
+
+
+def _flatten_title(title: str) -> str:
+    t = title.replace('’', "'").replace('‘', "'")
+    t = t.replace('“', '"').replace('”', '"')
+    return t.replace('–', '-').replace('—', '-')
+
+
+def normalize_episode_title(title: str, strip_numbering: bool = True) -> str:
+    """Key an episode by its title, ignoring per-feed numbering decoration.
+
+    strip_numbering=False keeps the numbering, for shows where dropping it
+    would merge genuinely different episodes (see pick_title_key).
+    """
+    if not title:
+        return ''
+    t = _flatten_title(title)
+    if strip_numbering:
+        t = _TITLE_PREFIX_RE.sub('', t)
+        t = _TITLE_SUFFIX_RE.sub('', t)
+    return re.sub(r'[^a-z0-9]+', '', t.lower())
+
+
+def pick_title_key(feed_titles):
+    """Choose how to key this show's episodes, then return that key function.
+
+    Stripping "Ep 12:" off the front lets a numbered feed line up with iTunes'
+    unnumbered titles, but it also merges "Ep 12: Weekly Roundup" with "Ep 13:
+    Weekly Roundup" — two real episodes that differ only by number. If that
+    would happen here, keep the numbering for this show and accept that its
+    titles simply won't match iTunes'; the match-rate gate then skips it
+    rather than inserting duplicates.
+    """
+    titles = [t for t in feed_titles if t]
+    stripped = {normalize_episode_title(t) for t in titles}
+    if len(stripped) < len(set(titles)):
+        return lambda t: normalize_episode_title(t, strip_numbering=False)
+    return normalize_episode_title
+
 
 class PodcastScraper:
     def __init__(self, db_connection_string, episode_limit: int = 50):
@@ -276,7 +332,8 @@ class PodcastScraper:
         return episode_id
 
     def backfill_from_rss(self, apple_podcast_id: str, since: Optional[date] = None,
-                          dry_run: bool = False, refresh_existing: bool = False) -> Dict:
+                          dry_run: bool = False, refresh_existing: bool = False,
+                          force: bool = False) -> Dict:
         """Add episodes the RSS feed has but iTunes never returned.
 
         iTunes' Lookup API caps at 200 episodes per show, so process_podcast()
@@ -289,10 +346,11 @@ class PodcastScraper:
         credits from description parsing only.
         """
         result = {'title': None, 'feed_total': 0, 'considered': 0, 'inserted': 0,
-                  'refreshed': 0, 'existing': 0, 'skipped_old': 0, 'failed': 0}
+                  'refreshed': 0, 'existing': 0, 'skipped_old': 0, 'failed': 0,
+                  'stored': 0, 'matched': 0, 'skipped_show': False}
         try:
             return self._backfill_from_rss(apple_podcast_id, since, dry_run,
-                                           refresh_existing, result)
+                                           refresh_existing, force, result)
         except Exception:
             self.conn.rollback()
             raise
@@ -303,7 +361,7 @@ class PodcastScraper:
             self.conn.close()
 
     def _backfill_from_rss(self, apple_podcast_id: str, since, dry_run: bool,
-                           refresh_existing: bool, result: Dict) -> Dict:
+                           refresh_existing: bool, force: bool, result: Dict) -> Dict:
         itunes_data = self.fetch_itunes_data(apple_podcast_id)
         result['title'] = itunes_data['podcast'].get('trackName')
 
@@ -326,7 +384,32 @@ class PodcastScraper:
         self.cursor.execute(
             "SELECT title FROM episodes WHERE podcast_id = %s", (podcast_id,)
         )
-        existing_titles = {r[0] for r in self.cursor.fetchall()}
+        stored = [r[0] for r in self.cursor.fetchall()]
+
+        # Decide the keying scheme from the feed, then use it on both sides.
+        key_of = pick_title_key([e.get('title') or '' for e in rss_data['episodes']])
+        existing_titles = {key_of(t) for t in stored}
+        existing_titles.discard('')
+
+        # Safety gate. Dedupe rests entirely on titles lining up, and some
+        # feeds title episodes quite differently from iTunes — SunCast's feed
+        # numbers every episode, so only 10 of our 210 matched and a run would
+        # have inserted 831 duplicates of episodes we already had. If the feed
+        # cannot account for most of what we hold, we cannot tell new episodes
+        # from ones we already have, so refuse rather than guess.
+        feed_keys = {key_of(e.get('title') or '') for e in rss_data['episodes']}
+        matched = len(existing_titles & feed_keys)
+        result['stored'] = len(stored)
+        result['matched'] = matched
+        if not force and len(stored) >= MIN_EPISODES_FOR_MATCH_CHECK and \
+                matched < len(stored) * MIN_TITLE_MATCH_RATIO:
+            result['skipped_show'] = True
+            logger.warning(
+                f"  Skipping: feed titles match only {matched}/{len(stored)} stored "
+                f"episodes, so new ones can't be told from duplicates. "
+                f"Use force=True to override."
+            )
+            return result
 
         for rss_episode in rss_data['episodes']:
             title = (rss_episode.get('title') or '').strip()
@@ -338,7 +421,8 @@ class PodcastScraper:
                 result['skipped_old'] += 1
                 continue
 
-            if title in existing_titles and not refresh_existing:
+            key = key_of(title)
+            if key in existing_titles and not refresh_existing:
                 result['existing'] += 1
                 continue
 
@@ -351,9 +435,9 @@ class PodcastScraper:
                 # Passed as both arguments on purpose: the first supplies the
                 # RSS-shaped fields, the second makes insert_episode take its
                 # RSS branch for duration ("HH:MM:SS" rather than millis).
-                was_present = title in existing_titles
+                was_present = key in existing_titles
                 self.insert_episode(rss_episode, podcast_id, rss_episode)
-                existing_titles.add(title)   # feeds can repeat a title
+                existing_titles.add(key)   # feeds can repeat a title
                 if was_present:
                     result['refreshed'] += 1
                 else:
