@@ -19,6 +19,21 @@ jobs:
   backup:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      # A real PostgreSQL 18 to restore into. The client package installed
+      # below ships psql and pg_restore but no server binaries, so initdb
+      # isn't available to stand one up by hand.
+      verify:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: verify
+        ports:
+          - 55499:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     steps:
       - name: Install a client matching the server
         run: |
@@ -77,13 +92,7 @@ jobs:
           # throwaway local server and compare every table against the live
           # database — counting rows in the dump file itself is fragile, and
           # proving it restores is the property actually worth having.
-          sudo systemctl stop postgresql 2>/dev/null || true
-          mkdir -p /tmp/verify
-          initdb -D /tmp/verify/data -U postgres --auth=trust > /dev/null
-          pg_ctl -D /tmp/verify/data -o "-p 55499" -l /tmp/verify/server.log start
-          for i in $(seq 30); do pg_isready -h 127.0.0.1 -p 55499 -q && break; sleep 1; done
-
-          LOCAL="postgresql://postgres@127.0.0.1:55499"
+          LOCAL="postgresql://postgres:verify@127.0.0.1:55499"
           psql "$LOCAL/postgres" -q -c "CREATE DATABASE verify;"
           pg_restore --no-owner --no-privileges -d "$LOCAL/verify" "podcast_db-${STAMP}.dump"
 
@@ -99,7 +108,6 @@ jobs:
               echo "  $t: $live rows OK"
             fi
           done
-          pg_ctl -D /tmp/verify/data stop -m immediate > /dev/null 2>&1 || true
           exit $fail
 
       - name: Upload
