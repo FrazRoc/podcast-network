@@ -54,7 +54,7 @@ const processData = (data) => {
         id: conn.source_id,
         name: conn.source_name,
         image: conn.source_image || null,
-        role: conn.source_role || 'Host',
+        role: conn.source_role || 'Guest',
         channel: conn.source_channel,
         genre: conn.source_genre,
         val: 0,
@@ -63,6 +63,10 @@ const processData = (data) => {
     }
     nodes.get(conn.source_id).podcasts.add(conn.podcast_title);
     nodes.get(conn.source_id).val++;
+    // 65 people host one show and guest on another. Whichever edge happened to
+    // be seen first used to decide their role; presenting any show is the more
+    // meaningful of the two, so it wins.
+    if (conn.source_role === 'Host') nodes.get(conn.source_id).role = 'Host';
 
     // Target node
     if (!nodes.has(conn.target_id)) {
@@ -70,7 +74,7 @@ const processData = (data) => {
         id: conn.target_id,
         name: conn.target_name,
         image: conn.target_image || null,
-        role: conn.target_role || 'Host',
+        role: conn.target_role || 'Guest',
         channel: conn.target_channel,
         genre: conn.target_genre,
         val: 0,
@@ -79,6 +83,7 @@ const processData = (data) => {
     }
     nodes.get(conn.target_id).podcasts.add(conn.podcast_title);
     nodes.get(conn.target_id).val++;
+    if (conn.target_role === 'Host') nodes.get(conn.target_id).role = 'Host';
 
     links.push({
       source: conn.source_id,

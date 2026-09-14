@@ -135,18 +135,32 @@ async def get_host_connections():
         cur = conn.cursor()
 
         cur.execute("""
-            WITH host_connections AS (
+            WITH
+            -- What each person actually did on each show, from the per-episode
+            -- credits rather than whether they are registered as a show host.
+            -- host_podcast only covers people someone has explicitly registered
+            -- — 110 of 1,952 here — so reading role from it left everyone else
+            -- with none, and the frontend's `|| 'Host'` fallback then labelled
+            -- the whole graph "Host". Ticking Guest returned nothing.
+            person_show_role AS (
+                SELECT eh.host_id, e.podcast_id,
+                       CASE WHEN bool_or(NOT eh.is_guest) THEN 'Host' ELSE 'Guest' END AS role
+                FROM episode_host eh
+                JOIN episodes e ON e.episode_id = eh.episode_id
+                GROUP BY eh.host_id, e.podcast_id
+            ),
+            host_connections AS (
                 SELECT
                     h1.host_id as source_id,
                     h1.first_name || ' ' || h1.last_name as source_name,
                     h1.profile_image_url as source_image,
-                    hp1.role as source_role,
+                    psr1.role as source_role,
                     c1.name as source_channel,
                     g1.name as source_genre,
                     h2.host_id as target_id,
                     h2.first_name || ' ' || h2.last_name as target_name,
                     h2.profile_image_url as target_image,
-                    hp2.role as target_role,
+                    psr2.role as target_role,
                     c1.name as target_channel,
                     g1.name as target_genre,
                     p.title as podcast_title,
@@ -160,16 +174,16 @@ async def get_host_connections():
                 LEFT JOIN channels c1 ON p.channel_id = c1.channel_id
                 LEFT JOIN podcast_genres pg ON p.podcast_id = pg.podcast_id AND pg.is_primary = true
                 LEFT JOIN genres g1 ON pg.genre_id = g1.genre_id
-                LEFT JOIN host_podcast hp1 ON h1.host_id = hp1.host_id AND p.podcast_id = hp1.podcast_id
+                LEFT JOIN person_show_role psr1 ON psr1.host_id = h1.host_id AND psr1.podcast_id = p.podcast_id
                 JOIN episode_host eh2 ON e.episode_id = eh2.episode_id
                 JOIN hosts h2 ON eh2.host_id = h2.host_id
-                LEFT JOIN host_podcast hp2 ON h2.host_id = hp2.host_id AND p.podcast_id = hp2.podcast_id
+                LEFT JOIN person_show_role psr2 ON psr2.host_id = h2.host_id AND psr2.podcast_id = p.podcast_id
                 WHERE h1.host_id < h2.host_id
                 GROUP BY
                     h1.host_id, h1.first_name, h1.last_name, h1.profile_image_url,
-                    hp1.role, c1.name, g1.name,
+                    psr1.role, c1.name, g1.name,
                     h2.host_id, h2.first_name, h2.last_name, h2.profile_image_url,
-                    hp2.role, p.title, p.focus_area, p.target_audience
+                    psr2.role, p.title, p.focus_area, p.target_audience
             )
             SELECT *
             FROM host_connections
