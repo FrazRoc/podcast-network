@@ -2538,6 +2538,13 @@ async def add_episode_credit(episode_id: int, body: AddCreditRequest):
     try:
         conn = get_db_connection()
         cur = conn.cursor()
+        # Adding a credit by hand overrides an earlier removal, so lift the
+        # suppression first — otherwise the trigger silently drops this insert
+        # and the admin gets a success with nothing written.
+        cur.execute(
+            "DELETE FROM credit_suppressions WHERE episode_id = %s AND host_id = %s",
+            (episode_id, body.host_id),
+        )
         cur.execute("""
             INSERT INTO episode_host (episode_id, host_id, is_guest, role, data_source)
             VALUES (%s, %s, %s, %s, 'manual')
@@ -2562,6 +2569,16 @@ async def remove_episode_credit(episode_id: int, host_id: int):
             (episode_id, host_id),
         )
         deleted = cur.rowcount
+        # The delete alone does not hold: the next scan re-reads the same
+        # description, derives the same name and puts the credit back. Record
+        # the removal so the trigger on episode_host keeps refusing it.
+        if deleted:
+            cur.execute(
+                """INSERT INTO credit_suppressions (episode_id, host_id, reason)
+                   VALUES (%s, %s, 'removed via admin')
+                   ON CONFLICT (episode_id, host_id) DO NOTHING""",
+                (episode_id, host_id),
+            )
         conn.commit()
         cur.close()
         conn.close()

@@ -8,6 +8,23 @@ from host_extractor import get_or_create_host
 from episode_name_scanner import get_hosts, get_known_names, show_host_first_names
 
 
+def _insert_episode(cur, title="An Episode"):
+    podcast_id = _insert_podcast(cur, title + " Show")
+    cur.execute(
+        "INSERT INTO episodes (podcast_id, title) VALUES (%s, %s) RETURNING episode_id",
+        (podcast_id, title)
+    )
+    return cur.fetchone()[0]
+
+
+def _insert_host(cur, first="Test", last="Person"):
+    cur.execute(
+        "INSERT INTO hosts (first_name, last_name) VALUES (%s, %s) RETURNING host_id",
+        (first, last)
+    )
+    return cur.fetchone()[0]
+
+
 def _insert_podcast(cur, title):
     cur.execute(
         "INSERT INTO podcasts (title, apple_podcast_id) VALUES (%s, %s) RETURNING podcast_id",
@@ -120,3 +137,82 @@ class TestShowHostFirstNames:
         result = show_host_first_names(db_conn)
         # There is no way to tell which "John" is meant, so neither counts.
         assert result.get(podcast_id, []) == []
+
+
+class TestCreditSuppression:
+    """A deleted credit has to stay deleted.
+
+    Removing a row from episode_host does not hold on its own: the next scan
+    re-reads the same description, derives the same name and re-inserts it.
+    That is how a morning of curation was undone — Bill Gates back to 48
+    credits from 3, Joe Manchin to 41 from 2 — by one scheduled scrape.
+
+    The guard is a BEFORE INSERT trigger rather than a check at the call
+    sites, because ten different places insert into episode_host and the
+    eleventh is the one that would forget. These tests go through raw SQL for
+    exactly that reason: they assert the database refuses the row no matter
+    who asks.
+    """
+
+    def test_insert_is_skipped_while_suppressed(self, db_conn):
+        cur = db_conn.cursor()
+        ep, host = _insert_episode(cur), _insert_host(cur)
+        cur.execute(
+            "INSERT INTO credit_suppressions (episode_id, host_id, reason)"
+            " VALUES (%s, %s, 'test')", (ep, host))
+        cur.execute(
+            "INSERT INTO episode_host (episode_id, host_id, is_guest, role, data_source)"
+            " VALUES (%s, %s, true, 'Guest', 'parsed_desc')", (ep, host))
+        cur.execute(
+            "SELECT COUNT(*) FROM episode_host WHERE episode_id=%s AND host_id=%s",
+            (ep, host))
+        assert cur.fetchone()[0] == 0
+
+    def test_insert_lands_when_not_suppressed(self, db_conn):
+        cur = db_conn.cursor()
+        ep, host = _insert_episode(cur), _insert_host(cur)
+        cur.execute(
+            "INSERT INTO episode_host (episode_id, host_id, is_guest, role, data_source)"
+            " VALUES (%s, %s, true, 'Guest', 'parsed_desc')", (ep, host))
+        cur.execute(
+            "SELECT COUNT(*) FROM episode_host WHERE episode_id=%s AND host_id=%s",
+            (ep, host))
+        assert cur.fetchone()[0] == 1
+
+    def test_bulk_insert_skips_only_the_suppressed_pair(self, db_conn):
+        """The scanner inserts many rows at once; one suppressed pair must not
+        fail the batch or take the others down with it."""
+        cur = db_conn.cursor()
+        ep = _insert_episode(cur)
+        blocked = _insert_host(cur, 'Blocked', 'Person')
+        allowed = _insert_host(cur, 'Allowed', 'Person')
+        cur.execute(
+            "INSERT INTO credit_suppressions (episode_id, host_id, reason)"
+            " VALUES (%s, %s, 'test')", (ep, blocked))
+        cur.execute(
+            "INSERT INTO episode_host (episode_id, host_id, is_guest, role, data_source)"
+            " VALUES (%s, %s, true, 'Guest', 'parsed_desc'),"
+            "        (%s, %s, true, 'Guest', 'parsed_desc')",
+            (ep, blocked, ep, allowed))
+        cur.execute(
+            "SELECT host_id FROM episode_host WHERE episode_id=%s ORDER BY host_id", (ep,))
+        assert [r[0] for r in cur.fetchall()] == [allowed]
+
+    def test_lifting_the_suppression_lets_an_admin_re_add(self, db_conn):
+        """Suppression must not lock a real appearance out permanently — the
+        admin add-credit path deletes the suppression before inserting."""
+        cur = db_conn.cursor()
+        ep, host = _insert_episode(cur), _insert_host(cur)
+        cur.execute(
+            "INSERT INTO credit_suppressions (episode_id, host_id, reason)"
+            " VALUES (%s, %s, 'test')", (ep, host))
+        cur.execute(
+            "DELETE FROM credit_suppressions WHERE episode_id=%s AND host_id=%s",
+            (ep, host))
+        cur.execute(
+            "INSERT INTO episode_host (episode_id, host_id, is_guest, role, data_source)"
+            " VALUES (%s, %s, true, 'Guest', 'manual')", (ep, host))
+        cur.execute(
+            "SELECT COUNT(*) FROM episode_host WHERE episode_id=%s AND host_id=%s",
+            (ep, host))
+        assert cur.fetchone()[0] == 1

@@ -23,6 +23,7 @@ TEST_DB = os.getenv('SCANNER_TEST_DATABASE_URL', 'postgresql://localhost/podcast
 
 # Tables that fixtures/tests write to, in an order safe for TRUNCATE ... CASCADE.
 _TABLES_TO_RESET = [
+    'credit_suppressions',
     'episode_host', 'host_podcast', 'suggestions', 'rejected_names',
     'host_aliases', 'not_duplicate_pairs', 'episodes', 'hosts', 'podcasts',
     'channels',

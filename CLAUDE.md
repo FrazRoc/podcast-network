@@ -57,6 +57,23 @@ human or authoritative decisions and automated passes must not overwrite them.
 alongside the canonical name so future scans match either spelling. The
 scanner's `get_hosts()` unions `hosts` and `host_aliases`.
 
+**Deleting a credit does not stick on its own — suppress it.** Removing a row
+from `episode_host` is undone by the next scrape, which re-reads the same
+description, derives the same name and re-inserts it. This cost a full morning
+of per-person curation: Bill Gates went back to 48 credits from 3, Joe Manchin
+to 41 from 2, on one scheduled run. `credit_suppressions (episode_id,
+host_id)` records the removal, and a `BEFORE INSERT` trigger on `episode_host`
+silently skips any suppressed pair. It is enforced by the trigger, not at the
+call sites, because ten places insert into that table. To re-add a credit
+deliberately, delete the suppression first — the admin add-credit endpoint
+already does.
+
+**Scanner-level fixes are durable; row deletions are not.** The curation that
+survived that scrape survived because it changed the scanner — a strip pattern,
+`scan_descriptions` off for a show, an exclusion. Anything done purely by
+DELETE came back. Prefer fixing the extraction; use suppression for the
+genuinely per-episode cases.
+
 **`not_duplicate_pairs` records deliberate non-merges.** Albert Gore III was
 wrongly merged into Al Gore and had to be separated; the pair is recorded so
 it is not re-proposed.
