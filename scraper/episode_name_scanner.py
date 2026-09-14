@@ -102,7 +102,15 @@ def clean_description(text: str, max_chars: int = DESC_SCAN_MAX_CHARS) -> str:
         if match:
             text = text[:match.start()]
     text = text.strip()
-    return text[:max_chars] if max_chars else text
+    if not max_chars or len(text) <= max_chars:
+        return text
+    # Cut back to a word boundary. Slicing at an exact character count splits
+    # the word it lands on, and the fragment becomes a candidate name —
+    # "Connect With Smart Energy Decisions" was queued as the person
+    # "Smart Energ".
+    cut = text[:max_chars]
+    space = cut.rfind(' ')
+    return cut[:space] if space > 0 else cut
 
 
 # ------------------------------------------------------------------
@@ -316,7 +324,7 @@ _HONORIFIC_RE = re.compile(
     # Job titles run straight into the name the same way an honorific does:
     # the review queue holds "Founder Oliver Katz" and "CEO Dan Shugar".
     r'(?:Co[- ]?)?Founder|CEO|CTO|CFO|COO|CMO|Chief|Vice|VP|Director|'
-    r'Head|Partner|Principal|Manager|Senior|Junior|Deputy)\.?\s+)+',
+    r'Head|Partner|Principal|Manager|Senior|Junior|Deputy|Writer|Reporter|Journalist|Editor|Author|Analyst|Correspondent|Columnist)\.?\s+)+',
     re.IGNORECASE
 )
 
@@ -330,10 +338,10 @@ _HONORIFIC_RE = re.compile(
 # click to reject; a person filtered out is lost silently, so this errs towards
 # letting things through. Checked against all 2,074 known people: no matches.
 _ORG_WORDS = {
-    'inc', 'llc', 'ltd', 'corp', 'corporation', 'company', 'technologies',
+    'inc', 'llc', 'llp', 'plc', 'gmbh', 'ltd', 'corp', 'corporation', 'company', 'technologies',
     'technology', 'systems', 'solutions', 'ventures', 'capital', 'partners',
     'holdings', 'industries', 'labs', 'laboratories', 'institute', 'foundation',
-    'university', 'college', 'centre', 'fund', 'media', 'news', 'studios',
+    'university', 'college', 'centre', 'center', 'fund', 'media', 'news', 'studios',
     'robotics', 'aerospace', 'biosciences', 'bioscience', 'sciences', 'security',
     'batteries', 'materials', 'motors', 'mobility', 'analytics', 'strategies',
     'advisors', 'advisers', 'associates', 'consulting', 'county', 'district',
