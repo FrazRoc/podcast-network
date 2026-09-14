@@ -72,6 +72,10 @@ const processData = (data) => {
   if (data && !Array.isArray(data) && Array.isArray(data.nodes)) {
     return processNormalised(data);
   }
+  // Anything else — an error body, a shape we don't know — yields an empty
+  // graph rather than throwing in the fetch handler.
+  if (!Array.isArray(data)) return { nodes: [], links: [] };
+
   const nodes = new Map();
   const links = [];
 
@@ -536,7 +540,10 @@ const PodcastHostNetwork = () => {
     setError(null);
     fetch(API_URL)
       .then(r => { if (!r.ok) throw new Error(`API error ${r.status}`); return r.json(); })
-      .then(data => setGraphData(processData(Array.isArray(data) ? data : [])))
+      // processData handles both the {nodes, links} object and the older
+      // row-per-edge array. Coercing a non-array to [] here threw the object
+      // away before it ever reached that check, which emptied the graph.
+      .then(data => setGraphData(processData(data || [])))
       .catch(err => setError(err.message || 'Failed to load network data'))
       .finally(() => setLoading(false));
   }, []);
