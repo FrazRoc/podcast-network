@@ -94,9 +94,30 @@ STRIP_AFTER_PATTERNS = [
 ]
 
 
+# 2,327 descriptions still carry the feed's raw HTML. A tag has to become a
+# space rather than vanish: dropping it outright welds the end of one block to
+# the start of the next, which is how "Connect with Jason Rissman</p><p>On
+# LinkedIn" turns into the name "Jason RissmanOn".
+_HTML_TAG_RE = re.compile(r'<[^>]+>')
+_HTML_ENTITIES = [('&nbsp;', ' '), ('&amp;', '&'), ('&#38;', '&'), ('&quot;', '"'),
+                  ('&#39;', "'"), ('&rsquo;', "'"), ('&lsquo;', "'"), ('&mdash;', '-'),
+                  ('&ndash;', '-'), ('&hellip;', '...'), ('&lt;', '<'), ('&gt;', '>')]
+
+
+def strip_html(text: str) -> str:
+    text = _HTML_TAG_RE.sub(' ', text)
+    for entity, char in _HTML_ENTITIES:
+        text = text.replace(entity, char)
+    # Collapse the runs of spaces the tags leave behind, but keep line breaks:
+    # the boilerplate patterns below anchor on them.
+    text = re.sub(r'[^\S\n]+', ' ', text)
+    return re.sub(r'\n{3,}', '\n\n', text)
+
+
 def clean_description(text: str, max_chars: int = DESC_SCAN_MAX_CHARS) -> str:
     if not text:
         return ''
+    text = strip_html(text)
     for pattern in STRIP_AFTER_PATTERNS:
         match = re.search(pattern, text)
         if match:
@@ -271,9 +292,17 @@ def get_show_hosts(conn) -> dict:
 
 # Intro phrases that signal a guest is being introduced
 _INTRO_RE = re.compile(
-    r"""(?:with|joined by|featuring|speaks?\s+with|talks?\s+(?:to|with)|
-        interviews?|welcomes?|sits?\s+down\s+with|chats?\s+with|
-        talk(?:s|ed)?\s+(?:to|with)|I\s+(?:talk|chat|speak)s?\s+with)
+    r"""(?:with|joined\s+by|featuring|
+        # "speak to" as well as "speak with" — "we speak to Benjamin Bartle"
+        # matched nothing, because only the "with" form was listed.
+        (?:speak|spoke|speaks)\s+(?:to|with)|
+        (?:talk|talks|talked)\s+(?:to|with)|
+        (?:sit|sits|sat)\s+down\s+with|
+        (?:chat|chats|chatted)\s+(?:to|with)|
+        (?:catch|catches|caught)\s+up\s+with|
+        (?:hear|hears|heard)\s+from|
+        interviews?|welcomes?|
+        I\s+(?:talk|chat|speak)s?\s+(?:to|with))
         \s+
         # Optional title prefix
         (?:(?:Dr|Prof|Mr|Ms|Mrs|Senator|Sen|Rep|CEO|CTO|CFO|COO|Governor|Gov|
