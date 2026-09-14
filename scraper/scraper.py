@@ -388,8 +388,17 @@ class PodcastScraper:
 
         # Decide the keying scheme from the feed, then use it on both sides.
         key_of = pick_title_key([e.get('title') or '' for e in rss_data['episodes']])
-        existing_titles = {key_of(t) for t in stored}
-        existing_titles.discard('')
+        # Keep the stored spelling for each key. The episodes table is unique on
+        # the exact title, so an upsert only lands on the right row if it uses
+        # the title already there — iTunes titles carry stray characters the
+        # feed lacks (one ends in a U+202F narrow no-break space), and inserting
+        # the feed's spelling would quietly create a second row for the episode.
+        existing_by_key = {}
+        for t in stored:
+            k = key_of(t)
+            if k:
+                existing_by_key.setdefault(k, t)
+        existing_titles = set(existing_by_key)
 
         # Safety gate. Dedupe rests entirely on titles lining up, and some
         # feeds title episodes quite differently from iTunes — SunCast's feed
@@ -436,8 +445,12 @@ class PodcastScraper:
                 # RSS-shaped fields, the second makes insert_episode take its
                 # RSS branch for duration ("HH:MM:SS" rather than millis).
                 was_present = key in existing_titles
+                if was_present:
+                    # Refresh mode: address the row we already have.
+                    rss_episode = dict(rss_episode, title=existing_by_key[key])
                 self.insert_episode(rss_episode, podcast_id, rss_episode)
                 existing_titles.add(key)   # feeds can repeat a title
+                existing_by_key.setdefault(key, rss_episode.get('title'))
                 if was_present:
                     result['refreshed'] += 1
                 else:
