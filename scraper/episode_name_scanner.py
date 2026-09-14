@@ -34,9 +34,6 @@ DESC_SCAN_SKIP_SHOWS = {
     'POLITICO Energy',
 }
 
-# Minimum word length to consider as a name candidate in suggest mode
-MIN_NAME_LENGTH = 8
-
 # How much of a description to scan. Who is on an episode is established in the
 # opening summary; what follows is links, boilerplate — or, for Volts, a full
 # transcript averaging 18,000 characters and running to 111,000. Scanning those
@@ -315,9 +312,43 @@ _FALSE_POSITIVE_WORDS = {
 _HONORIFIC_RE = re.compile(
     r'^(?:(?:Dr|Prof|Professor|Mr|Ms|Mrs|Miss|Sir|Dame|Rev|Senator|Sen|'
     r'Representative|Rep|Congressman|Congresswoman|Governor|Gov|Mayor|'
-    r'President|Secretary|Ambassador|Admiral|General|Captain|Lord|Lady)\.?\s+)+',
+    r'President|Secretary|Ambassador|Admiral|General|Captain|Lord|Lady|'
+    # Job titles run straight into the name the same way an honorific does:
+    # the review queue holds "Founder Oliver Katz" and "CEO Dan Shugar".
+    r'(?:Co[- ]?)?Founder|CEO|CTO|CFO|COO|CMO|Chief|Vice|VP|Director|'
+    r'Head|Partner|Principal|Manager|Senior|Junior|Deputy)\.?\s+)+',
     re.IGNORECASE
 )
+
+# Words that are effectively never someone's surname. Used to keep companies
+# out of the review queue — episode titles are full of them ("Heart Aerospace",
+# "Rigetti Computing", "Burnt Island Ventures"), and the intro patterns cannot
+# tell "talks with Jane Smith" from "talks with Bedrock Robotics".
+#
+# Deliberately omits words that ARE real surnames: Power (Ted Power), Zero,
+# Deep, Duty, Again, Lead, Health, Works. A company left in the queue costs one
+# click to reject; a person filtered out is lost silently, so this errs towards
+# letting things through. Checked against all 2,074 known people: no matches.
+_ORG_WORDS = {
+    'inc', 'llc', 'ltd', 'corp', 'corporation', 'company', 'technologies',
+    'technology', 'systems', 'solutions', 'ventures', 'capital', 'partners',
+    'holdings', 'industries', 'labs', 'laboratories', 'institute', 'foundation',
+    'university', 'college', 'centre', 'fund', 'media', 'news', 'studios',
+    'robotics', 'aerospace', 'biosciences', 'bioscience', 'sciences', 'security',
+    'batteries', 'materials', 'motors', 'mobility', 'analytics', 'strategies',
+    'advisors', 'advisers', 'associates', 'consulting', 'county', 'district',
+    'council', 'committee', 'association', 'alliance', 'coalition', 'society',
+    'agency', 'department', 'ministry', 'commission', 'logistics', 'software',
+    'minerals', 'mining', 'pharma', 'airlines', 'aviation', 'shipping',
+    'utilities', 'computing', 'management', 'advisory', 'enterprises',
+}
+
+
+def looks_like_organisation(name: str) -> bool:
+    tokens = [t.lower().strip('.,') for t in name.split()]
+    if not tokens:
+        return True
+    return tokens[-1] in _ORG_WORDS or (len(tokens) >= 2 and tokens[-2] in _ORG_WORDS)
 
 
 def strip_honorific(name: str) -> str:
@@ -330,6 +361,7 @@ def _valid_name(name: str) -> bool:
     words = name.split()
     if len(words) < 2 or len(words) > 3: return False
     if words[0].lower() in _FALSE_POSITIVE_WORDS: return False
+    if looks_like_organisation(name): return False
     for w in words:
         if not (w[0].isupper() or ord(w[0]) > 127): return False
     return True
