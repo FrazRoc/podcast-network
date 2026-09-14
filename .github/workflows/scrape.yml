@@ -68,13 +68,19 @@ jobs:
         working-directory: scraper
         run: python3 host_extractor.py run
 
+      # Both scans now read descriptions as well as titles. Titles are the
+      # low-precision source: over the whole archive they yield 27 new
+      # candidates, nearly all noun phrases, while descriptions yield 611 of
+      # which roughly four in five are real people. Descriptions used to be
+      # unaffordable — 17 minutes archive-wide — until candidates were looked
+      # up by surname, which brought a full pass under a second.
       - name: Scan episodes for known names
         working-directory: scraper
-        run: python3 episode_name_scanner.py run --title-only
+        run: python3 episode_name_scanner.py run
 
       - name: Queue new-name suggestions for review
         working-directory: scraper
-        run: python3 episode_name_scanner.py suggest --title-only
+        run: python3 episode_name_scanner.py suggest
 
       - name: Record successful run timestamp
         working-directory: scraper

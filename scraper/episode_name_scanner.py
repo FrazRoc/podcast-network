@@ -271,7 +271,7 @@ _INTRO_RE = re.compile(
         (?:(?:Dr|Prof|Mr|Ms|Mrs|Senator|Sen|Rep|CEO|CTO|CFO|COO|Governor|Gov|
            Secretary|Director|Mayor|President)\.?\s+)*
         # The actual name: exactly 2 capitalized words (first + last only)
-        ([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})
+        ([A-Z][a-z]+(?:[^\S\n]+[A-Z][a-z]+){1,2})
         # Stop before: " of", " at", " from", ",", possessive, title words
         (?=\s+(?:of|at|from|about|for|on|to)|,|'s|\s+(?:CEO|CTO|CFO|COO|Director|Founder)|$)
     """,
@@ -280,13 +280,13 @@ _INTRO_RE = re.compile(
 
 # "Name joins me/us"
 _JOINS_RE = re.compile(
-    r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\s+joins?\s+(?:me|us|host|the\s+show)',
+    r'([A-Z][a-z]+(?:[^\S\n]+[A-Z][a-z]+){1,2})\s+joins?\s+(?:me|us|host|the\s+show)',
     re.IGNORECASE
 )
 
 # Possessive org then name: "Rewiring America's Ari Matusiak"
 _POSSESSIVE_RE = re.compile(
-    r"[A-Z][A-Za-z&\s,.\-]+?'s\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})"
+    r"[A-Z][A-Za-z&\s,.\-]+?'s\s+([A-Z][a-z]+(?:[^\S\n]+[A-Z][a-z]+){1,2})"
     r"(?=\s+(?:of|at|from|about|for|,|and)|$)",
 )
 
