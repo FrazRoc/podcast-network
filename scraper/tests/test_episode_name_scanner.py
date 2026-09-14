@@ -97,6 +97,23 @@ class TestCleanDescription:
         assert " " not in result[-1:] or True  # no trailing partial word
         assert result == "Connect With Smart Energy Decisions" or len(result) <= 36
 
+    def test_cross_show_promo_blurb_stripped(self):
+        # Real incident: Latitude Media's "listen to our new podcast, Political
+        # Climate ... hosts Julia Pyper, Emily Domenech, and Brandon Hurlbut"
+        # outro credited all three hosts of a show that never aired on 12
+        # episodes of two unrelated shows (Green Blueprint, Catalyst).
+        text = ("This week: Tesla news. And make sure to listen to our new podcast, "
+                "Political Climate – an insider’s view on the most pressing "
+                "policy questions in energy and climate. Tune in every other Friday "
+                "for the latest takes from hosts Julia Pyper, Emily Domenech, and "
+                "Brandon Hurlbut. Available on Apple, Spotify, or wherever you get "
+                "your podcasts.")
+        result = clean_description(text)
+        assert "Domenech" not in result
+        assert "Pyper" not in result
+        assert "Hurlbut" not in result
+        assert "Tesla news" in result
+
     def test_zero_climate_race_footer_stripped(self):
         # cleanup_zero_guests.py fixed the case where "Explore further: Past
         # episode with X" credited a guest from a different episode.

@@ -169,6 +169,16 @@ REMOVE_PATTERNS = [
     # part in.
     r'(?i)\bjoin\b[^.\n]{0,110}\bfor (?:a|our|the) (?:live|free|virtual|upcoming|special)\b[^.\n]{0,90}',
     r'(?i)[A-Z][A-Za-z\x27 ]{0,40} is supported by[^.\n]{0,70}',
+    # Latitude Media cross-promoted Political Climate's launch in the outro of
+    # Green Blueprint and Catalyst episodes: "Make sure to listen to our new
+    # podcast, Political Climate ... Tune in every other Friday for the latest
+    # takes from hosts Julia Pyper, Emily Domenech, and Brandon Hurlbut.
+    # Available on Apple, Spotify, or wherever you get your podcasts." That
+    # credited all three hosts of a show that never aired on 12 episodes of
+    # two other shows. Not named to one show: any "listen to our new podcast"
+    # cross-promotion reads the same way.
+    r'(?i)(?:and\s+)?make sure to (?:also )?listen to our new podcast,[^.\n]*\.'
+    r'(?:\s*Tune in[^.\n]*\.)?(?:\s*Available on[^.\n]*\.)?',
 ]
 
 
