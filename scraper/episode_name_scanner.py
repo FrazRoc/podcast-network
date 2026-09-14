@@ -105,16 +105,21 @@ def get_hosts(conn) -> list[dict]:
     "Nathaniel Bullard" instead of creating a second record.
     """
     cur = conn.cursor()
+    # The UNION has to be wrapped: Postgres only allows result column names in
+    # an ORDER BY that follows UNION, not an expression like LENGTH(...).
     cur.execute("""
-        SELECT host_id, first_name, last_name,
-               first_name || ' ' || last_name AS full_name
-        FROM hosts
-        UNION ALL
-        SELECT a.host_id,
-               split_part(a.alias_name, ' ', 1) AS first_name,
-               NULLIF(substr(a.alias_name, strpos(a.alias_name, ' ') + 1), a.alias_name) AS last_name,
-               a.alias_name AS full_name
-        FROM host_aliases a
+        SELECT host_id, first_name, last_name, full_name FROM (
+            SELECT host_id, first_name, last_name,
+                   first_name || ' ' || last_name AS full_name
+            FROM hosts
+            UNION ALL
+            SELECT a.host_id,
+                   split_part(a.alias_name, ' ', 1) AS first_name,
+                   NULLIF(substr(a.alias_name, strpos(a.alias_name, ' ') + 1), a.alias_name) AS last_name,
+                   a.alias_name AS full_name
+            FROM host_aliases a
+        ) names
+        WHERE full_name IS NOT NULL
         ORDER BY LENGTH(full_name) DESC
     """)
     rows = cur.fetchall()
@@ -191,17 +196,26 @@ def get_all_episodes(conn, show: str = None) -> list[dict]:
     ]
 
 
-def get_uncredited_episodes(conn) -> list[dict]:
-    """Load episodes without any credits yet."""
+def get_uncredited_episodes(conn, scan_all: bool = False) -> list[dict]:
+    """Episodes to scan: by default only those with no credits at all.
+
+    That default exists for speed, and it leaves a real gap — an episode
+    already carrying a host credit is never looked at again, so a guest we
+    failed to spot the first time stays missing forever. scan_all lifts it;
+    inserts are ON CONFLICT DO NOTHING, so existing credits are untouched and
+    only genuinely new ones are added.
+    """
     cur = conn.cursor()
-    cur.execute("""
+    where = "" if scan_all else """
+        WHERE NOT EXISTS (
+            SELECT 1 FROM episode_host eh WHERE eh.episode_id = e.episode_id
+        )"""
+    cur.execute(f"""
         SELECT e.episode_id, e.title, e.description,
                p.podcast_id, p.title AS podcast_title
         FROM episodes e
         JOIN podcasts p ON e.podcast_id = p.podcast_id
-        WHERE NOT EXISTS (
-            SELECT 1 FROM episode_host eh WHERE eh.episode_id = e.episode_id
-        )
+        {where}
         ORDER BY p.title, e.published_date DESC
     """)
     rows = cur.fetchall()
@@ -225,10 +239,6 @@ def get_show_hosts(conn) -> dict:
     cur.close()
     return result
 
-
-# ------------------------------------------------------------------
-# NAME EXTRACTION (for suggest mode)
-# ------------------------------------------------------------------
 
 # ------------------------------------------------------------------
 # NAME EXTRACTION (for suggest mode)
@@ -362,15 +372,74 @@ def extract_candidate_names(text: str) -> list[tuple[str, str]]:
 # SCANNING — known names (run mode)
 # ------------------------------------------------------------------
 
+_NAME_RE_CACHE = {}
+
+
+def _name_pattern(full_name: str):
+    """Match a full name only where it stands as a name in its own right.
+
+    A plain substring test credits the wrong person: "dan yates" is inside
+    "jordan yates", and "sara baldwin" inside "sara baldwin-griffin" — both
+    real pairs in this database, and both produced wrong credits. \\b is not
+    enough on its own, since it happily matches "Sara Baldwin" against
+    "Sara Baldwin-Griffin" (the hyphen is a word boundary), so hyphens are
+    excluded on either side as well.
+    """
+    pattern = _NAME_RE_CACHE.get(full_name)
+    if pattern is None:
+        pattern = re.compile(
+            r'(?<![\w-])' + re.escape(full_name) + r'(?![\w-])',
+            re.IGNORECASE
+        )
+        _NAME_RE_CACHE[full_name] = pattern
+    return pattern
+
+
 def name_in_text(full_name: str, text: str) -> bool:
-    return full_name.lower() in text.lower()
+    return bool(_name_pattern(full_name).search(text))
 
 
-def run(dry_run: bool = True, title_only: bool = False, min_length: int = 7):
+_WORD_RE = re.compile(r"[\w'-]+")
+
+
+def build_surname_index(hosts: list) -> dict:
+    """Group people by surname so an episode only tests plausible candidates.
+
+    Checking all ~2,000 names against every episode costs 44ms per description
+    — twelve minutes over the full archive, which is why descriptions have
+    never been scanned in the scheduled run. A surname has to appear verbatim
+    for the full name to match, so looking it up first skips almost everyone.
+    """
+    index = {}
+    for host in hosts:
+        full_name = host.get('full_name') or ''
+        tokens = _WORD_RE.findall(full_name.lower())
+        if tokens:
+            index.setdefault(tokens[-1], []).append(host)
+    return index
+
+
+def candidate_hosts(text: str, index: dict) -> list:
+    """People whose surname occurs in this text — the only possible matches."""
+    if not text:
+        return []
+    seen_ids, out = set(), []
+    for token in set(_WORD_RE.findall(text.lower())):
+        for host in index.get(token, ()):
+            marker = id(host)
+            if marker not in seen_ids:
+                seen_ids.add(marker)
+                out.append(host)
+    return out
+
+
+def run(dry_run: bool = True, title_only: bool = False, min_length: int = 7,
+        scan_all: bool = False):
     conn = psycopg2.connect(DB)
     hosts = get_hosts(conn)
-    episodes = get_uncredited_episodes(conn)
+    episodes = get_uncredited_episodes(conn, scan_all=scan_all)
     show_hosts = get_show_hosts(conn)
+    surname_index = build_surname_index(hosts)
 
     logger.info(f"Scanning {len(episodes)} uncredited episodes against {len(hosts)} known people...")
 
@@ -385,7 +454,13 @@ def run(dry_run: bool = True, title_only: bool = False, min_length: int = 7):
         show_host_ids = show_hosts.get(podcast_id, set())
         clean_desc    = clean_description(description) if not title_only else ''
 
-        for host in hosts:
+        # Only people whose surname appears in this episode can possibly match.
+        scan_desc = bool(clean_desc) and podcast_title not in DESC_SCAN_SKIP_SHOWS
+        candidates = candidate_hosts(
+            title + ('\n' + clean_desc if scan_desc else ''), surname_index
+        )
+
+        for host in candidates:
             host_id   = host['host_id']
             full_name = host['full_name']
             # A name match for someone already recorded as this show's
@@ -406,8 +481,7 @@ def run(dry_run: bool = True, title_only: bool = False, min_length: int = 7):
                 })
                 continue
 
-            if not title_only and clean_desc and podcast_title not in DESC_SCAN_SKIP_SHOWS \
-                    and name_in_text(full_name, clean_desc):
+            if scan_desc and name_in_text(full_name, clean_desc):
                 matches.append({
                     'episode_id': episode_id, 'host_id': host_id,
                     'full_name': full_name, 'podcast_title': podcast_title,
@@ -474,7 +548,8 @@ def run(dry_run: bool = True, title_only: bool = False, min_length: int = 7):
 # SUGGEST — find new names, write to suggestions queue
 # ------------------------------------------------------------------
 
-def suggest(title_only: bool = False, limit: int = None, show: str = None):
+def suggest(title_only: bool = False, limit: int = None, show: str = None,
+            dry_run: bool = False):
     """
     Scan all episodes for candidate names NOT already in the hosts table.
     Writes new candidates to the suggestions table for human review.
@@ -496,6 +571,7 @@ def suggest(title_only: bool = False, limit: int = None, show: str = None):
 
     cur = conn.cursor()
     added = skipped_known = skipped_rejected = skipped_pending = 0
+    by_name = {}
 
     for episode in episodes:
         episode_id    = episode['episode_id']
@@ -536,6 +612,12 @@ def suggest(title_only: bool = False, limit: int = None, show: str = None):
                 first_name = ' '.join(parts[:-1]) if len(parts) > 1 else name
                 last_name  = parts[-1] if len(parts) > 1 else ''
 
+                if dry_run:
+                    added += 1
+                    pending.add((name_lower, episode_id))
+                    by_name[name] = by_name.get(name, 0) + 1
+                    continue
+
                 try:
                     cur.execute(
                         """
@@ -553,12 +635,21 @@ def suggest(title_only: bool = False, limit: int = None, show: str = None):
                     logger.error(f"Error inserting suggestion '{name}': {e}")
                     conn.rollback()
 
-    conn.commit()
+    if dry_run:
+        conn.rollback()
+    else:
+        conn.commit()
     cur.close()
     conn.close()
 
-    print(f"\nSuggestion scan complete:")
-    print(f"  ✅ Added to queue:     {added}")
+    print(f"\nSuggestion scan complete{' (DRY RUN — nothing written)' if dry_run else ''}:")
+    print(f"  {'Would add' if dry_run else 'Added'} to queue:  {added}"
+          f"{f' ({len(by_name)} distinct names)' if dry_run else ''}")
+    if dry_run and by_name:
+        print("\n  Most frequent new names:")
+        for nm, c in sorted(by_name.items(), key=lambda kv: -kv[1])[:25]:
+            print(f"    {c:4}x  {nm}")
+        print()
     print(f"  ⏭  Already known:      {skipped_known}")
     print(f"  ❌ Previously rejected: {skipped_rejected}")
     print(f"  ⚪ Already pending:     {skipped_pending}")
@@ -598,18 +689,25 @@ examples:
     )
     parser.add_argument('command', choices=['dry-run', 'run', 'suggest'])
     parser.add_argument('--title-only', action='store_true', default=False)
+    parser.add_argument('--scan-all', action='store_true', default=False,
+                        help='Also re-scan episodes that already have credits, to pick '
+                             'up people missed the first time (existing credits are kept)')
     parser.add_argument('--min-length', type=int, default=7)
     parser.add_argument('--limit', type=int, default=None,
                         help='Limit number of episodes to scan (suggest mode)')
     parser.add_argument('--show', type=str, default=None,
                         help='Only scan episodes from this podcast title (suggest mode)')
+    parser.add_argument('--dry-run', action='store_true', default=False,
+                        help='suggest mode: report what would be queued without writing')
     args = parser.parse_args()
 
     if args.command == 'suggest':
-        suggest(title_only=args.title_only, limit=args.limit, show=args.show)
+        suggest(title_only=args.title_only, limit=args.limit, show=args.show,
+                dry_run=args.dry_run)
     else:
         run(
             dry_run=(args.command == 'dry-run'),
             title_only=args.title_only,
             min_length=args.min_length,
+            scan_all=args.scan_all,
         )
