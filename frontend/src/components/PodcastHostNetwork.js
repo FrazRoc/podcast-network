@@ -47,13 +47,22 @@ const formatRelativeTime = (isoString) => {
 };
 
 // Stable color per podcast title (deterministic, no random)
-const podcastColor = (title) => {
+const podcastHue = (title) => {
   let hash = 0;
   for (let i = 0; i < title.length; i++) {
     hash = title.charCodeAt(i) + ((hash << 5) - hash);
   }
-  return `hsla(${Math.abs(hash) % 360}, 65%, 55%, 0.85)`;
+  return Math.abs(hash) % 360;
 };
+
+const podcastColor = (title) => `hsla(${podcastHue(title)}, 65%, 55%, 0.85)`;
+
+// Links take the show's hue too, but paler and more transparent: they sit
+// behind the nodes and there are 4,397 of them, so they read as tint rather
+// than as another set of saturated marks. 73 hashed hues is far more than
+// anyone can tell apart, so colour here says "these strands are the same show"
+// at a glance — the legend and hover are what name it.
+const linkColor = (title, alpha) => `hsla(${podcastHue(title)}, 50%, 62%, ${alpha})`;
 
 // The API already merges duplicate people and resolves their role; this only
 // adds the per-node tallies the force graph needs.
@@ -1023,13 +1032,18 @@ const PodcastHostNetwork = () => {
           // Link rendering
           linkLabel={link => `${link.value} episode${link.value !== 1 ? 's' : ''} on ${link.podcast}`}
           linkWidth={link => {
-            const w = Math.min(10, Math.max(1, link.value / 2));
+            // Was value/2 capped at 10, which saturated at 20 episodes: 36
+            // links sat at the cap and a 20-episode tie was drawn the same as
+            // a 350-episode one. Square root keeps separating them all the way
+            // up, and takes 30% off the total link ink — the widest link is
+            // now about the radius of the smallest node rather than twice it.
+            const w = Math.min(6, Math.max(0.5, Math.sqrt(link.value) * 0.7));
             return (selectedLinks.has(link) || highlightLinks.has(link)) ? w + 2 : w;
           }}
           linkColor={link =>
             selectedLinks.has(link) || highlightLinks.has(link)
               ? '#f59e0b'
-              : `rgba(156, 163, 175, ${Math.min(0.8, link.value / 5)})`
+              : linkColor(link.podcast, Math.min(0.6, 0.12 + Math.sqrt(link.value) * 0.1))
           }
           linkDirectionalParticles={link =>
             selectedLinks.has(link) || highlightLinks.has(link) ? 3 : 0
