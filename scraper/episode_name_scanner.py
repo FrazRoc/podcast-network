@@ -90,6 +90,13 @@ STRIP_AFTER_PATTERNS = [
     # research-support credit above: crew, not participants.
     r'[A-Z][a-z]+ [A-Z][a-z]+ is (?:our |the )?executive (?:editor|producer)',
     r'\bEngineering by\b',                               # audio crew sign-off
+    # Sponsor and partner credits name organisations, not participants:
+    # "created in partnership with the public policy think tank Third Way"
+    # was queueing Third Way as a guest.
+    r'is (?:produced|created|made) in partnership with',
+    r'\nRecommended reading',                            # link list of publications
+    r'\nFurther reading',
+    r'\nRelated reading',
     r'\bOriginal music (?:and|by)\b',                    # composer credit
 ]
 
@@ -308,22 +315,22 @@ _INTRO_RE = re.compile(
         (?:(?:Dr|Prof|Mr|Ms|Mrs|Senator|Sen|Rep|CEO|CTO|CFO|COO|Governor|Gov|
            Secretary|Director|Mayor|President)\.?\s+)*
         # The actual name: exactly 2 capitalized words (first + last only)
-        ([A-Z][a-z]+(?:[^\S\n]+[A-Z][a-z]+){1,2})
+        ([A-Z][a-zA-Z\x27’-]+(?:[^\S\n]+[A-Z][a-zA-Z\x27’-]+){1,2})
         # Stop before: " of", " at", " from", ",", possessive, title words
-        (?=\s+(?:of|at|from|about|for|on|to)|,|'s|\s+(?:CEO|CTO|CFO|COO|Director|Founder)|$)
+        (?=\s+(?:of|at|from|about|for|on|to|and)|,|'s|\s+(?:CEO|CTO|CFO|COO|Director|Founder)|$)
     """,
     re.VERBOSE | re.IGNORECASE
 )
 
 # "Name joins me/us"
 _JOINS_RE = re.compile(
-    r'([A-Z][a-z]+(?:[^\S\n]+[A-Z][a-z]+){1,2})\s+joins?\s+(?:me|us|host|the\s+show)',
+    r'([A-Z][a-zA-Z\x27’-]+(?:[^\S\n]+[A-Z][a-zA-Z\x27’-]+){1,2})\s+joins?\s+(?:me|us|host|the\s+show)',
     re.IGNORECASE
 )
 
 # Possessive org then name: "Rewiring America's Ari Matusiak"
 _POSSESSIVE_RE = re.compile(
-    r"[A-Z][A-Za-z&\s,.\-]+?'s\s+([A-Z][a-z]+(?:[^\S\n]+[A-Z][a-z]+){1,2})"
+    r"[A-Z][A-Za-z&\s,.\-]+?'s\s+([A-Z][a-zA-Z\x27’-]+(?:[^\S\n]+[A-Z][a-zA-Z\x27’-]+){1,2})"
     r"(?=\s+(?:of|at|from|about|for|,|and)|$)",
 )
 
@@ -387,6 +394,9 @@ _ORG_WORDS = {
     'sustainability', 'procurement', 'compliance', 'governance', 'infrastructure',
     'excellence', 'initiatives', 'partnerships', 'acquisition', 'intelligence',
     'experience', 'enablement', 'insights',
+    # Show-note furniture that reads as a second name after "and"/"with".
+    'transcript', 'bonus', 'takeaways', 'highlights', 'recap', 'roundup',
+    'edition', 'special', 'series', 'episode', 'newsletter', 'webinar',
 }
 
 
@@ -395,6 +405,14 @@ def looks_like_organisation(name: str) -> bool:
     if not tokens:
         return True
     return tokens[-1] in _ORG_WORDS or (len(tokens) >= 2 and tokens[-2] in _ORG_WORDS)
+
+
+_POSSESSIVE_PREFIX_RE = re.compile(r"^\S+[\x27’]s\s+")
+
+
+def strip_possessive_prefix(name: str) -> str:
+    """Drop a leading "Org's " so the person after it stands alone."""
+    return _POSSESSIVE_PREFIX_RE.sub('', name).strip()
 
 
 def strip_honorific(name: str) -> str:
@@ -422,7 +440,7 @@ def extract_candidate_names(text: str) -> list[tuple[str, str]]:
     seen = set()
 
     def add(name, pos):
-        name = strip_honorific(name)
+        name = strip_honorific(strip_possessive_prefix(name))
         if _valid_name(name) and name.lower() not in seen:
             seen.add(name.lower())
             start = max(0, pos - 60)
