@@ -1304,6 +1304,73 @@ def _suggest_survivor(a, b):
     return keep, drop, "nothing separates them — pick by name"
 
 
+@app.get("/api/admin/diagnostics", dependencies=[Depends(verify_admin)])
+async def get_diagnostics():
+    """Per-show data health, for the admin diagnostics page.
+
+    Three things a chart can show that a query does not: which shows have no
+    credits at all, which rest entirely on inference rather than Apple's own
+    labels, and which are credited as all-guest — the signature of a show
+    whose hosts were never registered.
+    """
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT p.podcast_id,
+                   p.title,
+                   COUNT(DISTINCT e.episode_id)                                   AS episodes,
+                   COUNT(DISTINCT e.episode_id) FILTER (WHERE c.n > 0)            AS episodes_with_credit,
+                   COUNT(DISTINCT e.episode_id) FILTER (WHERE c.g > 0)            AS episodes_with_guest,
+                   COALESCE(SUM(c.n), 0)                                          AS credits,
+                   COALESCE(SUM(c.g), 0)                                          AS guest_credits,
+                   COALESCE(SUM(c.apple), 0)                                      AS apple_credits,
+                   COALESCE(SUM(c.inferred), 0)                                   AS inferred_credits,
+                   (SELECT COUNT(*) FROM host_podcast hp WHERE hp.podcast_id = p.podcast_id) AS registered_hosts
+            FROM podcasts p
+            LEFT JOIN episodes e ON e.podcast_id = p.podcast_id
+            LEFT JOIN (
+                SELECT episode_id,
+                       COUNT(*)                                              AS n,
+                       COUNT(*) FILTER (WHERE is_guest)                      AS g,
+                       COUNT(*) FILTER (WHERE data_source = 'apple_verified') AS apple,
+                       COUNT(*) FILTER (WHERE data_source LIKE 'parsed%')     AS inferred
+                FROM episode_host GROUP BY episode_id
+            ) c ON c.episode_id = e.episode_id
+            GROUP BY p.podcast_id, p.title
+            ORDER BY p.title
+        """)
+        shows = cur.fetchall()
+
+        # How many people each episode is credited with. The zero bar is the
+        # backlog; a long tail means a list of names was read as a cast.
+        cur.execute("""
+            SELECT credits, COUNT(*) AS episodes FROM (
+                SELECT e.episode_id, COUNT(eh.host_id) AS credits
+                FROM episodes e LEFT JOIN episode_host eh ON eh.episode_id = e.episode_id
+                GROUP BY e.episode_id
+            ) per_episode
+            GROUP BY credits ORDER BY credits
+        """)
+        credits_per_episode = cur.fetchall()
+
+        cur.execute("""
+            SELECT COUNT(*) AS episodes,
+                   (SELECT COUNT(*) FROM episode_host) AS credits,
+                   (SELECT COUNT(*) FROM hosts) AS people
+            FROM episodes
+        """)
+        totals = cur.fetchone()
+
+        cur.close()
+        conn.close()
+        return {"shows": shows, "credits_per_episode": credits_per_episode, "totals": totals}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/admin/people/duplicates", dependencies=[Depends(verify_admin)])
 async def find_duplicate_people():
     """Surface possible duplicate people for a human to judge.

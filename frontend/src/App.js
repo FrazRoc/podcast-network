@@ -5,6 +5,7 @@ import AdminPeople from './components/AdminPeople';
 import AdminShows from './components/AdminShows';
 import AdminEpisodes from './components/AdminEpisodes';
 import AdminDuplicates from './components/AdminDuplicates';
+import AdminDiagnostics from './components/AdminDiagnostics';
 import AdminLoginGate from './components/AdminLoginGate';
 import Stats from './components/Stats';
 
@@ -17,6 +18,8 @@ function App() {
     return <AdminLoginGate><div className="w-full min-h-screen"><AdminImages /></div></AdminLoginGate>;
   if (path === '/admin/people' || path.startsWith('/admin/people/'))
     return <AdminLoginGate><div className="w-full min-h-screen"><AdminPeople /></div></AdminLoginGate>;
+  if (path === '/admin/diagnostics' || path.startsWith('/admin/diagnostics/'))
+    return <AdminLoginGate><div className="w-full min-h-screen"><AdminDiagnostics /></div></AdminLoginGate>;
   if (path === '/admin/duplicates' || path.startsWith('/admin/duplicates/'))
     return <AdminLoginGate><div className="w-full min-h-screen"><AdminDuplicates /></div></AdminLoginGate>;
   if (path === '/admin/shows' || path.startsWith('/admin/shows/'))
