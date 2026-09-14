@@ -486,7 +486,7 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
       onClick={() => onFiltersChange({
         minConnections: 2, minPodcasts: 1,
         minEpisodes: 1,
-        minClusterSize: 8, repulsion: 60,
+        minClusterSize: 8, repulsion: 60, centering: 8, spacing: 1,
         selectedRoles: ['Host', 'Guest'],
         selectedChannel: 'all', selectedGenre: 'all',
       })}
@@ -555,6 +555,46 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
           spreads the graph twice as wide.
         </p>
       </div>
+
+      <div className="space-y-1">
+        <label className="block text-sm font-medium text-gray-700">
+          Centering: {currentFilters.centering}
+        </label>
+        <input
+          type="range" min="1" max="20"
+          value={currentFilters.centering}
+          onChange={e => onFiltersChange({ centering: parseInt(e.target.value) })}
+          className="w-full"
+        />
+        <div className="flex justify-between text-xs text-gray-400">
+          <span>1</span><span>20</span>
+        </div>
+        <p className="text-xs text-gray-400">
+          How hard everything is pulled toward the middle. The only dial that
+          improves two things at once: at 4 the shows separate better than at 8
+          and the centre is less crowded, in exchange for a wider graph.
+        </p>
+      </div>
+
+      <div className="space-y-1">
+        <label className="block text-sm font-medium text-gray-700">
+          Node Spacing: {currentFilters.spacing}
+        </label>
+        <input
+          type="range" min="0" max="10"
+          value={currentFilters.spacing}
+          onChange={e => onFiltersChange({ spacing: parseInt(e.target.value) })}
+          className="w-full"
+        />
+        <div className="flex justify-between text-xs text-gray-400">
+          <span>0</span><span>10</span>
+        </div>
+        <p className="text-xs text-gray-400">
+          Clear space kept around every node. 0 lets them touch; past about 4 it
+          stops separating and starts imposing even spacing, which flattens the
+          density differences that show who is loosely connected.
+        </p>
+      </div>
     </div>
     )}
   </div>
@@ -608,6 +648,8 @@ const PodcastHostNetwork = () => {
     minEpisodes: 1,
     minClusterSize: 8,
     repulsion: 60,
+    centering: 8,   // pull toward the middle, as strength x100
+    spacing: 1,     // extra clear space the collision force keeps, in units
     selectedRoles: ['Host', 'Guest'],
     selectedChannel: 'all',
     selectedGenre: 'all',
@@ -622,6 +664,8 @@ const PodcastHostNetwork = () => {
   const graphRef = useRef(null);
   const hasAutoFitted = useRef(false);
   const repulsionRef = useRef(60);
+  const centeringRef = useRef(8);
+  const spacingRef = useRef(1);
 
   // Admin is localStorage-only and unverified until the server rejects it, so
   // this reveals controls and nothing more — never anything worth protecting.
@@ -643,8 +687,8 @@ const PodcastHostNetwork = () => {
     // which reaches 15% but flings the graph into a sparse web 2.4x wider —
     // legible, and much less like a network.
     graph.d3Force('charge', forceManyBody().strength(-repulsionRef.current));
-    graph.d3Force('x', forceX(0).strength(0.08));
-    graph.d3Force('y', forceY(0).strength(0.08));
+    graph.d3Force('x', forceX(0).strength(centeringRef.current / 100));
+    graph.d3Force('y', forceY(0).strength(centeringRef.current / 100));
     // Nothing previously kept two nodes from occupying the same point, so the
     // default view settled with 107 pairs permanently overlapping, the worst
     // 60% buried. Radius is what gets drawn plus the ring, and 1u of margin.
@@ -656,7 +700,8 @@ const PodcastHostNetwork = () => {
     // tight) and the spread of spacing around the outer nodes falls from 0.93
     // to 0.74, flattening the periphery into an even ring. At 1u both match an
     // uncollided layout to two decimal places, and no pair overlaps.
-    graph.d3Force('collide', forceCollide(node => nodeRadius(node) + RING_WIDTH + 1).iterations(2));
+    graph.d3Force('collide',
+      forceCollide(node => nodeRadius(node) + RING_WIDTH + spacingRef.current).iterations(2));
     graph._forcesSet = true;
   }, []);
   const imageCache = useImageCache(graphData.nodes);
@@ -719,14 +764,21 @@ const PodcastHostNetwork = () => {
   // Repulsion is the one filter that changes the simulation rather than the
   // data, so it is applied to the live force and the layout reheated. The fit
   // is re-armed because the graph's extent changes a lot with it.
+  const { repulsion, centering, spacing } = currentFilters;
   useEffect(() => {
-    repulsionRef.current = currentFilters.repulsion;
+    repulsionRef.current = repulsion;
+    centeringRef.current = centering;
+    spacingRef.current = spacing;
     const graph = graphRef.current;
     if (!graph?.d3Force) return;
-    graph.d3Force('charge', forceManyBody().strength(-currentFilters.repulsion));
+    graph.d3Force('charge', forceManyBody().strength(-repulsion));
+    graph.d3Force('x', forceX(0).strength(centering / 100));
+    graph.d3Force('y', forceY(0).strength(centering / 100));
+    graph.d3Force('collide',
+      forceCollide(node => nodeRadius(node) + RING_WIDTH + spacing).iterations(2));
     hasAutoFitted.current = false;
     graph.d3ReheatSimulation();
-  }, [currentFilters.repulsion]);
+  }, [repulsion, centering, spacing]);
 
   // Filtered graph — recomputed when filters or data change
   const filteredGraphData = useMemo(() => {
