@@ -139,10 +139,27 @@ def strip_html(text: str) -> str:
     return re.sub(r'\n{3,}', '\n\n', text)
 
 
+# Phrases pointing at other episodes. Unlike the patterns above these are cut
+# out in place rather than truncating the rest, because they sit around the
+# middle of a description with real content after them — one reads "listen to
+# our previous episode with Wanjira Mathai" and then "Thank you to our guest
+# this week, Katie Eder!". The name belongs to the episode being linked to, not
+# this one.
+REMOVE_PATTERNS = [
+    r'(?i)(?:click here to\s+)?(?:listen to|watch|hear|check out|revisit)\s+'
+    r'(?:a|our|the|this)?\s*(?:previous|past|earlier|related|full|entire)?\s*'
+    r'(?:episode|ep\.?)\s*#?\d*\s*(?:with|featuring|w/)[^.\n]{0,70}',
+    r'(?i)our episodes? featuring[^.\n]{0,90}',
+    r'(?i)(?:podcast )?interview with[^.\n]{0,50}(?=\s*(?:https?://|\n|$))',
+]
+
+
 def clean_description(text: str, max_chars: int = DESC_SCAN_MAX_CHARS) -> str:
     if not text:
         return ''
     text = strip_html(text)
+    for pattern in REMOVE_PATTERNS:
+        text = re.sub(pattern, ' ', text)
     for pattern in STRIP_AFTER_PATTERNS:
         match = re.search(pattern, text)
         if match:
