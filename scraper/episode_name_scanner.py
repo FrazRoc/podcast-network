@@ -471,8 +471,12 @@ _SECTION_RE = re.compile(r'^\s*[A-Z][A-Za-z /&\'-]{0,28}:\s*$')
 _TIMESTAMP_RE = re.compile(r'^\s*\d{1,2}:\d{2}')
 
 
-def _names_from_entry(entry: str, is_guest: bool, found: list):
-    for part in re.split(r';|\s+(?:and|&|with)\s+', entry):
+def _names_from_entry(entry: str, is_guest: bool, found: list, split_on_and: bool = True):
+    # In the block form each line is one person, so an "and" there belongs to
+    # their job title: "Thomas Ramey, Commercial and Nonprofit Solar Evaluator"
+    # otherwise yields a second, non-existent guest.
+    parts = re.split(r';|\s+(?:and|&|with)\s+', entry) if split_on_and else [entry]
+    for part in parts:
         # Everything after the first comma is the person's job title.
         name = strip_honorific(part.strip().split(',')[0].strip(' .'))
         if _valid_name(name):
@@ -489,8 +493,13 @@ def extract_labelled_credits(text: str) -> list[tuple[str, bool]]:
     found = []
     lines = (text or '').split('\n')
     for i, line in enumerate(lines):
-        match = re.match(r'\s*(Hosts?|Moderators?|Guests?|Interviewee)\s*:\s*(.*)$',
-                         line, re.IGNORECASE)
+        # Climate One writes "Episode Guests:", so a qualifier may precede the
+        # label — requiring the line to begin with it missed 349 episodes'
+        # worth of stated credits, including Joe Manchin's real appearance.
+        match = re.match(
+            r"\s*(?:Episode|Show|Today\x27s|This\s+week\x27s|Featured)?\s*"
+            r"(Hosts?|Moderators?|Guests?|Interviewee)\s*:\s*(.*)$",
+            line, re.IGNORECASE)
         if not match:
             continue
         is_guest = match.group(1).lower() not in _HOST_LABELS
@@ -506,7 +515,7 @@ def extract_labelled_credits(text: str) -> list[tuple[str, bool]]:
             if _SECTION_RE.match(following) or _TIMESTAMP_RE.match(following):
                 break
             before = len(found)
-            _names_from_entry(following, is_guest, found)
+            _names_from_entry(following, is_guest, found, split_on_and=False)
             if len(found) == before:      # a line that is not a person ends the list
                 break
     return found
