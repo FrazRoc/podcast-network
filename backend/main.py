@@ -1925,7 +1925,8 @@ async def merge_people(keep_id: int, drop_id: int):
             WHERE eh.episode_id = e.episode_id
               AND hp.host_id = eh.host_id AND hp.podcast_id = e.podcast_id
               AND eh.host_id = %s
-              AND eh.is_guest = true AND eh.data_source <> 'apple_verified'
+              AND eh.is_guest = true
+              AND eh.data_source NOT IN ('apple_verified', 'manual')
         """, (keep_id,))
         roles_reconciled = cur.rowcount
 
@@ -2337,7 +2338,10 @@ async def add_show_host(apple_podcast_id: str, body: AddShowHostRequest):
               AND eh.host_id = %s
               AND e.podcast_id = %s
               AND eh.is_guest = true
-              AND eh.data_source <> 'apple_verified'
+              -- 'manual' is a person's deliberate decision and outranks this
+              -- inference, same as Apple's own label: a former host really can
+              -- return as a guest, and that correction must survive.
+              AND eh.data_source NOT IN ('apple_verified', 'manual')
         """, (body.host_id, row["podcast_id"]))
         credits_updated = cur.rowcount
 
