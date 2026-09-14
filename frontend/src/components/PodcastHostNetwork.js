@@ -466,7 +466,7 @@ const PodcastLegend = ({ podcasts, isOpen, onToggle }) => (
       onClick={onToggle}
       className="w-full flex items-center justify-between px-4 py-2 text-sm font-semibold text-gray-700"
     >
-      <span>Podcast Clusters ({podcasts.length})</span>
+      <span>Podcasts ({podcasts.length})</span>
       <span>{isOpen ? '▲' : '▼'}</span>
     </button>
     {isOpen && (
@@ -610,9 +610,12 @@ const PodcastHostNetwork = () => {
   }, [filteredGraphData]);
 
   // All podcasts for legend
-  const allPodcasts = useMemo(() =>
-    [...new Set(graphData.nodes.flatMap(n => n.podcasts))].sort(),
-    [graphData]
+  // The legend colours the links on screen, so it lists the shows those links
+  // belong to. Taking them from the unfiltered data made it disagree with the
+  // Podcasts stat — 78 against 73 — and name shows with nothing drawn for them.
+  const visiblePodcastList = useMemo(() =>
+    [...new Set(filteredGraphData.links.map(l => l.podcast))].sort(),
+    [filteredGraphData]
   );
 
   // Interaction handlers
@@ -911,7 +914,7 @@ const PodcastHostNetwork = () => {
       {/* Legend */}
       {!loading && !error && (
         <PodcastLegend
-          podcasts={allPodcasts}
+          podcasts={visiblePodcastList}
           isOpen={legendOpen}
           onToggle={() => setLegendOpen(o => !o)}
         />
