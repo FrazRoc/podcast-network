@@ -1327,7 +1327,8 @@ async def get_diagnostics():
                    COALESCE(SUM(c.g), 0)                                          AS guest_credits,
                    COALESCE(SUM(c.apple), 0)                                      AS apple_credits,
                    COALESCE(SUM(c.inferred), 0)                                   AS inferred_credits,
-                   (SELECT COUNT(*) FROM host_podcast hp WHERE hp.podcast_id = p.podcast_id) AS registered_hosts
+                   (SELECT COUNT(*) FROM host_podcast hp WHERE hp.podcast_id = p.podcast_id) AS registered_hosts,
+                   COALESCE(p.scan_descriptions, TRUE) AS scan_descriptions
             FROM podcasts p
             LEFT JOIN episodes e ON e.podcast_id = p.podcast_id
             LEFT JOIN (
@@ -1338,7 +1339,7 @@ async def get_diagnostics():
                        COUNT(*) FILTER (WHERE data_source LIKE 'parsed%')     AS inferred
                 FROM episode_host GROUP BY episode_id
             ) c ON c.episode_id = e.episode_id
-            GROUP BY p.podcast_id, p.title
+            GROUP BY p.podcast_id, p.title, p.scan_descriptions
             ORDER BY p.title
         """)
         shows = cur.fetchall()

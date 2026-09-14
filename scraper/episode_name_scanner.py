@@ -29,10 +29,28 @@ logger = logging.getLogger(__name__)
 
 DB = os.getenv('DATABASE_URL', 'postgresql://localhost/podcast_db')
 
-# Shows to skip for description scanning
-DESC_SCAN_SKIP_SHOWS = {
-    'POLITICO Energy',
-}
+# Shows whose descriptions are not worth reading. Held in the database
+# (podcasts.scan_descriptions) so the rest of the system can see the decision —
+# as a constant here it was invisible, and the diagnostics page reported the
+# excluded show as an unexplained hole in coverage.
+#
+# POLITICO Energy is the case: it discusses politicians constantly and rarely
+# has a guest, so almost every name in a description belongs to someone being
+# talked about rather than someone present.
+DESC_SCAN_SKIP_SHOWS = set()   # filled from the database at run time
+
+
+def load_desc_scan_skips(conn) -> set:
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT title FROM podcasts WHERE NOT scan_descriptions")
+        return {r[0] for r in cur.fetchall()}
+    except Exception:
+        # Column not present yet: scan everything rather than fail.
+        conn.rollback()
+        return set()
+    finally:
+        cur.close()
 
 # How much of a description to scan. Who is on an episode is established in the
 # opening summary; what follows is links, boilerplate — or, for Volts, a full
@@ -652,6 +670,7 @@ def run(dry_run: bool = True, title_only: bool = False, min_length: int = 7,
     show_hosts = get_show_hosts(conn)
     surname_index = build_surname_index(hosts)
     host_first_names = show_host_first_names(conn)
+    desc_skips = load_desc_scan_skips(conn)
 
     scope = "uncredited episodes" if uncredited_only else "episodes"
     logger.info(f"Scanning {len(episodes)} {scope} against {len(hosts)} known names "
@@ -669,7 +688,7 @@ def run(dry_run: bool = True, title_only: bool = False, min_length: int = 7,
         clean_desc    = clean_description(description) if not title_only else ''
 
         # Only people whose surname appears in this episode can possibly match.
-        scan_desc = bool(clean_desc) and podcast_title not in DESC_SCAN_SKIP_SHOWS
+        scan_desc = bool(clean_desc) and podcast_title not in desc_skips
         candidates = candidate_hosts(
             title + ('\n' + clean_desc if scan_desc else ''), surname_index
         )
@@ -789,6 +808,7 @@ def suggest(title_only: bool = False, limit: int = None, show: str = None,
     """
     conn = psycopg2.connect(DB)
 
+    desc_skips      = load_desc_scan_skips(conn)
     known_names     = get_known_names(conn)
     rejected_names  = get_rejected_names(conn)
     pending         = get_pending_suggestions(conn)
@@ -813,7 +833,7 @@ def suggest(title_only: bool = False, limit: int = None, show: str = None,
 
         # Gather text sources to scan
         sources = [('parsed_title', title)]
-        if not title_only and podcast_title not in DESC_SCAN_SKIP_SHOWS:
+        if not title_only and podcast_title not in desc_skips:
             clean_desc = clean_description(description)
             if clean_desc:
                 sources.append(('parsed_desc', clean_desc))

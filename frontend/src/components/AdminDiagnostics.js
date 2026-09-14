@@ -78,7 +78,9 @@ export default function AdminDiagnostics() {
   // A show credited as all-guest with nobody registered as its host is not a
   // finding about the show; it means we never recorded who presents it.
   const missingHosts = shows.filter(s => s.credits >= 20 && s.pctGuest >= 85 && s.registered_hosts === 0);
-  const uncovered = shows.filter(s => s.coverage <= 20);
+  // Shows whose descriptions we deliberately don't read are expected to be
+  // thin, so they belong outside the list of things to look into.
+  const uncovered = shows.filter(s => s.coverage <= 20 && s.scan_descriptions !== false);
 
   return (
     <div className="min-h-screen bg-gray-100 font-sans">
@@ -164,13 +166,22 @@ export default function AdminDiagnostics() {
                   <tbody>
                     {shows.map(s => (
                       <tr key={s.podcast_id} className="border-b border-gray-100 hover:bg-gray-50">
-                        <td className="px-2 py-1.5 text-gray-900">{s.title}</td>
+                        <td className="px-2 py-1.5 text-gray-900">
+                          {s.title}
+                          {s.scan_descriptions === false && (
+                            <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 align-middle"
+                                  title="Descriptions are deliberately not scanned for this show, so low coverage is expected">
+                              titles only
+                            </span>
+                          )}
+                        </td>
                         <td className="px-2 py-1.5 text-right text-gray-500 tabular-nums">{s.episodes.toLocaleString()}</td>
                         <td className="px-2 py-1.5">
                           <Bar value={s.coverage} max={100} color={teal(s.coverage / 100)}
                                title={`${s.episodes_with_credit} of ${s.episodes} episodes`} />
                         </td>
-                        <td className={`px-2 py-1.5 text-right tabular-nums ${s.coverage <= 20 ? 'text-red-600 font-medium' : 'text-gray-600'}`}>
+                        <td className={`px-2 py-1.5 text-right tabular-nums ${
+                          s.coverage <= 20 && s.scan_descriptions !== false ? 'text-red-600 font-medium' : 'text-gray-600'}`}>
                           {s.coverage}%
                         </td>
                         <td className="px-2 py-1.5">
