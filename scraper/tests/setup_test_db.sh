@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Creates the disposable Postgres database the DB-backed tests use.
+# Safe to re-run: drops and recreates from scratch.
+#
+# Usage: scraper/tests/setup_test_db.sh
+set -euo pipefail
+
+cd "$(dirname "$0")/.."   # scraper/
+
+DB_NAME="${SCANNER_TEST_DB_NAME:-podcast_scanner_test}"
+PSQL_HOST="${PGHOST:-localhost}"
+
+dropdb --if-exists -h "$PSQL_HOST" "$DB_NAME"
+createdb -h "$PSQL_HOST" "$DB_NAME"
+
+psql -h "$PSQL_HOST" -d "$DB_NAME" -v ON_ERROR_STOP=1 -f podcast-schema.sql > /dev/null
+
+for f in migrate_add_data_source.sql migrate_add_host_aliases.sql \
+         migrate_add_image_suggestions.sql migrate_add_scan_descriptions.sql \
+         migrate_add_scrape_status.sql migrate_add_suggestions.sql; do
+    psql -h "$PSQL_HOST" -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$f" > /dev/null
+done
+
+echo "Test database '$DB_NAME' ready."

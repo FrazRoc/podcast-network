@@ -85,35 +85,65 @@ it is not re-proposed.
   overreach.
 - Insert loops are per-row and slow; `execute_values` batching is the fix.
 
-## Tests — the gap worth closing first
+## Tests
 
-**There is no working test suite.** `frontend/src/App.test.js` is the
-untouched create-react-app scaffold, asserting on a "learn react" link this
-app has never had, and `setupTests.js` imports `@testing-library/jest-dom`,
-which has never been a declared dependency. There are no Python tests at all.
+**`scraper/tests/` now has a real pytest suite** (109 cases) covering
+`host_extractor.py`, `episode_name_scanner.py`, and the title/date/dedupe
+logic in `scraper.py`. Run it with:
 
-Every scanner fix so far has been verified by running against production data
-and eyeballing samples, which means **nothing stops a future change from
-silently reintroducing a bug that was already fixed.** The regressions worth
-pinning down as cases, each one a real incident:
+```
+cd scraper
+python3.11 -m venv venv && source venv/bin/activate   # needs 3.10+ for `X | None` syntax
+pip install -r requirements-dev.txt
+pytest
+```
 
-| case | what it must keep doing |
-|---|---|
-| `Jordan Yates` | must **not** credit `Dan Yates` — word-boundary matching |
-| hyphenated surnames | `\b` is not enough; the `[\w-]` guards matter |
-| raw HTML descriptions | tags become spaces, so words do not glue together |
-| `U+202F` and friends | unicode spaces in titles must not create duplicate rows |
-| SunCast title drift | numbered feed titles must not insert duplicates — the 80% match-rate guard |
-| published_date | `(A or B) if C else None` precedence bug once nulled every RSS date |
-| organisation names | `Norton Rose Fulbright` and similar are not people |
-| labelled credits | `Host:` / `Guest:` / `Moderator:`, same-line and block form |
-| first-name host credits | show-level hosts named by first name only |
-| alias matching | a stored nickname matches as well as the canonical name |
-| `apple_verified` / `manual` | reconciliation must never overwrite these |
+Most cases are pure-function tests over fixture strings (no DB). A handful —
+alias resolution, honorific-based host merging, first-name host attribution —
+need real tables and run against a disposable database:
 
-These are pure-function cases over text — they need fixture strings, not a
-database — so a plain `pytest` file next to the scanner would cover most of
-it without any fixtures or network.
+```
+scraper/tests/setup_test_db.sh     # creates podcast_scanner_test once
+pytest tests/test_db_integration.py
+```
+
+These skip automatically (not fail) if that database doesn't exist, so
+`pytest` is always safe to run. Never point `SCANNER_TEST_DATABASE_URL` at
+`podcast_db` — the fixture truncates its tables between tests.
+
+Two small refactors made `scraper.py`'s previously-inline logic testable
+without changing behavior: `compute_duration_seconds`, `compute_published_date`,
+and `compute_match_gate` are now standalone functions the class methods call
+into, rather than logic embedded directly in `insert_episode` /
+`_backfill_from_rss`.
+
+`frontend/src/App.test.js` is still the untouched create-react-app scaffold
+(asserts on a "learn react" link this app has never had) and remains
+unfixed — no frontend test infra exists yet.
+
+The regressions pinned down as cases, each one a real incident:
+
+| case | what it must keep doing | covered in |
+|---|---|---|
+| `Jordan Yates` | must **not** credit `Dan Yates` — word-boundary matching | `test_episode_name_scanner.py::TestWordBoundaryMatching` |
+| hyphenated surnames | `\b` is not enough; the `[\w-]` guards matter | same |
+| raw HTML descriptions | tags become spaces, so words do not glue together | `TestStripHtml` |
+| `U+202F` and friends | unicode spaces in titles must not create duplicate rows | `test_scraper.py::TestNormalizeEpisodeTitle` |
+| SunCast title drift | numbered feed titles must not insert duplicates — the 80% match-rate guard | `TestComputeMatchGate` |
+| published_date | `(A or B) if C else None` precedence bug once nulled every RSS date | `TestComputePublishedDate` |
+| organisation names | `Norton Rose Fulbright` and similar are not people | `test_host_extractor.py::TestLooksLikePersonChannel`, `test_episode_name_scanner.py::TestOrganisationFiltering` |
+| labelled credits | `Host:` / `Guest:` / `Moderator:`, same-line and block form | `TestLabelledCredits` |
+| first-name host credits | show-level hosts named by first name only | `test_db_integration.py::TestShowHostFirstNames` |
+| alias matching | a stored nickname matches as well as the canonical name | `test_db_integration.py::TestAliasMatching` |
+| `apple_verified` / `manual` | reconciliation must never overwrite these | **not covered** — that logic lives in `backend/main.py` SQL, not the scraper; still a gap |
+
+**Known gap found while writing these tests, not yet fixed:** the
+`host_extractor.py` docstring's own example — `"Hosted by Amy Westervelt"`
+with no role word in between — matches none of `HOST_PATTERNS`. Every
+pattern that starts with "Hosted by" either requires a `Co-` prefix or a
+lowercase role word before the capitalized name (`"hosted by partner Todd
+Alexander"` works; the bare form doesn't). Tests were written against actual
+behavior rather than papering over this.
 
 ## Environment
 
