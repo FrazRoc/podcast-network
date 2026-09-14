@@ -487,6 +487,7 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
         minConnections: 2, minPodcasts: 1,
         minEpisodes: 1,
         minClusterSize: 8, repulsion: 60, centering: 8, spacing: 1,
+        drawMinEpisodes: 1,
         selectedRoles: ['Host', 'Guest'],
         selectedChannel: 'all', selectedGenre: 'all',
       })}
@@ -518,6 +519,26 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
         <p className="text-xs text-gray-400">
           82% of connections are a single shared episode. Raising this leaves only
           recurring working relationships, which pulls the dense middle apart.
+        </p>
+      </div>
+
+      <div className="space-y-1">
+        <label className="block text-sm font-medium text-gray-700">
+          Draw Links From: {currentFilters.drawMinEpisodes} episode{currentFilters.drawMinEpisodes === 1 ? '' : 's'}
+        </label>
+        <input
+          type="range" min="1" max="10"
+          value={currentFilters.drawMinEpisodes}
+          onChange={e => onFiltersChange({ drawMinEpisodes: parseInt(e.target.value) })}
+          className="w-full"
+        />
+        <div className="flex justify-between text-xs text-gray-400">
+          <span>1</span><span>10</span>
+        </div>
+        <p className="text-xs text-gray-400">
+          Hides weak links from view only. They keep pulling, so nobody moves —
+          the same layout with the noise taken out. The slider above removes
+          them from the layout too, which rearranges everything.
         </p>
       </div>
 
@@ -648,6 +669,7 @@ const PodcastHostNetwork = () => {
     minEpisodes: 1,
     minClusterSize: 8,
     repulsion: 60,
+    drawMinEpisodes: 1,
     centering: 8,   // pull toward the middle, as strength x100
     spacing: 1,     // extra clear space the collision force keeps, in units
     selectedRoles: ['Host', 'Guest'],
@@ -827,8 +849,12 @@ const PodcastHostNetwork = () => {
   // belong to. Taking them from the unfiltered data made it disagree with the
   // Podcasts stat — 78 against 73 — and name shows with nothing drawn for them.
   const visiblePodcastList = useMemo(() =>
-    [...new Set(filteredGraphData.links.map(l => l.podcast))].sort(),
-    [filteredGraphData]
+    [...new Set(
+      filteredGraphData.links
+        .filter(l => l.value >= currentFilters.drawMinEpisodes)
+        .map(l => l.podcast)
+    )].sort(),
+    [filteredGraphData, currentFilters.drawMinEpisodes]
   );
 
   // Interaction handlers
@@ -951,6 +977,15 @@ const PodcastHostNetwork = () => {
   const nodeCanvasObject = useCallback((node, ctx, globalScale) => {
     nodeCanvasObjectRef.current?.(node, ctx, globalScale);
   }, []); // stable reference, always calls fresh painter via ref
+
+  // Drawing-only threshold. force-graph filters linkVisibility in the paint and
+  // hit-test passes but feeds the whole link array to the force, so hiding a
+  // link declutters the view without moving a single node — unlike Minimum
+  // Episodes Together, which removes them from the layout and relaxes it.
+  const linkVisibility = useCallback(
+    link => link.value >= currentFilters.drawMinEpisodes,
+    [currentFilters.drawMinEpisodes]
+  );
 
   const nodePointerAreaPaint = useCallback((node, color, ctx) => {
     const size = nodeRadius(node);
@@ -1102,6 +1137,7 @@ const PodcastHostNetwork = () => {
           }
           linkDirectionalParticleWidth={2}
           linkCurvature={link => link.curvature || 0}
+          linkVisibility={linkVisibility}
           // Links are thin and crowded; the 4px default makes them fiddly to hit.
           linkHoverPrecision={8}
 
