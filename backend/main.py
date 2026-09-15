@@ -130,13 +130,20 @@ def _verify_and_source(rows: list, name: str) -> list:
     against — Political Climate, Shift Key's "Shocked" cross-promo, RCC's
     rotating past-episode references) would credit that episode too. Title
     matches don't need cleaning — the scanner never cleans titles either.
+
+    No length cap on the cleaned description: this checks a specific,
+    already-known name for an exact match, not the noisy heuristic discovery
+    the scanner's DESC_SCAN_MAX_CHARS exists to protect. Real incident: a
+    Smart Energy Decisions episode named Kulsoom Khan only in a "Connect
+    with" footer past that cap, so "rescan" from her Edit Person page found
+    nothing even though her name was plainly in the description.
     """
     name_lower = name.lower()
     verified = []
     for row in rows:
         if name_lower in (row['title'] or '').lower():
             verified.append({**row, 'source': 'parsed_title'})
-        elif name_lower in clean_description(row['description'] or '').lower():
+        elif name_lower in clean_description(row['description'] or '', max_chars=None).lower():
             verified.append({**row, 'source': 'parsed_desc'})
     return verified
 
@@ -643,8 +650,22 @@ async def get_show_overlap_stats(top_n: int = 25):
 
 @app.get("/api/stats/show-timeline")
 async def get_show_timeline_stats():
-    """Per-show episode date range + every episode date — the data behind
-    the show lifespan Gantt chart on the public Stats page."""
+    """Per-show publishing history for the timeline on the Stats page.
+
+    Returns a monthly count per show rather than a list of every episode
+    date. Drawing one mark per episode does not survive the density: across
+    600px of chart, 34 of the 91 shows put down more than a dot every three
+    pixels and merge into a solid bar, and POLITICO Energy manages 2.6
+    episodes per pixel. The cadence the chart exists to show is exactly what
+    that overplotting destroys.
+
+    Counts are aligned to one shared month axis so every show's array indexes
+    the same way, which keeps the payload small and the rendering trivial.
+
+    episode_dates is still included for one deploy cycle. Backend and frontend
+    deploy separately and the backend lands first, so removing it in the same
+    release that stops using it would break the live page in between.
+    """
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -660,9 +681,46 @@ async def get_show_timeline_stats():
             ORDER BY earliest_episode_date ASC;
         """)
         shows = cur.fetchall()
+
+        cur.execute("""
+            SELECT p.podcast_id,
+                   to_char(date_trunc('month', e.published_date), 'YYYY-MM') AS month,
+                   COUNT(*) AS n
+            FROM podcasts p
+            JOIN episodes e ON e.podcast_id = p.podcast_id
+            WHERE e.published_date IS NOT NULL
+              -- Everything before 2019 is 111 episodes, 0.7% of the data, but
+              -- 68 months of axis. Carrying it would spend 42% of the chart's
+              -- width on a near-empty stretch and squeeze the years that matter.
+              AND e.published_date >= DATE '2019-01-01'
+            GROUP BY 1, 2
+        """)
+        by_month = cur.fetchall()
         cur.close()
         conn.close()
-        return {"shows": shows}
+
+        months = sorted({r["month"] for r in by_month})
+        if months:
+            first_y, first_m = (int(x) for x in months[0].split("-"))
+            last_y, last_m = (int(x) for x in months[-1].split("-"))
+            axis = []
+            y, m = first_y, first_m
+            while (y, m) <= (last_y, last_m):
+                axis.append(f"{y:04d}-{m:02d}")
+                y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+        else:
+            axis = []
+        index = {mo: i for i, mo in enumerate(axis)}
+
+        counts = {s["podcast_id"]: [0] * len(axis) for s in shows}
+        for r in by_month:
+            row = counts.get(r["podcast_id"])
+            if row is not None:
+                row[index[r["month"]]] = r["n"]
+        for s in shows:
+            s["monthly"] = counts[s["podcast_id"]]
+
+        return {"shows": shows, "months": axis}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
