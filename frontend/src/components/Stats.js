@@ -1,6 +1,7 @@
 import ShowOverlapMatrix from './ShowOverlapMatrix';
 import GuestAppearanceChart from './GuestAppearanceChart';
 import GuestReachChart from './GuestReachChart';
+import BridgeChart from './BridgeChart';
 import ShowTimelineGantt from './ShowTimelineGantt';
 import EpisodeCalendarHeatmap from './EpisodeCalendarHeatmap';
 
@@ -36,6 +37,16 @@ export default function Stats() {
             How many guests the top 25 most-connected shows share with each other.
           </p>
           <ShowOverlapMatrix />
+        </div>
+
+        <div className="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6">
+          <h2 className="text-base font-semibold text-gray-900 mb-1">Network Reach</h2>
+          <p className="text-sm text-gray-500 mb-4">
+            How many shows each person is one step from: the shows they appear on,
+            plus every show their fellow guests appear on. Ordered by how many
+            shows they appear on themselves.
+          </p>
+          <BridgeChart />
         </div>
 
         <div className="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6">

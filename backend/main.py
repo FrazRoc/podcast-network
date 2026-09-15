@@ -408,6 +408,73 @@ async def get_guest_reach():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/stats/bridges")
+async def get_bridges():
+    """The two routes to reaching most of the network.
+
+    Reach — shows you can get to in one step, through anyone you shared an
+    episode with — turns out to barely vary at the top: everyone here lands
+    between about 57 and 69 of 88. It saturates, because the guest pool
+    circulates among the same shows. David Roberts has sat with twice as many
+    people as Cody Simms for 12% more reach.
+
+    What does vary is how they got there. Jigar Shah appears on 32 shows and
+    reaches 59. Cody Simms hosts one show, has never appeared anywhere else,
+    and reaches 59 because 103 guests came to him. Ordering by own_shows rather
+    than by reach puts those two routes at opposite ends, which is the thing
+    worth seeing — a ranking by reach would just be a flat list.
+    """
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            WITH person_show AS (
+                SELECT DISTINCT eh.host_id, e.podcast_id
+                FROM episode_host eh JOIN episodes e USING (episode_id)
+            ),
+            pair AS (
+                SELECT DISTINCT a.host_id AS me, b.host_id AS them
+                FROM episode_host a
+                JOIN episode_host b
+                  ON a.episode_id = b.episode_id AND a.host_id <> b.host_id
+            ),
+            own AS (
+                SELECT host_id, COUNT(*) AS own_shows FROM person_show GROUP BY 1
+            ),
+            reach AS (
+                SELECT p.me AS host_id, COUNT(DISTINCT ps.podcast_id) AS reached
+                FROM pair p JOIN person_show ps ON ps.host_id = p.them
+                GROUP BY 1
+            ),
+            partners AS (
+                SELECT me AS host_id, COUNT(*) AS people_sat_with FROM pair GROUP BY 1
+            ),
+            top AS (
+                SELECT h.host_id,
+                       h.first_name || ' ' || h.last_name AS name,
+                       r.reached,
+                       o.own_shows,
+                       GREATEST(r.reached - o.own_shows, 0) AS via_others,
+                       pt.people_sat_with
+                FROM reach r
+                JOIN own      o  USING (host_id)
+                JOIN partners pt USING (host_id)
+                JOIN hosts    h  USING (host_id)
+                ORDER BY r.reached DESC
+                LIMIT 20
+            )
+            SELECT * FROM top ORDER BY own_shows DESC, reached DESC
+        """)
+        people = cur.fetchall()
+        cur.execute("SELECT COUNT(*) AS n FROM podcasts")
+        total_shows = cur.fetchone()["n"]
+        cur.close()
+        conn.close()
+        return {"people": people, "total_shows": total_shows}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/stats/show-overlap")
 async def get_show_overlap_stats(top_n: int = 25):
     """Pairwise shared-guest counts among the top_n most-connected shows —
