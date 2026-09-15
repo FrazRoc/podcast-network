@@ -418,6 +418,46 @@ class TestGuestListPattern:
         assert "Environment Division" not in names
 
 
+class TestBioSentencePattern:
+    """Real incident: Climate CEOs' description for suggestion 9340 said
+    "Adam Greenberg is the CEO and co-founder." — a plain declarative bio
+    sentence with no trigger word ("with"/"featuring"/...) at all. Only the
+    title ("... with AI-Powered Greenhouses") got scanned by other patterns,
+    surfacing "AI-Powered Greenhouses" as the (wrong) suggestion instead."""
+
+    def test_name_is_the_role_sentence(self):
+        text = "Adam Greenberg is the CEO and co-founder. He previously worked at a Fortune 100 company."
+        names = [n for n, _ in extract_candidate_names(text)]
+        assert "Adam Greenberg" in names
+
+    def test_name_is_a_role_sentence(self):
+        text = "Jesse Smith is the Director of Land Stewardship at White Buffalo Land Trust, a nonprofit."
+        names = [n for n, _ in extract_candidate_names(text)]
+        assert "Jesse Smith" in names
+
+    def test_company_is_a_sentence_not_credited(self):
+        # No role word (founder/CEO/reporter/...) appears near "is a" here —
+        # a company being described this way must not look like a person.
+        text = "Reneu Energy is a premier international solar energy consulting firm and developer."
+        names = [n for n, _ in extract_candidate_names(text)]
+        assert names == []
+
+    def test_sentence_initial_adverb_not_swallowed_into_name(self):
+        # "Today Christopher ..." / "Although Khosla ..." — the adverb
+        # satisfies the capitalized-words shape just as well as a name would
+        # since it's the first capitalized word after the sentence boundary.
+        text = "Today Christopher is a Venture Partner at a growth fund."
+        names = [n for n, _ in extract_candidate_names(text)]
+        assert "Today Christopher" not in names
+        assert names == []
+
+    def test_mid_sentence_role_clause_not_credited(self):
+        # Must not fire mid-sentence — only right after a sentence boundary.
+        text = "As part of his role, the CEO of Tesla is Elon Musk, according to reports."
+        names = [n for n, _ in extract_candidate_names(text)]
+        assert "The CEO" not in names
+
+
 class TestExtractTitleNameCredit:
     """Real incident: Titans Of Nuclear had 194 of 200 episodes with zero
     credits (suggestion 3570 — "Juliann Edwards - Chair, United States Women

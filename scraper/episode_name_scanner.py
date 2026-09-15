@@ -344,6 +344,69 @@ def strip_possessive_prefix(name: str) -> str:
     return _POSSESSIVE_PREFIX_RE.sub('', name).strip()
 
 
+# "Adam Greenberg is the CEO and co-founder." — a plain declarative bio
+# sentence with no trigger word at all (suggestion 9340: Climate CEOs'
+# description named the guest this way; the title only said "... with
+# AI-Powered Greenhouses", which is what got suggested instead). Anchored to
+# a sentence boundary so it doesn't fire mid-sentence ("the CEO of Tesla is
+# Elon Musk" isn't "the CEO of Tesla, is, Elon").
+_BIO_IS_RE = re.compile(
+    r'(?:^|[.!?]\s+)([A-Z][a-zA-ZÀ-ž\x27’-]+(?:[^\S\n]+[A-Z][a-zA-ZÀ-ž\x27’-]+){1,2})'
+    r'\s+is\s+(?:the|a|an)\s+'
+)
+
+# Sentence-initial words that satisfy the capitalized-words shape as often
+# as a real name — "Today Christopher ..." and "Although Khosla ..." pulled
+# the adverb/conjunction in as part of the "name" because it's the first
+# capitalized word after the sentence boundary. _valid_name's first-word
+# check only knows _FALSE_POSITIVE_WORDS, which doesn't cover this class.
+_BIO_SENTENCE_LEAD_BAD = {
+    'today', 'although', 'however', 'meanwhile', 'unlike', 'specifically',
+    'importantly', 'surprisingly', 'unfortunately', 'fortunately',
+    'regardless', 'instead', 'otherwise', 'besides', 'certainly',
+    'essentially', 'basically', 'still', 'yet', 'again', 'actually',
+    'indeed', 'overall', 'ultimately', 'currently', 'previously',
+    'historically', 'notably', 'interestingly', 'moreover', 'furthermore',
+    'additionally', 'similarly', 'conversely', 'therefore', 'thus', 'hence',
+    'nonetheless', 'nevertheless', 'before', 'after', 'when', 'while',
+    'since', 'because', 'also', 'and', 'but', 'so', 'if', 'then',
+}
+
+# A company is essentially never described as "is a/the founder/reporter/
+# professor/..." — requiring one of these words to show up in the clause
+# right after "is a/the" is what separates "Adam Greenberg is the CEO and
+# co-founder" from "Reneu Energy is a premier international solar energy
+# consulting firm" or "Raptor Maps is a solar management platform", neither
+# of which _ORG_WORDS catches (no recognizable org-suffix word in either).
+_BIO_ROLE_WORDS_RE = re.compile(
+    r'(?<![a-zA-Z])(?:founders?|co-?founders?|ceo|cto|cfo|coo|cmo|directors?|'
+    r'presidents?|professors?|reporters?|journalists?|analysts?|attorneys?|'
+    r'partners?|executives?|engineers?|scientists?|hosts?|authors?|'
+    r'columnists?|correspondents?|editors?|coach(?:es)?|investors?|'
+    r'consultants?|advisors?|advisers?|chair(?:man|woman)?|managers?|'
+    r'specialists?|experts?|leads?|principals?|fellows?|researchers?|'
+    r'entrepreneurs?|activists?|strategists?|physicians?|doctors?|lawyers?|'
+    r'economists?|geologists?|ecologists?|pioneers?|advocates?|'
+    r'philanthropists?|educators?|historians?)(?![a-zA-Z])',
+    re.IGNORECASE
+)
+
+
+def find_bio_sentence_names(text):
+    """Names from a plain "Name is the/a/an ROLE" bio sentence (see
+    _BIO_IS_RE above). Yields (name, absolute_pos) pairs."""
+    for m in _BIO_IS_RE.finditer(text):
+        name = strip_honorific(m.group(1))
+        if not _valid_name(name):
+            continue
+        if name.split()[0].lower() in _BIO_SENTENCE_LEAD_BAD:
+            continue
+        window = text[m.end():m.end() + 120]
+        if not _BIO_ROLE_WORDS_RE.search(window):
+            continue
+        yield name, m.start()
+
+
 # Interview-format shows (Titans Of Nuclear, Leaders in Cleantech, ...) put
 # the guest's name directly in the title with no trigger phrase at all:
 # "Ep 452: Juliann Edwards - Chair, United States Women in Nuclear" or
@@ -467,6 +530,9 @@ def extract_candidate_names(text: str) -> list[tuple[str, str]]:
             add(name, pos)
 
     for name, pos in find_guest_list_names(text):
+        add(name, pos)
+
+    for name, pos in find_bio_sentence_names(text):
         add(name, pos)
 
     return found
