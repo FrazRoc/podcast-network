@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { API_BASE_URL } from '../config';
 import { adminFetch } from '../adminAuth';
 import AdminHeader from './AdminHeader';
@@ -63,30 +63,53 @@ export default function AdminSuggestions() {
   const [pinnedId, setPinnedId] = useState(
     () => new URLSearchParams(window.location.search).get('suggestion_id')
   );
+  // A ?apple_podcast_id= in the URL scopes the queue to one show, so a Show
+  // panel's "N pending suggestions" link lands directly on that show's queue.
+  const [shows, setShows] = useState([]);
+  const [selectedShow, setSelectedShow] = useState(
+    () => new URLSearchParams(window.location.search).get('apple_podcast_id') || ''
+  );
+  // fetchNext/backToQueue are stable (empty deps) so the keydown handler
+  // below doesn't need to be re-registered on every render; they read the
+  // current filter through this ref rather than closing over stale state.
+  const selectedShowRef = useRef(selectedShow);
+  useEffect(() => { selectedShowRef.current = selectedShow; }, [selectedShow]);
+
+  useEffect(() => {
+    adminFetch(`${API}/shows`)
+      .then(r => r.json())
+      .then(data => setShows(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  }, []);
 
   // Keep the address bar pointed at whatever is on screen. Reloading then
-  // returns to the same suggestion, and the URL can be copied at any moment
-  // without pressing the button first.
-  const syncUrl = (id) => {
-    window.history.replaceState({}, '', `${window.location.pathname}?suggestion_id=${id}`);
+  // returns to the same suggestion (and show filter), and the URL can be
+  // copied at any moment without pressing the button first.
+  const syncUrl = (id, showId = selectedShowRef.current) => {
+    const params = new URLSearchParams();
+    if (showId) params.set('apple_podcast_id', showId);
+    if (id) params.set('suggestion_id', id);
+    const qs = params.toString();
+    window.history.replaceState({}, '', `${window.location.pathname}${qs ? `?${qs}` : ''}`);
   };
 
-  const fetchNext = useCallback(async (clearResult = true) => {
+  const fetchNext = useCallback(async (clearResult = true, showId = selectedShowRef.current) => {
     setLoading(true);
     setNotFound(null);
     if (clearResult) setLastResult(null);
     try {
-      const res = await adminFetch(`${API}/suggestions/next`);
+      const qs = showId ? `?apple_podcast_id=${encodeURIComponent(showId)}` : '';
+      const res = await adminFetch(`${API}/suggestions/next${qs}`);
       const data = await res.json();
       if (data.done) {
         setDone(true);
         setSuggestion(null);
-        window.history.replaceState({}, '', window.location.pathname);
+        syncUrl(null, showId);
       } else {
         setSuggestion(data);
         setEditedName('');
         setDone(false);
-        syncUrl(data.suggestion_id);
+        syncUrl(data.suggestion_id, showId);
       }
     } catch (e) {
       console.error(e);
@@ -94,6 +117,13 @@ export default function AdminSuggestions() {
       setLoading(false);
     }
   }, []);
+
+  const handleShowFilterChange = (showId) => {
+    setSelectedShow(showId);
+    selectedShowRef.current = showId;
+    setPinnedId(null);
+    fetchNext(true, showId);
+  };
 
   const fetchById = useCallback(async (id) => {
     setLoading(true);
@@ -119,10 +149,10 @@ export default function AdminSuggestions() {
   }, []);
 
   // Leaving the pinned suggestion drops the parameter, so the queue doesn't
-  // reopen the same one on the next reload.
+  // reopen the same one on the next reload — the show filter, if any, stays.
   const backToQueue = useCallback(() => {
     setPinnedId(null);
-    window.history.replaceState({}, '', window.location.pathname);
+    syncUrl(null);
     fetchNext();
   }, [fetchNext]);
 
@@ -197,7 +227,25 @@ export default function AdminSuggestions() {
         }
       />
 
-
+      {/* Show filter — scopes the review queue to one show */}
+      <div className="px-6 py-3 bg-white border-b border-gray-200 flex items-center gap-2">
+        <label htmlFor="show-filter" className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+          Show
+        </label>
+        <select
+          id="show-filter"
+          value={selectedShow}
+          onChange={e => handleShowFilterChange(e.target.value)}
+          className="text-sm border border-gray-300 rounded-lg px-2 py-1.5 focus:outline-none focus:border-teal-500 max-w-xs"
+        >
+          <option value="">All Shows</option>
+          {shows.map(s => (
+            <option key={s.apple_podcast_id} value={s.apple_podcast_id}>
+              {s.podcast_title}{s.pending_suggestion_count > 0 ? ` (${s.pending_suggestion_count})` : ''}
+            </option>
+          ))}
+        </select>
+      </div>
 
       {/* Loading */}
       {loading && (
@@ -221,8 +269,18 @@ export default function AdminSuggestions() {
       {done && !loading && !notFound && (
         <div className="flex flex-col items-center justify-center h-96 gap-3">
           <div className="text-4xl">🎉</div>
-          <p className="text-xl font-semibold text-gray-700">Queue is empty!</p>
-          <p className="text-gray-400 text-sm">Run <code className="bg-gray-100 px-1 rounded">python3 episode_name_scanner.py suggest</code> to find more.</p>
+          <p className="text-xl font-semibold text-gray-700">
+            {selectedShow
+              ? `No pending suggestions for ${shows.find(s => s.apple_podcast_id === selectedShow)?.podcast_title || 'this show'}!`
+              : 'Queue is empty!'}
+          </p>
+          {selectedShow ? (
+            <button onClick={() => handleShowFilterChange('')} className="text-teal-700 underline hover:text-teal-900 text-sm">
+              View all shows
+            </button>
+          ) : (
+            <p className="text-gray-400 text-sm">Run <code className="bg-gray-100 px-1 rounded">python3 episode_name_scanner.py suggest</code> to find more.</p>
+          )}
         </div>
       )}
 
@@ -458,25 +516,31 @@ export default function AdminSuggestions() {
                 </div>
               )}
 
-              {/* Progress */}
+              {/* Progress — the approved/rejected split is global across all
+                  shows, so it's only meaningful (and only shown) as a bar
+                  when the queue itself isn't scoped to one show. */}
               <div className="mt-5 pt-4 border-t border-gray-200">
                 <div className="flex justify-between text-sm text-gray-500 mb-2">
                   <span>Queue progress</span>
-                  <span className="font-medium">{suggestion.total_pending} remaining</span>
+                  <span className="font-medium">{suggestion.total_pending} remaining{selectedShow ? ' for this show' : ''}</span>
                 </div>
-                <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div
-                    className="bg-green-500 h-2 rounded-full transition-all"
-                    style={{
-                      width: `${Math.min(100, ((stats.approved ?? 0) /
-                        Math.max(1, (stats.approved ?? 0) + (stats.rejected ?? 0) + suggestion.total_pending)) * 100)}%`
-                    }}
-                  />
-                </div>
-                <div className="flex justify-between text-xs text-gray-400 mt-1">
-                  <span>{(stats.approved ?? 0) + (stats.rejected ?? 0)} reviewed</span>
-                  <span>{stats.approved ?? 0} approved · {stats.rejected ?? 0} rejected</span>
-                </div>
+                {!selectedShow && (
+                  <>
+                    <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div
+                        className="bg-green-500 h-2 rounded-full transition-all"
+                        style={{
+                          width: `${Math.min(100, ((stats.approved ?? 0) /
+                            Math.max(1, (stats.approved ?? 0) + (stats.rejected ?? 0) + suggestion.total_pending)) * 100)}%`
+                        }}
+                      />
+                    </div>
+                    <div className="flex justify-between text-xs text-gray-400 mt-1">
+                      <span>{(stats.approved ?? 0) + (stats.rejected ?? 0)} reviewed</span>
+                      <span>{stats.approved ?? 0} approved · {stats.rejected ?? 0} rejected</span>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>

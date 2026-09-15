@@ -253,6 +253,17 @@ function ShowPanel({ selected, onDone, onCancel }) {
             {selected.error_message && (
               <p className="text-xs text-red-500 mt-2">{selected.error_message}</p>
             )}
+            {selected.pending_suggestion_count > 0 && (
+              <a
+                href={`/admin/suggestions?apple_podcast_id=${selected.apple_podcast_id}`}
+                className="mt-3 flex items-center justify-between px-3 py-2 bg-orange-50 hover:bg-orange-100 border border-orange-200 rounded-lg text-sm transition-colors"
+              >
+                <span className="font-medium text-orange-700">
+                  {selected.pending_suggestion_count} pending suggestion{selected.pending_suggestion_count !== 1 ? 's' : ''}
+                </span>
+                <span className="text-orange-500">Review →</span>
+              </a>
+            )}
           </div>
 
           {/* Show hosts */}
@@ -523,6 +534,11 @@ export default function AdminShows() {
                           <span className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${badge.bg}`}>
                             {badge.label}
                           </span>
+                          {show.pending_suggestion_count > 0 && (
+                            <span className="text-xs px-1.5 py-0.5 rounded flex-shrink-0 bg-orange-100 text-orange-700">
+                              {show.pending_suggestion_count} pending
+                            </span>
+                          )}
                         </div>
                         <p className="text-xs text-gray-400">
                           {show.episode_count} episode{show.episode_count !== 1 ? 's' : ''}

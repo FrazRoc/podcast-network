@@ -582,15 +582,32 @@ if __name__ == "__main__":
 # ADMIN ENDPOINTS — Suggestions queue
 # ==================================================================
 
-def _load_suggestion(cur, suggestion_id: int = None):
+def _load_suggestion(cur, suggestion_id: int = None, apple_podcast_id: str = None):
     """Fetch one suggestion with its episode context.
 
-    With no id this is the review queue: the oldest still-pending one. With an
-    id it is that specific suggestion whatever its status, so a link to one
-    keeps working after it has been approved or rejected.
+    With no id this is the review queue: the oldest still-pending one,
+    optionally scoped to one show via apple_podcast_id. With an id it is that
+    specific suggestion whatever its status, so a link to one keeps working
+    after it has been approved or rejected — the show filter doesn't apply
+    there, since a direct link should always resolve.
     """
-    where, params = ("s.status = 'pending'", ()) if suggestion_id is None \
-        else ("s.suggestion_id = %s", (suggestion_id,))
+    if suggestion_id is None:
+        where = "s.status = 'pending'"
+        params = ()
+        if apple_podcast_id:
+            where += " AND p.apple_podcast_id = %s"
+            params = (apple_podcast_id,)
+    else:
+        where, params = "s.suggestion_id = %s", (suggestion_id,)
+
+    total_pending_where = "status = 'pending'"
+    total_pending_params = ()
+    if suggestion_id is None and apple_podcast_id:
+        total_pending_where += (
+            " AND episode_id IN (SELECT e2.episode_id FROM episodes e2 "
+            "JOIN podcasts p2 ON e2.podcast_id = p2.podcast_id WHERE p2.apple_podcast_id = %s)"
+        )
+        total_pending_params = (apple_podcast_id,)
 
     cur.execute(f"""
             SELECT
@@ -608,14 +625,14 @@ def _load_suggestion(cur, suggestion_id: int = None):
                 p.title       AS podcast_title,
                 p.cover_art_url AS podcast_cover_art,
                 p.apple_podcast_id,
-                (SELECT COUNT(*) FROM suggestions WHERE status = 'pending') AS total_pending
+                (SELECT COUNT(*) FROM suggestions WHERE {total_pending_where}) AS total_pending
             FROM suggestions s
             JOIN episodes e ON s.episode_id = e.episode_id
             JOIN podcasts p ON e.podcast_id = p.podcast_id
             WHERE {where}
             ORDER BY s.created_at ASC
             LIMIT 1
-    """, params)
+    """, (*total_pending_params, *params))
 
     row = cur.fetchone()
     if not row:
@@ -668,12 +685,15 @@ def _load_suggestion(cur, suggestion_id: int = None):
 
 
 @app.get("/api/admin/suggestions/next", dependencies=[Depends(verify_admin)])
-async def get_next_suggestion():
-    """Next pending suggestion for review, with full episode context."""
+async def get_next_suggestion(apple_podcast_id: str = None):
+    """Next pending suggestion for review, with full episode context.
+
+    Optionally scoped to one show via apple_podcast_id.
+    """
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        result = _load_suggestion(cur)
+        result = _load_suggestion(cur, apple_podcast_id=apple_podcast_id)
         cur.close()
         conn.close()
         return result or {"done": True, "message": "No more suggestions to review!"}
@@ -2309,12 +2329,14 @@ async def get_shows():
                 MIN(e.published_date) AS earliest_episode_date,
                 MAX(e.published_date) AS latest_episode_date,
                 COUNT(DISTINCT hp.host_id) AS host_count,
-                COUNT(DISTINCT CASE WHEN eh.is_guest = true THEN eh.host_id END) AS guest_count
+                COUNT(DISTINCT CASE WHEN eh.is_guest = true THEN eh.host_id END) AS guest_count,
+                COUNT(DISTINCT CASE WHEN sug.status = 'pending' THEN sug.suggestion_id END) AS pending_suggestion_count
             FROM podcast_tracking pt
             LEFT JOIN podcasts p ON p.apple_podcast_id = pt.apple_podcast_id
             LEFT JOIN episodes e ON e.podcast_id = p.podcast_id
             LEFT JOIN episode_host eh ON eh.episode_id = e.episode_id
             LEFT JOIN host_podcast hp ON hp.podcast_id = p.podcast_id
+            LEFT JOIN suggestions sug ON sug.episode_id = e.episode_id
             GROUP BY pt.tracking_id, pt.apple_podcast_id, pt.podcast_title,
                      pt.status, pt.last_scraped_at, pt.error_message, pt.total_episodes,
                      p.cover_art_url
