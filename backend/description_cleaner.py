@@ -253,6 +253,7 @@ _ORG_WORDS = {
     'advisors', 'advisers', 'associates', 'consulting', 'county', 'district',
     'council', 'committee', 'association', 'alliance', 'coalition', 'society',
     'agency', 'department', 'ministry', 'commission', 'logistics', 'software',
+    'division', 'divisions',
     'minerals', 'mining', 'pharma', 'airlines', 'aviation', 'shipping',
     'utilities', 'computing', 'management', 'advisory', 'enterprises',
     # Job-function words. "Director of Digital Transformation and Enterprise

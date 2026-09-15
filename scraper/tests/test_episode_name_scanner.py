@@ -337,6 +337,65 @@ class TestExtractCandidateNames:
         assert "Jason Gates" in names
 
 
+class TestGuestListPattern:
+    """Real incident: A Matter of Degrees episode (suggestion 9066) said
+    'We hear from three guests who are leading us to a world beyond
+    petrochemicals and plastics: Michele Fetting, program director at the
+    Breathe Project ...; Shilpi Chhotray, co-founder ... of People Over
+    Plastics ...; and Yvette Arellano, founder ... of ... Fenceline Watch.'
+    None of the other patterns fire because the names sit after a colon,
+    far from the 'hear from' trigger word."""
+
+    def test_semicolon_delimited_list_after_colon(self):
+        text = (
+            "We hear from three guests who are leading us to a world beyond "
+            "petrochemicals and plastics: Michele Fetting, program director at "
+            "the Breathe Project in Pittsburgh; Shilpi Chhotray, co-founder and "
+            "executive director of People Over Plastics, a BIPOC storytelling "
+            "and environmental justice power-building collective; and Yvette "
+            "Arellano, founder and director of a Houston-based environmental "
+            "justice organization, Fenceline Watch."
+        )
+        names = [n for n, _ in extract_candidate_names(text)]
+        assert "Michele Fetting" in names
+        assert "Shilpi Chhotray" in names
+        assert "Yvette Arellano" in names
+        assert "Breathe Project" not in names
+        assert "People Over Plastics" not in names
+        assert "Fenceline Watch" not in names
+
+    def test_panelists_trigger_word(self):
+        text = ("The episode features a pair of marquee panelists: Tom Starrs, "
+                "currently the vice president of strategy; and Maria Robinson, "
+                "until recently the director of an agency.")
+        names = [n for n, _ in extract_candidate_names(text)]
+        assert "Tom Starrs" in names
+        assert "Maria Robinson" in names
+
+    def test_single_item_list_does_not_fire(self):
+        # Needs 2+ semicolon-separated items to be confident this is a real
+        # list rather than an arbitrary colon followed by one clause.
+        text = "Our guest today: Jane Smith, a climate reporter."
+        names = [n for n, _ in extract_candidate_names(text)]
+        assert names == []
+
+    def test_labelled_guest_list_not_duplicated(self):
+        # "Guests:\nName1\nName2" is already handled by extract_labelled_credits
+        # on the full text — this pattern's comma-then-lowercase-word shape
+        # must not also fire on that form and produce noise like org names
+        # embedded in a bio ("... Energy, Infrastructure and Environment
+        # Division ...").
+        text = (
+            "Guests: \nSue Gander, Managing Director of Electric Vehicle Policy "
+            "with the Electrification Coalition and former Director of the "
+            "Energy, Infrastructure and Environment Division with the National "
+            "Governors' Association; Mike Henchen, Principal of Building "
+            "Electrification with the Rocky Mountain Institute."
+        )
+        names = [n for n, _ in extract_candidate_names(text)]
+        assert "Environment Division" not in names
+
+
 class TestSurnameIndex:
     def test_only_matching_surname_is_a_candidate(self):
         hosts = [

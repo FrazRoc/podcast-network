@@ -256,7 +256,11 @@ _INTRO_RE = re.compile(
         # Optional title prefix
         (?:(?:Dr|Prof|Mr|Ms|Mrs|Senator|Sen|Rep|CEO|CTO|CFO|COO|Governor|Gov|
            Secretary|Director|Mayor|President)\.?\s+)*
-        # The actual name: exactly 2 capitalized words (first + last only)
+        # The actual name: exactly 2 capitalized words (first + last only).
+        # IGNORECASE is intentional here — job words not in the title-prefix
+        # list above ("reporter", "activist", ...) are meant to be captured
+        # as part of this group too and cleaned up by strip_honorific()
+        # downstream, which knows a much longer list of them.
         ([A-Z][a-zA-Z\x27’-]+(?:[^\S\n]+[A-Z][a-zA-Z\x27’-]+){1,2})
         # Stop before: " of", " at", " from", ",", possessive, title words
         (?=\s+(?:of|at|from|about|for|on|to|and)|,|'s|\s+(?:CEO|CTO|CFO|COO|Director|Founder)|$)
@@ -287,6 +291,46 @@ _POSSESSIVE_NON_ORG_WORDS = {
 }
 
 _POSSESSIVE_PREFIX_RE = re.compile(r"^\S+[\x27’]s\s+")
+
+# "We hear from three guests ...: Michele Fetting, program director at the
+# Breathe Project ...; Shilpi Chhotray, co-founder ... of People Over
+# Plastics ...; and Yvette Arellano, founder ... of Fenceline Watch." — none
+# of the patterns above fire because the names sit after a colon, far from
+# the "hear from" trigger. Scoped to an explicit guest/panelist/speaker
+# mention right before the colon, and requires 2+ semicolon-separated items,
+# so it doesn't fire on arbitrary colons elsewhere in a description.
+_GUEST_LIST_INTRO_RE = re.compile(
+    r'(?:guests?|panelists?|speakers?)\b[^.:\n]{0,90}:\s*',
+    re.IGNORECASE
+)
+
+# Each item's leading "Name, " — the comma-then-lowercase-word shape is what
+# distinguishes a person with an appositive title from an org name or a
+# "Guests:\nName1\nName2" label list (already handled by extract_labelled_credits).
+_GUEST_LIST_ITEM_RE = re.compile(
+    # strip_html() leaves a space where a tag was, e.g. "Fetting</a>," becomes
+    # "Fetting ," — the optional \s* before the comma absorbs that.
+    r'^\s*(?:and\s+)?([A-Z][a-zA-Z\x27’-]+(?:[^\S\n]+[A-Z][a-zA-Z\x27’-]+){1,2})\s*,\s+[a-z]'
+)
+
+
+def find_guest_list_names(text):
+    """Names from a colon-introduced, semicolon-delimited guest list (see
+    _GUEST_LIST_INTRO_RE above). Yields (name, absolute_pos) pairs."""
+    for m in _GUEST_LIST_INTRO_RE.finditer(text):
+        list_start = m.end()
+        remainder = text[list_start:list_start + 600]
+        end_idx = remainder.find('. ')
+        list_text = remainder if end_idx == -1 else remainder[:end_idx + 1]
+        items = list_text.split(';')
+        if len(items) < 2:
+            continue
+        pos = list_start
+        for item in items:
+            item_m = _GUEST_LIST_ITEM_RE.match(item)
+            if item_m:
+                yield item_m.group(1), pos + item_m.start(1)
+            pos += len(item) + 1
 
 
 def strip_possessive_prefix(name: str) -> str:
@@ -347,6 +391,9 @@ def extract_candidate_names(text: str) -> list[tuple[str, str]]:
         add(m.group(1), m.start())
         for name, pos in find_and_names(text, m.end()):
             add(name, pos)
+
+    for name, pos in find_guest_list_names(text):
+        add(name, pos)
 
     return found
 
