@@ -16,7 +16,7 @@ import httpx
 from urllib.parse import urlparse
 from dotenv import load_dotenv
 
-from description_cleaner import clean_description
+from description_cleaner import clean_description, extract_labelled_credits
 
 load_dotenv()
 
@@ -131,19 +131,30 @@ def _verify_and_source(rows: list, name: str) -> list:
     rotating past-episode references) would credit that episode too. Title
     matches don't need cleaning — the scanner never cleans titles either.
 
-    No length cap on the cleaned description: this checks a specific,
-    already-known name for an exact match, not the noisy heuristic discovery
-    the scanner's DESC_SCAN_MAX_CHARS exists to protect. Real incident: a
-    Smart Energy Decisions episode named Kulsoom Khan only in a "Connect
-    with" footer past that cap, so "rescan" from her Edit Person page found
-    nothing even though her name was plainly in the description.
+    The general text-presence check stays capped at DESC_SCAN_MAX_CHARS
+    (clean_description()'s default) — lifting the cap for exact matching
+    sounds safe but isn't: it would resurrect the original Joe Manchin/Volts
+    bug clean_description.py's docstring for DESC_SCAN_MAX_CHARS describes,
+    since a name buried in a huge transcript is an exact match too. Labelled
+    credits ("Guest:", "Connect with [Name]") are checked separately against
+    the FULL text instead, because those are precise statements rather than
+    mentions — see extract_labelled_credits()'s docstring. Real incident:
+    Kulsoom Khan, an already-known host, was named only in a "Connect with"
+    footer past the cap, so "rescan" from her Edit Person page found nothing
+    even though her name was plainly in the description.
     """
     name_lower = name.lower()
     verified = []
     for row in rows:
         if name_lower in (row['title'] or '').lower():
             verified.append({**row, 'source': 'parsed_title'})
-        elif name_lower in clean_description(row['description'] or '', max_chars=None).lower():
+            continue
+        if name_lower in clean_description(row['description'] or '').lower():
+            verified.append({**row, 'source': 'parsed_desc'})
+            continue
+        full_desc = clean_description(row['description'] or '', max_chars=None)
+        labelled_names = {n.lower() for n, _ in extract_labelled_credits(full_desc)}
+        if name_lower in labelled_names:
             verified.append({**row, 'source': 'parsed_desc'})
     return verified
 

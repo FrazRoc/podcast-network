@@ -180,3 +180,216 @@ def clean_description(text: str, max_chars: int = DESC_SCAN_MAX_CHARS) -> str:
     cut = text[:max_chars]
     space = cut.rfind(' ')
     return cut[:space] if space > 0 else cut
+
+
+# ------------------------------------------------------------------
+# LABELLED CREDITS — precise, structured statements of who's on an episode
+# ------------------------------------------------------------------
+#
+# Unlike the noisy heuristic patterns in scraper/episode_name_scanner.py's
+# extract_candidate_names() (guessing from verbs like "talks with"), these
+# require an explicit statement — "Guest:", "Host:", "Connect with [Name]".
+# That precision is exactly why callers can safely run this against the FULL
+# cleaned text with no DESC_SCAN_MAX_CHARS cap: the cap exists to stop a
+# bare name *mention* deep in a huge transcript from reading as a credit
+# (Joe Manchin picked up 34 false Volts credits this way), but a structured
+# credit statement is never a bare mention — wherever it sits in the text,
+# it's still a deliberate statement that this person is on the episode.
+#
+# Real incident this distinction matters for: Kulsoom Khan, an already-known
+# host, wasn't found by run()'s exact-name matching on an episode that named
+# her only in a "Connect with Kulsoom Khan" footer past the 2500-char cap.
+# The fix isn't to drop the cap everywhere (that reopens the Manchin problem
+# for ordinary full-text matching) — it's to let *labelled* credits like this
+# one bypass it, while everything else stays capped. See run() and backend
+# main.py's _verify_and_source() for how the two checks are combined.
+
+_FALSE_POSITIVE_WORDS = {
+    'how', 'why', 'what', 'when', 'where', 'which', 'who', 'will',
+    'clean', 'green', 'solar', 'wind', 'grid', 'power', 'energy',
+    'climate', 'carbon', 'hydrogen', 'nuclear', 'fusion', 'battery',
+    'electric', 'renewable', 'data', 'center', 'tech', 'policy',
+    'market', 'supply', 'chain', 'global', 'local', 'state', 'federal',
+    'new', 'old', 'big', 'small', 'best', 'next', 'last', 'first',
+    'american', 'united', 'states', 'world', 'north', 'south', 'east', 'west',
+    'inside', 'beyond', 'me', 'us', 'him', 'her', 'the', 'this', 'that',
+    'tell', 'know', 'think', 'make', 'take', 'come', 'look',
+    'wall', 'street', 'main', 'back', 'front', 'high', 'low', 'virtual',
+    'taming', 'rewiring',
+}
+
+
+# Honorifics that show up glued to the front of a captured name. The capture
+# regexes each try to skip these, but they only cover the forms they list —
+# "Professor" slipped past a list containing "Prof" and created a separate
+# "Professor Tristan Smith" person. Stripping here catches every path.
+_HONORIFIC_RE = re.compile(
+    r'^(?:(?:Dr|Prof|Professor|Mr|Ms|Mrs|Miss|Sir|Dame|Rev|Senator|Sen|'
+    r'Representative|Rep|Congressman|Congresswoman|Governor|Gov|Mayor|'
+    r'President|Secretary|Ambassador|Admiral|General|Captain|Lord|Lady|'
+    # Job titles run straight into the name the same way an honorific does:
+    # the review queue holds "Founder Oliver Katz" and "CEO Dan Shugar".
+    r'(?:Co[- ]?)?Founder|CEO|CTO|CFO|COO|CMO|Chief|Vice|VP|Director|'
+    r'Head|Partner|Principal|Manager|Senior|Junior|Deputy|Writer|Reporter|Journalist|Editor|Author|Analyst|Correspondent|Columnist)\.?\s+)+',
+    re.IGNORECASE
+)
+
+# Words that are effectively never someone's surname. Used to keep companies
+# out of the review queue — episode titles are full of them ("Heart Aerospace",
+# "Rigetti Computing", "Burnt Island Ventures"), and the intro patterns cannot
+# tell "talks with Jane Smith" from "talks with Bedrock Robotics".
+#
+# Deliberately omits words that ARE real surnames: Power (Ted Power), Zero,
+# Deep, Duty, Again, Lead, Health, Works. A company left in the queue costs one
+# click to reject; a person filtered out is lost silently, so this errs towards
+# letting things through. Checked against all 2,074 known people: no matches.
+_ORG_WORDS = {
+    'inc', 'llc', 'llp', 'plc', 'gmbh', 'ltd', 'corp', 'corporation', 'company', 'technologies',
+    'technology', 'systems', 'solutions', 'ventures', 'capital', 'partners',
+    'holdings', 'industries', 'labs', 'laboratories', 'institute', 'foundation',
+    'university', 'college', 'centre', 'center', 'fund', 'media', 'news', 'studios',
+    'robotics', 'aerospace', 'biosciences', 'bioscience', 'sciences', 'security',
+    'batteries', 'materials', 'motors', 'mobility', 'analytics', 'strategies',
+    'advisors', 'advisers', 'associates', 'consulting', 'county', 'district',
+    'council', 'committee', 'association', 'alliance', 'coalition', 'society',
+    'agency', 'department', 'ministry', 'commission', 'logistics', 'software',
+    'minerals', 'mining', 'pharma', 'airlines', 'aviation', 'shipping',
+    'utilities', 'computing', 'management', 'advisory', 'enterprises',
+    # Job-function words. "Director of Digital Transformation and Enterprise
+    # Architecture at ..." makes "Enterprise Architecture" look exactly like a
+    # second guest to the "X and Y" pattern. Checked against every known
+    # person: the only match was "Chief Marketing", itself a bad record.
+    'architecture', 'transformation', 'operations', 'development', 'engineering',
+    'marketing', 'communications', 'affairs', 'relations', 'innovation',
+    'sustainability', 'procurement', 'compliance', 'governance', 'infrastructure',
+    'excellence', 'initiatives', 'partnerships', 'acquisition', 'intelligence',
+    'experience', 'enablement', 'insights',
+    # Show-note furniture that reads as a second name after "and"/"with".
+    'transcript', 'bonus', 'takeaways', 'highlights', 'recap', 'roundup',
+    'edition', 'special', 'series', 'episode', 'newsletter', 'webinar',
+    # Title nouns that survive the role-prefix strip: "Chief Revenue Officer"
+    # loses "Chief" and the rest reads as a name.
+    'officer', 'president', 'chair', 'chairman', 'chairwoman', 'treasurer',
+    'fellow', 'scholar', 'ambassador', 'counsel', 'administrator', 'commissioner',
+    'director', 'directors', 'manager', 'strategist', 'advisor',
+    # _POSSESSIVE_RE (episode_name_scanner.py) assumes whatever follows
+    # "Org's" is a person, but Title Cased episode titles often follow a
+    # possessive with an abstract topic noun instead: "Big Oil's Frivolous
+    # Suits", "Nucera's Bold Forecast", "America's Economic Nervous System".
+    # None of these are plausible surnames, unlike some already-excluded
+    # words would have been.
+    'solution', 'problem', 'problems', 'threat', 'threats', 'forecast',
+    'forecasts', 'capacity', 'accelerator', 'accelerators', 'suits', 'system',
+    # "Connect With Smart Energy Decisions" — a show's own publisher name,
+    # not a person — is a recurring footer line alongside real "Connect with
+    # [Guest Name]" entries _CONNECT_WITH_RE below is meant to catch.
+    'decisions',
+}
+
+
+def looks_like_organisation(name: str) -> bool:
+    tokens = [t.lower().strip('.,') for t in name.split()]
+    if not tokens:
+        return True
+    return tokens[-1] in _ORG_WORDS or (len(tokens) >= 2 and tokens[-2] in _ORG_WORDS)
+
+
+def strip_honorific(name: str) -> str:
+    """Remove any leading titles so "Dr. Leah Stokes" and "Leah Stokes" are one person."""
+    return _HONORIFIC_RE.sub('', name.strip()).strip()
+
+
+def _valid_name(name: str) -> bool:
+    if not name or len(name) < 7: return False
+    words = name.split()
+    if len(words) < 2 or len(words) > 3: return False
+    if words[0].lower() in _FALSE_POSITIVE_WORDS: return False
+    if looks_like_organisation(name): return False
+    for w in words:
+        if not (w[0].isupper() or ord(w[0]) > 127): return False
+    return True
+
+
+# Some shows state the line-up outright — "Moderator: Michael Eyman, Managing
+# Director, Origis Services" / "Guest: Dr. Charles Sims, Director for ...".
+# That is a statement of role, not a shape to infer one from, and it covers
+# roughly 645 episodes including 354 of Climate One's.
+_LABEL_RE = re.compile(
+    r'(?:^|\n)[ \t]*(Hosts?|Moderators?|Guests?|Interviewee)[ \t]*:[ \t]*(.+)',
+    re.IGNORECASE
+)
+_HOST_LABELS = {'host', 'hosts', 'moderator', 'moderators'}
+
+
+# A line that is itself a section heading ends the list of people under a
+# label: Climate One follows its guests with "Highlights:" and timestamps.
+_SECTION_RE = re.compile(r'^\s*[A-Z][A-Za-z /&\'-]{0,28}:\s*$')
+_TIMESTAMP_RE = re.compile(r'^\s*\d{1,2}:\d{2}')
+
+# Smart Energy Decisions' shows (and others — strip_html's own docstring
+# example, "Connect with Jason Rissman", is from a different one) list guests
+# one per line this way, often only in a "Resources & People Mentioned"
+# footer near the end of the description.
+_CONNECT_WITH_RE = re.compile(
+    r'(?:^|\n)[ \t]*Connect [Ww]ith\s+([A-Z][a-zA-Z\x27’-]+(?:\s+[A-Z][a-zA-Z\x27’-]+){1,2})\s*$',
+    re.MULTILINE
+)
+
+
+def _names_from_entry(entry: str, is_guest: bool, found: list, split_on_and: bool = True):
+    # In the block form each line is one person, so an "and" there belongs to
+    # their job title: "Thomas Ramey, Commercial and Nonprofit Solar Evaluator"
+    # otherwise yields a second, non-existent guest.
+    parts = re.split(r';|\s+(?:and|&|with)\s+', entry) if split_on_and else [entry]
+    for part in parts:
+        # Everything after the first comma is the person's job title.
+        name = strip_honorific(part.strip().split(',')[0].strip(' .'))
+        if _valid_name(name):
+            found.append((name, is_guest))
+
+
+def extract_labelled_credits(text: str) -> list[tuple[str, bool]]:
+    """Names from explicit Host:/Guest:/Connect-with statements, as (name, is_guest).
+
+    Handles the shapes seen in the feeds: the names on the same line as a
+    Host:/Guest: label, the label alone on its line with one person per line
+    beneath (Climate One writes 354 episodes this way), and "Connect with
+    [Name]" footer lines.
+    """
+    found = []
+    lines = (text or '').split('\n')
+    for i, line in enumerate(lines):
+        # Climate One writes "Episode Guests:", so a qualifier may precede the
+        # label — requiring the line to begin with it missed 349 episodes'
+        # worth of stated credits, including Joe Manchin's real appearance.
+        match = re.match(
+            r"\s*(?:Episode|Show|Our|My|The|Today\x27s|This\s+week\x27s|Featured)?\s*"
+            r"(Hosts?|Moderators?|Guests?|Interviewee)"
+            # "Guests included:", "Our guests were:", "Host is:"
+            r"(?:\s+(?:included|include|are|were|is|was|this\s+week|today))?\s*:\s*(.*)$",
+            line, re.IGNORECASE)
+        if not match:
+            continue
+        is_guest = match.group(1).lower() not in _HOST_LABELS
+
+        if match.group(2).strip():
+            _names_from_entry(match.group(2), is_guest, found)
+            continue
+
+        # Label alone: take the people listed beneath it.
+        for following in lines[i + 1:]:
+            if not following.strip():
+                continue
+            if _SECTION_RE.match(following) or _TIMESTAMP_RE.match(following):
+                break
+            before = len(found)
+            _names_from_entry(following, is_guest, found, split_on_and=False)
+            if len(found) == before:      # a line that is not a person ends the list
+                break
+
+    for m in _CONNECT_WITH_RE.finditer(text):
+        name = strip_honorific(m.group(1).strip())
+        if _valid_name(name):
+            found.append((name, True))
+
+    return found

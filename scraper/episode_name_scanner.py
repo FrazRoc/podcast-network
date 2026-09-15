@@ -25,12 +25,13 @@ import argparse
 import logging
 from collections import defaultdict
 
-# clean_description() lives in backend/ — see that module's docstring for why
-# this is the canonical copy and the scraper reaches across to it rather than
-# the other way around.
+# clean_description() and the labelled-credits extraction it enables live in
+# backend/ — see that module's docstring for why this is the canonical copy
+# and the scraper reaches across to it rather than the other way around.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'backend'))
 from description_cleaner import (  # noqa: E402
     clean_description, strip_html, DESC_SCAN_MAX_CHARS, REMOVE_PATTERNS, STRIP_AFTER_PATTERNS,
+    extract_labelled_credits, strip_honorific, _valid_name, looks_like_organisation, _ORG_WORDS,
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
@@ -284,182 +285,12 @@ _POSSESSIVE_NON_ORG_WORDS = {
     'one', 'everyone', 'everybody', 'someone', 'nobody',
 }
 
-_FALSE_POSITIVE_WORDS = {
-    'how', 'why', 'what', 'when', 'where', 'which', 'who', 'will',
-    'clean', 'green', 'solar', 'wind', 'grid', 'power', 'energy',
-    'climate', 'carbon', 'hydrogen', 'nuclear', 'fusion', 'battery',
-    'electric', 'renewable', 'data', 'center', 'tech', 'policy',
-    'market', 'supply', 'chain', 'global', 'local', 'state', 'federal',
-    'new', 'old', 'big', 'small', 'best', 'next', 'last', 'first',
-    'american', 'united', 'states', 'world', 'north', 'south', 'east', 'west',
-    'inside', 'beyond', 'me', 'us', 'him', 'her', 'the', 'this', 'that',
-    'tell', 'know', 'think', 'make', 'take', 'come', 'look',
-    'wall', 'street', 'main', 'back', 'front', 'high', 'low', 'virtual',
-    'taming', 'rewiring',
-}
-
-
-# Honorifics that show up glued to the front of a captured name. The capture
-# regexes each try to skip these, but they only cover the forms they list —
-# "Professor" slipped past a list containing "Prof" and created a separate
-# "Professor Tristan Smith" person. Stripping here catches every path.
-_HONORIFIC_RE = re.compile(
-    r'^(?:(?:Dr|Prof|Professor|Mr|Ms|Mrs|Miss|Sir|Dame|Rev|Senator|Sen|'
-    r'Representative|Rep|Congressman|Congresswoman|Governor|Gov|Mayor|'
-    r'President|Secretary|Ambassador|Admiral|General|Captain|Lord|Lady|'
-    # Job titles run straight into the name the same way an honorific does:
-    # the review queue holds "Founder Oliver Katz" and "CEO Dan Shugar".
-    r'(?:Co[- ]?)?Founder|CEO|CTO|CFO|COO|CMO|Chief|Vice|VP|Director|'
-    r'Head|Partner|Principal|Manager|Senior|Junior|Deputy|Writer|Reporter|Journalist|Editor|Author|Analyst|Correspondent|Columnist)\.?\s+)+',
-    re.IGNORECASE
-)
-
-# Words that are effectively never someone's surname. Used to keep companies
-# out of the review queue — episode titles are full of them ("Heart Aerospace",
-# "Rigetti Computing", "Burnt Island Ventures"), and the intro patterns cannot
-# tell "talks with Jane Smith" from "talks with Bedrock Robotics".
-#
-# Deliberately omits words that ARE real surnames: Power (Ted Power), Zero,
-# Deep, Duty, Again, Lead, Health, Works. A company left in the queue costs one
-# click to reject; a person filtered out is lost silently, so this errs towards
-# letting things through. Checked against all 2,074 known people: no matches.
-_ORG_WORDS = {
-    'inc', 'llc', 'llp', 'plc', 'gmbh', 'ltd', 'corp', 'corporation', 'company', 'technologies',
-    'technology', 'systems', 'solutions', 'ventures', 'capital', 'partners',
-    'holdings', 'industries', 'labs', 'laboratories', 'institute', 'foundation',
-    'university', 'college', 'centre', 'center', 'fund', 'media', 'news', 'studios',
-    'robotics', 'aerospace', 'biosciences', 'bioscience', 'sciences', 'security',
-    'batteries', 'materials', 'motors', 'mobility', 'analytics', 'strategies',
-    'advisors', 'advisers', 'associates', 'consulting', 'county', 'district',
-    'council', 'committee', 'association', 'alliance', 'coalition', 'society',
-    'agency', 'department', 'ministry', 'commission', 'logistics', 'software',
-    'minerals', 'mining', 'pharma', 'airlines', 'aviation', 'shipping',
-    'utilities', 'computing', 'management', 'advisory', 'enterprises',
-    # Job-function words. "Director of Digital Transformation and Enterprise
-    # Architecture at ..." makes "Enterprise Architecture" look exactly like a
-    # second guest to the "X and Y" pattern. Checked against every known
-    # person: the only match was "Chief Marketing", itself a bad record.
-    'architecture', 'transformation', 'operations', 'development', 'engineering',
-    'marketing', 'communications', 'affairs', 'relations', 'innovation',
-    'sustainability', 'procurement', 'compliance', 'governance', 'infrastructure',
-    'excellence', 'initiatives', 'partnerships', 'acquisition', 'intelligence',
-    'experience', 'enablement', 'insights',
-    # Show-note furniture that reads as a second name after "and"/"with".
-    'transcript', 'bonus', 'takeaways', 'highlights', 'recap', 'roundup',
-    'edition', 'special', 'series', 'episode', 'newsletter', 'webinar',
-    # Title nouns that survive the role-prefix strip: "Chief Revenue Officer"
-    # loses "Chief" and the rest reads as a name.
-    'officer', 'president', 'chair', 'chairman', 'chairwoman', 'treasurer',
-    'fellow', 'scholar', 'ambassador', 'counsel', 'administrator', 'commissioner',
-    'director', 'directors', 'manager', 'strategist', 'advisor',
-    # _POSSESSIVE_RE assumes whatever follows "Org's" is a person, but Title
-    # Cased episode titles often follow a possessive with an abstract topic
-    # noun instead: "Big Oil's Frivolous Suits", "Nucera's Bold Forecast",
-    # "America's Economic Nervous System". None of these are plausible
-    # surnames, unlike some already-excluded words would have been.
-    'solution', 'problem', 'problems', 'threat', 'threats', 'forecast',
-    'forecasts', 'capacity', 'accelerator', 'accelerators', 'suits', 'system',
-}
-
-
-def looks_like_organisation(name: str) -> bool:
-    tokens = [t.lower().strip('.,') for t in name.split()]
-    if not tokens:
-        return True
-    return tokens[-1] in _ORG_WORDS or (len(tokens) >= 2 and tokens[-2] in _ORG_WORDS)
-
-
 _POSSESSIVE_PREFIX_RE = re.compile(r"^\S+[\x27’]s\s+")
 
 
 def strip_possessive_prefix(name: str) -> str:
     """Drop a leading "Org's " so the person after it stands alone."""
     return _POSSESSIVE_PREFIX_RE.sub('', name).strip()
-
-
-def strip_honorific(name: str) -> str:
-    """Remove any leading titles so "Dr. Leah Stokes" and "Leah Stokes" are one person."""
-    return _HONORIFIC_RE.sub('', name.strip()).strip()
-
-
-def _valid_name(name: str) -> bool:
-    if not name or len(name) < 7: return False
-    words = name.split()
-    if len(words) < 2 or len(words) > 3: return False
-    if words[0].lower() in _FALSE_POSITIVE_WORDS: return False
-    if looks_like_organisation(name): return False
-    for w in words:
-        if not (w[0].isupper() or ord(w[0]) > 127): return False
-    return True
-
-
-# Some shows state the line-up outright — "Moderator: Michael Eyman, Managing
-# Director, Origis Services" / "Guest: Dr. Charles Sims, Director for ...".
-# That is a statement of role, not a shape to infer one from, and it covers
-# roughly 645 episodes including 354 of Climate One's.
-_LABEL_RE = re.compile(
-    r'(?:^|\n)[ \t]*(Hosts?|Moderators?|Guests?|Interviewee)[ \t]*:[ \t]*(.+)',
-    re.IGNORECASE
-)
-_HOST_LABELS = {'host', 'hosts', 'moderator', 'moderators'}
-
-
-# A line that is itself a section heading ends the list of people under a
-# label: Climate One follows its guests with "Highlights:" and timestamps.
-_SECTION_RE = re.compile(r'^\s*[A-Z][A-Za-z /&\'-]{0,28}:\s*$')
-_TIMESTAMP_RE = re.compile(r'^\s*\d{1,2}:\d{2}')
-
-
-def _names_from_entry(entry: str, is_guest: bool, found: list, split_on_and: bool = True):
-    # In the block form each line is one person, so an "and" there belongs to
-    # their job title: "Thomas Ramey, Commercial and Nonprofit Solar Evaluator"
-    # otherwise yields a second, non-existent guest.
-    parts = re.split(r';|\s+(?:and|&|with)\s+', entry) if split_on_and else [entry]
-    for part in parts:
-        # Everything after the first comma is the person's job title.
-        name = strip_honorific(part.strip().split(',')[0].strip(' .'))
-        if _valid_name(name):
-            found.append((name, is_guest))
-
-
-def extract_labelled_credits(text: str) -> list[tuple[str, bool]]:
-    """Names from explicit Host:/Guest: labels, as (name, is_guest).
-
-    Handles both shapes seen in the feeds: the names on the same line as the
-    label, and the label alone on its line with one person per line beneath —
-    Climate One writes 354 episodes the second way.
-    """
-    found = []
-    lines = (text or '').split('\n')
-    for i, line in enumerate(lines):
-        # Climate One writes "Episode Guests:", so a qualifier may precede the
-        # label — requiring the line to begin with it missed 349 episodes'
-        # worth of stated credits, including Joe Manchin's real appearance.
-        match = re.match(
-            r"\s*(?:Episode|Show|Our|My|The|Today\x27s|This\s+week\x27s|Featured)?\s*"
-            r"(Hosts?|Moderators?|Guests?|Interviewee)"
-            # "Guests included:", "Our guests were:", "Host is:"
-            r"(?:\s+(?:included|include|are|were|is|was|this\s+week|today))?\s*:\s*(.*)$",
-            line, re.IGNORECASE)
-        if not match:
-            continue
-        is_guest = match.group(1).lower() not in _HOST_LABELS
-
-        if match.group(2).strip():
-            _names_from_entry(match.group(2), is_guest, found)
-            continue
-
-        # Label alone: take the people listed beneath it.
-        for following in lines[i + 1:]:
-            if not following.strip():
-                continue
-            if _SECTION_RE.match(following) or _TIMESTAMP_RE.match(following):
-                break
-            before = len(found)
-            _names_from_entry(following, is_guest, found, split_on_and=False)
-            if len(found) == before:      # a line that is not a person ends the list
-                break
-    return found
 
 
 def extract_candidate_names(text: str) -> list[tuple[str, str]]:
@@ -652,6 +483,10 @@ def run(dry_run: bool = True, title_only: bool = False, min_length: int = 7,
     episodes = get_episodes_to_scan(conn, uncredited_only=uncredited_only)
     show_hosts = get_show_hosts(conn)
     surname_index = build_surname_index(hosts)
+    # Exact lookup for labelled-credit matching (see below) — a name pulled
+    # from a "Guest:"/"Connect with" statement is checked directly against
+    # this rather than run back through the (truncated-text) surname index.
+    known_by_full_name = {h['full_name'].lower(): h for h in hosts if h['full_name']}
     host_first_names = show_host_first_names(conn)
     desc_skips = load_desc_scan_skips(conn)
 
@@ -707,6 +542,27 @@ def run(dry_run: bool = True, title_only: bool = False, min_length: int = 7,
                     'full_name': full_name, 'podcast_title': podcast_title,
                     'episode_title': title, 'source': 'parsed_desc',
                     'is_show_host': is_show_host,
+                })
+
+        # Labelled credits ("Guest:", "Connect with [Name]") are precise
+        # statements, not mentions, so they're checked against the FULL
+        # description with no DESC_SCAN_MAX_CHARS cap — unlike the surname
+        # pre-filter above, which stays capped to avoid Joe-Manchin-style
+        # over-crediting from huge transcripts. Real incident: Kulsoom Khan,
+        # an already-known host, was only named in a "Connect with" footer
+        # past the cap, so the truncated-text matching above never found her.
+        if scan_desc:
+            full_desc = clean_description(description, max_chars=None)
+            for labelled_name, _ in extract_labelled_credits(full_desc):
+                host = known_by_full_name.get(labelled_name.lower())
+                if not host or host['host_id'] in matched_here:
+                    continue
+                matched_here.add(host['host_id'])
+                matches.append({
+                    'episode_id': episode_id, 'host_id': host['host_id'],
+                    'full_name': host['full_name'], 'podcast_title': podcast_title,
+                    'episode_title': title, 'source': 'parsed_desc',
+                    'is_show_host': host['host_id'] in show_host_ids,
                 })
 
         # A registered host named only by their first name still counts, but
@@ -820,70 +676,75 @@ def suggest(title_only: bool = False, limit: int = None, show: str = None,
         title         = episode['title'] or ''
         description   = episode['description'] or ''
 
-        # Gather text sources to scan
-        sources = [('parsed_title', title)]
+        # Two passes per text: labelled credits (Host:/Guest:/"Connect with")
+        # are precise, so they run on the full text — length doesn't matter
+        # for exact statements the way it does for heuristic guessing (see
+        # run()'s identical reasoning). The heuristic pass stays capped at
+        # DESC_SCAN_MAX_CHARS to avoid Volts-transcript-style over-crediting
+        # of people merely mentioned, not present.
+        full_desc = truncated_desc = ''
         if not title_only and podcast_title not in desc_skips:
-            clean_desc = clean_description(description)
-            if clean_desc:
-                sources.append(('parsed_desc', clean_desc))
+            full_desc = clean_description(description, max_chars=None)
+            truncated_desc = clean_description(description)
 
-        for source, text in sources:
-            # A "Guest:"/"Moderator:" label states the line-up rather than
-            # implying it, so take those as well as the inferred matches.
-            candidates = [(n, text[:160]) for n, _ in extract_labelled_credits(text)]
-            candidates += extract_candidate_names(text)
+        candidates = [('parsed_title', n, title[:160]) for n, _ in extract_labelled_credits(title)]
+        candidates += [('parsed_title', n, c) for n, c in extract_candidate_names(title)]
+        if full_desc:
+            candidates += [('parsed_desc', n, full_desc[:160]) for n, _ in extract_labelled_credits(full_desc)]
+        if truncated_desc:
+            candidates += [('parsed_desc', n, c) for n, c in extract_candidate_names(truncated_desc)]
 
-            for name, context in candidates:
-                name_lower = name.lower()
+        for source, name, context in candidates:
+            name_lower = name.lower()
 
-                # Skip if already known
-                if name_lower in known_names:
-                    skipped_known += 1
-                    continue
+            # Skip if already known
+            if name_lower in known_names:
+                skipped_known += 1
+                continue
 
-                # Skip if previously rejected
-                if name_lower in rejected_names:
-                    skipped_rejected += 1
-                    continue
+            # Skip if previously rejected
+            if name_lower in rejected_names:
+                skipped_rejected += 1
+                continue
 
-                # Skip if already pending for this episode
-                if (name_lower, episode_id) in pending:
-                    skipped_pending += 1
-                    continue
+            # Skip if already pending for this episode
+            if (name_lower, episode_id) in pending:
+                skipped_pending += 1
+                continue
 
-                # Skip if this exact person is already credited on this exact
-                # episode — see get_already_credited_pairs().
-                if (name_lower, episode_id) in already_credited:
-                    skipped_credited += 1
-                    continue
+            # Skip if this exact person is already credited on this exact
+            # episode — see get_already_credited_pairs().
+            if (name_lower, episode_id) in already_credited:
+                skipped_credited += 1
+                continue
 
-                # Split name
-                parts = name.strip().split(' ')
-                first_name = ' '.join(parts[:-1]) if len(parts) > 1 else name
-                last_name  = parts[-1] if len(parts) > 1 else ''
+            # Split name
+            parts = name.strip().split(' ')
+            first_name = ' '.join(parts[:-1]) if len(parts) > 1 else name
+            last_name  = parts[-1] if len(parts) > 1 else ''
 
-                if dry_run:
+            if dry_run:
+                added += 1
+                pending.add((name_lower, episode_id))
+                by_name[name] = by_name.get(name, 0) + 1
+                continue
+
+            try:
+                cur.execute(
+                    """
+                    INSERT INTO suggestions
+                        (candidate_name, first_name, last_name, episode_id, source, matched_text, status)
+                    VALUES (%s, %s, %s, %s, %s, %s, 'pending')
+                    ON CONFLICT (candidate_name, episode_id) DO NOTHING
+                    """,
+                    (name, first_name, last_name, episode_id, source, context)
+                )
+                if cur.rowcount > 0:
                     added += 1
                     pending.add((name_lower, episode_id))
-                    by_name[name] = by_name.get(name, 0) + 1
-                    continue
-
-                try:
-                    cur.execute(
-                        """
-                        INSERT INTO suggestions
-                            (candidate_name, first_name, last_name, episode_id, source, matched_text, status)
-                        VALUES (%s, %s, %s, %s, %s, %s, 'pending')
-                        ON CONFLICT (candidate_name, episode_id) DO NOTHING
-                        """,
-                        (name, first_name, last_name, episode_id, source, context)
-                    )
-                    if cur.rowcount > 0:
-                        added += 1
-                        pending.add((name_lower, episode_id))
-                except Exception as e:
-                    logger.error(f"Error inserting suggestion '{name}': {e}")
-                    conn.rollback()
+            except Exception as e:
+                logger.error(f"Error inserting suggestion '{name}': {e}")
+                conn.rollback()
 
     if dry_run:
         conn.rollback()

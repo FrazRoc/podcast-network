@@ -213,6 +213,23 @@ class TestLabelledCredits:
         result = extract_labelled_credits("Guest: Dr. Charles Sims, Director for Energy")
         assert ("Charles Sims", True) in result
 
+    def test_connect_with_footer(self):
+        # Real incident: Kulsoom Khan, an already-known host, wasn't found on
+        # a Smart Energy Voices episode that named her this way — only her
+        # own "Connect with" line, not a Guest:/Host: label.
+        text = "Connect with Kulsoom Khan\nOn LinkedIn\nConnect with Kate Peterson\nOn LinkedIn"
+        result = extract_labelled_credits(text)
+        assert ("Kulsoom Khan", True) in result
+        assert ("Kate Peterson", True) in result
+
+    def test_connect_with_rejects_org_footer(self):
+        # "Connect With Smart Energy Decisions" is the show's own publisher
+        # name in the same footer style — not a person.
+        text = "Connect with Kulsoom Khan\nOn LinkedIn\nConnect With Smart Energy Decisions"
+        names = [n for n, _ in extract_labelled_credits(text)]
+        assert "Kulsoom Khan" in names
+        assert "Smart Energy Decisions" not in names
+
     def test_same_line_host_label(self):
         result = extract_labelled_credits("Host: Amy Westervelt")
         assert ("Amy Westervelt", False) in result
