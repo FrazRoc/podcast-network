@@ -28,6 +28,10 @@ import re
 # Volts credits without ever appearing on the show.
 DESC_SCAN_MAX_CHARS = 2500
 
+# A STRIP_AFTER_PATTERNS match this early is a show naming its sponsor
+# up front, not a sign-off — see clean_description's comment at the call site.
+MIN_STRIP_AFTER_POSITION = 100
+
 # ------------------------------------------------------------------
 # DESCRIPTION CLEANING
 # ------------------------------------------------------------------
@@ -168,7 +172,15 @@ def clean_description(text: str, max_chars: int = DESC_SCAN_MAX_CHARS) -> str:
         text = re.sub(pattern, ' ', text)
     for pattern in STRIP_AFTER_PATTERNS:
         match = re.search(pattern, text)
-        if match:
+        # Real incident: Smart Energy Voices opens several descriptions with
+        # "This episode ... is produced in partnership with Evergy Energy
+        # Partners." as its very first sentence, then names the host and
+        # guests right after — the "in partnership with" pattern is meant
+        # for a sponsor credit that comes AFTER the real content (that's
+        # true for the other 70+ episodes elsewhere that trigger it), not
+        # before it. A match this early is a show naming its sponsor up
+        # front, not a sign-off with nothing worth keeping after it.
+        if match and match.start() >= MIN_STRIP_AFTER_POSITION:
             text = text[:match.start()]
     text = text.strip()
     if not max_chars or len(text) <= max_chars:

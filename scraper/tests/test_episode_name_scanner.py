@@ -66,7 +66,12 @@ class TestStripHtml:
 
 class TestCleanDescription:
     def test_strips_produced_by_credit(self):
-        text = "Amy Westervelt talks with Jane Smith. Produced by Some Studio."
+        # Padded with realistic-length lead-in content — a match this early
+        # in the text is treated as a sponsor mentioned up front rather than
+        # a sign-off with nothing worth keeping after it (see
+        # MIN_STRIP_AFTER_POSITION and the Smart Energy Voices incident).
+        text = ("This week Amy Westervelt talks with Jane Smith about the future of "
+                "climate reporting and how newsrooms are adapting. Produced by Some Studio.")
         result = clean_description(text)
         assert "Produced by" not in result
 
@@ -92,7 +97,8 @@ class TestCleanDescription:
         assert "Amy Westervelt" in result
 
     def test_credits_without_hosted_by_is_cut(self):
-        text = "Great episode.\nCredits:\nEdited by some engineer"
+        text = ("Great episode this week covering the latest in renewable energy "
+                "policy and what it means for the grid.\nCredits:\nEdited by some engineer")
         result = clean_description(text)
         assert "Credits:" not in result
         assert "engineer" not in result
@@ -150,10 +156,34 @@ class TestCleanDescription:
     def test_zero_climate_race_footer_stripped(self):
         # cleanup_zero_guests.py fixed the case where "Explore further: Past
         # episode with X" credited a guest from a different episode.
-        text = "Real content about the guest.\nExplore further: Past episode with Someone Else"
+        text = ("Real content about the guest and their work on climate solutions "
+                "across the energy sector this year.\nExplore further: Past episode with Someone Else")
         result = clean_description(text)
         assert "Someone Else" not in result
         assert "Real content" in result
+
+    def test_early_sponsor_mention_does_not_truncate_real_content(self):
+        # Real incident: Smart Energy Voices opens several descriptions with
+        # "This episode ... is produced in partnership with Evergy Energy
+        # Partners." as its very first sentence, then names the host and
+        # guests right after (suggestion 6384 — "Host John Failla is joined
+        # by ..." was being thrown away entirely). The same "in partnership
+        # with" phrase appears near the END of descriptions on other shows
+        # (Political Climate, 70+ episodes) where cutting there is correct —
+        # the distinguishing signal is match position, not the phrase itself.
+        text = ("This episode of Smart Energy Voices is produced in partnership "
+                "with Evergy Energy Partners. Host John Failla is joined by "
+                "Evergy's Robert Day to discuss renewable energy in regulated markets.")
+        result = clean_description(text)
+        assert "John Failla" in result
+
+    def test_late_sponsor_mention_still_truncates(self):
+        text = ("Tony Seba gets a lot of things right about the coming energy "
+                "transition and where the industry is headed next for renewables. "
+                "This episode is produced in partnership with Acme Studios and its team.")
+        result = clean_description(text)
+        assert "Acme Studios" not in result
+        assert "Tony Seba" in result
 
 
 class TestOrganisationFiltering:
