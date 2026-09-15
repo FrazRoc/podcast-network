@@ -30,11 +30,12 @@ const FILTERS = [
 ];
 
 const SORTS = [
-  { id: 'title_asc',      label: 'Title A–Z' },
-  { id: 'episodes_desc',  label: 'Most episodes' },
-  { id: 'guests_desc',    label: 'Most guests' },
-  { id: 'guests_asc',     label: 'Fewest guests' },
-  { id: 'recent_scrape',  label: 'Recently scraped' },
+  { id: 'title_asc',        label: 'Title A–Z' },
+  { id: 'episodes_desc',    label: 'Most episodes' },
+  { id: 'guests_desc',      label: 'Most guests' },
+  { id: 'guests_asc',       label: 'Fewest guests' },
+  { id: 'suggestions_desc', label: 'Most pending suggestions' },
+  { id: 'recent_scrape',    label: 'Recently scraped' },
 ];
 
 // Accepts a raw Apple Podcast ID or a full podcasts.apple.com URL and
@@ -445,6 +446,7 @@ export default function AdminShows() {
     else if (sort === 'episodes_desc') items.sort((a, b) => b.episode_count - a.episode_count);
     else if (sort === 'guests_desc') items.sort((a, b) => b.guest_count - a.guest_count);
     else if (sort === 'guests_asc') items.sort((a, b) => a.guest_count - b.guest_count);
+    else if (sort === 'suggestions_desc') items.sort((a, b) => (b.pending_suggestion_count || 0) - (a.pending_suggestion_count || 0));
     else if (sort === 'recent_scrape') items.sort((a, b) => new Date(b.last_scraped_at || 0) - new Date(a.last_scraped_at || 0));
     return items;
   }, [shows, filter, searchQ, sort]);
@@ -544,6 +546,7 @@ export default function AdminShows() {
                           {show.episode_count} episode{show.episode_count !== 1 ? 's' : ''}
                           {' · '}{show.host_count} host{show.host_count !== 1 ? 's' : ''}
                           {' · '}{show.guest_count} guest{show.guest_count !== 1 ? 's' : ''}
+                          {' · '}{show.pending_suggestion_count || 0} suggestion{show.pending_suggestion_count !== 1 ? 's' : ''}
                           {show.latest_episode_date && ` · latest ${formatDateOnly(show.latest_episode_date)}`}
                           {show.last_scraped_at && ` · scraped ${new Date(show.last_scraped_at).toLocaleDateString()}`}
                         </p>
