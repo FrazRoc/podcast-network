@@ -16,6 +16,8 @@ import httpx
 from urllib.parse import urlparse
 from dotenv import load_dotenv
 
+from description_cleaner import clean_description
+
 load_dotenv()
 
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
@@ -93,39 +95,78 @@ def find_host_by_full_name(cur, name: str):
     return row['host_id'] if row else None
 
 
-def link_matching_episodes(cur, name: str, host_id: int, exclude_episode_id: int = None) -> list:
-    """Link host_id as a Guest on every OTHER episode whose title or
-    description contains `name`, and return the podcast title + matched
-    source for each one actually inserted.
+def _find_candidate_episodes(cur, name: str, exclude_episode_id: int = None) -> list:
+    """Return raw (episode_id, podcast_id, podcast_title, title, description)
+    rows whose RAW title or description contains `name` as a case-insensitive
+    substring, excluding one episode if given.
 
-    Done as one query rather than fetching every episode's full title and
-    description into Python and looping — some descriptions run past
-    100,000 characters (Volts' transcripts), and pulling all ~10k episodes'
-    text over the wire on every single suggestion approval was the reason
-    each approve took ~8 seconds in the admin UI.
+    A fast pre-filter, not the final answer: clean_description() only ever
+    removes text, so anything that matches after cleaning was already present
+    in the raw text, but the reverse doesn't hold. This still avoids pulling
+    all ~10k episodes' text over the wire — some descriptions run past
+    100,000 characters (Volts' transcripts) — and typically only a handful of
+    episodes contain any given name, so re-checking just those against real
+    cleaning in Python (_verify_and_source) is cheap.
     """
     cur.execute("""
-        WITH matches AS (
-            SELECT e.episode_id, e.podcast_id,
-                   CASE WHEN position(%(name_lower)s IN lower(e.title)) > 0
-                        THEN 'parsed_title' ELSE 'parsed_desc' END AS source
-            FROM episodes e
-            WHERE (%(exclude_id)s IS NULL OR e.episode_id != %(exclude_id)s)
-              AND (position(%(name_lower)s IN lower(e.title)) > 0
-                   OR position(%(name_lower)s IN lower(COALESCE(e.description, ''))) > 0)
-        ),
-        inserted AS (
+        SELECT e.episode_id, e.podcast_id, p.title AS podcast_title,
+               e.title, e.description
+        FROM episodes e
+        JOIN podcasts p ON p.podcast_id = e.podcast_id
+        WHERE (%(exclude_id)s IS NULL OR e.episode_id != %(exclude_id)s)
+          AND (position(%(name_lower)s IN lower(e.title)) > 0
+               OR position(%(name_lower)s IN lower(COALESCE(e.description, ''))) > 0)
+    """, {'name_lower': name.lower(), 'exclude_id': exclude_episode_id})
+    return cur.fetchall()
+
+
+def _verify_and_source(rows: list, name: str) -> list:
+    """Re-check each raw-text candidate against clean_description() before
+    trusting it as a real appearance.
+
+    Without this, approving a name that happens to appear inside a sponsor
+    blurb or cross-show promo on some unrelated episode (see
+    description_cleaner.py's docstring for real incidents this guards
+    against — Political Climate, Shift Key's "Shocked" cross-promo, RCC's
+    rotating past-episode references) would credit that episode too. Title
+    matches don't need cleaning — the scanner never cleans titles either.
+    """
+    name_lower = name.lower()
+    verified = []
+    for row in rows:
+        if name_lower in (row['title'] or '').lower():
+            verified.append({**row, 'source': 'parsed_title'})
+        elif name_lower in clean_description(row['description'] or '').lower():
+            verified.append({**row, 'source': 'parsed_desc'})
+    return verified
+
+
+def link_matching_episodes(cur, name: str, host_id: int, exclude_episode_id: int = None) -> list:
+    """Link host_id as a Guest on every OTHER episode that genuinely names
+    them, and return the podcast title + matched source for each one
+    actually inserted.
+    """
+    matches = _verify_and_source(_find_candidate_episodes(cur, name, exclude_episode_id), name)
+    if not matches:
+        return []
+
+    cur.execute("""
+        WITH inserted AS (
             INSERT INTO episode_host (episode_id, host_id, is_guest, role, data_source)
-            SELECT episode_id, %(host_id)s, true, 'Guest', source FROM matches
+            SELECT v.episode_id, %(host_id)s, true, 'Guest', v.source
+            FROM unnest(%(episode_ids)s::int[], %(sources)s::text[]) AS v(episode_id, source)
             ON CONFLICT (episode_id, host_id) DO NOTHING
             RETURNING episode_id
         )
-        SELECT p.title AS podcast_title, m.source
-        FROM matches m
-        JOIN podcasts p ON p.podcast_id = m.podcast_id
-        WHERE m.episode_id IN (SELECT episode_id FROM inserted)
-    """, {'name_lower': name.lower(), 'exclude_id': exclude_episode_id, 'host_id': host_id})
-    return cur.fetchall()
+        SELECT episode_id FROM inserted
+    """, {
+        'host_id': host_id,
+        'episode_ids': [m['episode_id'] for m in matches],
+        'sources': [m['source'] for m in matches],
+    })
+    inserted_ids = {r['episode_id'] for r in cur.fetchall()}
+    return [{'podcast_title': m['podcast_title'], 'source': m['source']}
+            for m in matches if m['episode_id'] in inserted_ids]
 
 
 def link_matching_episodes_with_role(cur, name: str, host_id: int, exclude_episode_id: int = None) -> list:
@@ -134,32 +175,38 @@ def link_matching_episodes_with_role(cur, name: str, host_id: int, exclude_episo
     used when creating/editing/rescanning a person directly, as opposed to
     approving a suggestion (which is always a Guest credit on the source show).
     """
+    matches = _verify_and_source(_find_candidate_episodes(cur, name, exclude_episode_id), name)
+    if not matches:
+        return []
+
+    cur.execute("SELECT podcast_id FROM host_podcast WHERE host_id = %s", (host_id,))
+    show_host_podcast_ids = {r['podcast_id'] for r in cur.fetchall()}
+
+    episode_ids, is_guests, roles, sources = [], [], [], []
+    for m in matches:
+        is_show_host = m['podcast_id'] in show_host_podcast_ids
+        episode_ids.append(m['episode_id'])
+        is_guests.append(not is_show_host)
+        roles.append('Host' if is_show_host else 'Guest')
+        sources.append(m['source'])
+
     cur.execute("""
-        WITH matches AS (
-            SELECT e.episode_id, e.podcast_id,
-                   CASE WHEN position(%(name_lower)s IN lower(e.title)) > 0
-                        THEN 'parsed_title' ELSE 'parsed_desc' END AS source,
-                   (hp.host_id IS NOT NULL) AS is_show_host
-            FROM episodes e
-            LEFT JOIN host_podcast hp ON hp.podcast_id = e.podcast_id AND hp.host_id = %(host_id)s
-            WHERE (%(exclude_id)s IS NULL OR e.episode_id != %(exclude_id)s)
-              AND (position(%(name_lower)s IN lower(e.title)) > 0
-                   OR position(%(name_lower)s IN lower(COALESCE(e.description, ''))) > 0)
-        ),
-        inserted AS (
+        WITH inserted AS (
             INSERT INTO episode_host (episode_id, host_id, is_guest, role, data_source)
-            SELECT episode_id, %(host_id)s, NOT is_show_host,
-                   CASE WHEN is_show_host THEN 'Host' ELSE 'Guest' END, source
-            FROM matches
+            SELECT v.episode_id, %(host_id)s, v.is_guest, v.role, v.source
+            FROM unnest(%(episode_ids)s::int[], %(is_guests)s::bool[], %(roles)s::text[], %(sources)s::text[])
+                AS v(episode_id, is_guest, role, source)
             ON CONFLICT (episode_id, host_id) DO NOTHING
             RETURNING episode_id
         )
-        SELECT p.title AS podcast_title, m.source
-        FROM matches m
-        JOIN podcasts p ON p.podcast_id = m.podcast_id
-        WHERE m.episode_id IN (SELECT episode_id FROM inserted)
-    """, {'name_lower': name.lower(), 'exclude_id': exclude_episode_id, 'host_id': host_id})
-    return cur.fetchall()
+        SELECT episode_id FROM inserted
+    """, {
+        'host_id': host_id, 'episode_ids': episode_ids,
+        'is_guests': is_guests, 'roles': roles, 'sources': sources,
+    })
+    inserted_ids = {r['episode_id'] for r in cur.fetchall()}
+    return [{'podcast_title': m['podcast_title'], 'source': m['source']}
+            for m in matches if m['episode_id'] in inserted_ids]
 
 
 app = FastAPI()
