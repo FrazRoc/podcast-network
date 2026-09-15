@@ -338,6 +338,74 @@ def strip_possessive_prefix(name: str) -> str:
     return _POSSESSIVE_PREFIX_RE.sub('', name).strip()
 
 
+# Interview-format shows (Titans Of Nuclear, Leaders in Cleantech, ...) put
+# the guest's name directly in the title with no trigger phrase at all:
+# "Ep 452: Juliann Edwards - Chair, United States Women in Nuclear" or
+# "Liliane Ableitner – Exnaton" (suggestion 3570 — Titans Of Nuclear had 194
+# of 200 episodes with zero credits, entirely because of this). Not anchored
+# to the start of the title since a leading "Show #NNN - " prefix is common
+# and varies per show; searched for anywhere and only the first match is
+# used, since a later "Name, Role, Org" segment would otherwise itself look
+# like a second person ("... - Independent Researcher, University of...").
+_TITLE_NAME_SEP_RE = re.compile(
+    r'([A-Z][a-zA-ZÀ-ž\x27’-]+(?:\s+[A-Z][a-zA-ZÀ-ž\x27’-]+){1,2})'
+    r'\s*[-–,]\s*(?=\S)'
+)
+
+# Words that make an otherwise name-shaped capture obviously not a person —
+# "This Week In Cleantech - Episode 1" satisfies the Title-Case-words-then-
+# separator shape as readily as a real name does. _valid_name only checks
+# the first word against _FALSE_POSITIVE_WORDS, and re.search skips ahead to
+# try "Week In Cleantech" once "This Week In" fails, dodging that filter —
+# so this checks every word instead, just for this one very permissive
+# pattern.
+_TITLE_NAME_BAD_WORDS = {'in', 'of', 'for', 'the', 'and', 'with', 'on', 'at', 'to', 'live'}
+
+
+def extract_title_name_credit(title: str) -> str | None:
+    """The one name this title's leading 'Name - Org' / 'Name, Org' shape
+    names, or None. Only meaningful for shows gated in by
+    title_credit_shows() below — this pattern alone is far too permissive
+    to run on every show's titles (see that function's docstring)."""
+    m = _TITLE_NAME_SEP_RE.search(title or '')
+    if not m:
+        return None
+    name = strip_honorific(m.group(1))
+    if not _valid_name(name):
+        return None
+    if any(w.lower() in _TITLE_NAME_BAD_WORDS for w in name.split()):
+        return None
+    return name
+
+
+def title_credit_shows(conn, min_episodes: int = 10, min_rate: float = 0.85) -> set:
+    """Podcast IDs whose titles reliably lead with "Name - Org" / "Name, Org"
+    — determined empirically per show, not applied network-wide.
+
+    extract_title_name_credit's shape (Title-Cased words then a dash or
+    comma) is common enough in ordinary headline-style titles ("Fake Meat,
+    What's The Beef?", "Plasma Recycling, Hydrogen Ferry, Scotland's
+    Transition...") that running it everywhere produced roughly 50% garbage
+    in a random network-wide sample. But on shows that actually use this as
+    their title convention, it fires on 91-100% of episodes; everything else
+    checked fires on 62% or less — a clean gap. This requires a show to
+    clear min_rate over a minimum sample before trusting the pattern for it,
+    the same match-rate-guard shape compute_match_gate (scraper.py) uses for
+    SunCast's title drift.
+    """
+    cur = conn.cursor()
+    cur.execute("SELECT podcast_id, title FROM episodes")
+    counts = defaultdict(lambda: [0, 0])  # podcast_id -> [fired, total]
+    for podcast_id, title in cur.fetchall():
+        c = counts[podcast_id]
+        c[1] += 1
+        if extract_title_name_credit(title or ''):
+            c[0] += 1
+    cur.close()
+    return {pid for pid, (fired, total) in counts.items()
+            if total >= min_episodes and fired / total >= min_rate}
+
+
 def extract_candidate_names(text: str) -> list[tuple[str, str]]:
     """
     Extract candidate person names from text.
@@ -655,6 +723,7 @@ def suggest(title_only: bool = False, limit: int = None, show: str = None,
     already_credited  = get_already_credited_pairs(conn)
     episodes          = get_all_episodes(conn, show=show)
     show_hosts        = get_show_hosts(conn)
+    title_credit_pids = title_credit_shows(conn)
 
     if limit:
         episodes = episodes[:limit]
@@ -685,6 +754,10 @@ def suggest(title_only: bool = False, limit: int = None, show: str = None,
 
         candidates = [('parsed_title', n, title[:160]) for n, _ in extract_labelled_credits(title)]
         candidates += [('parsed_title', n, c) for n, c in extract_candidate_names(title)]
+        if episode['podcast_id'] in title_credit_pids:
+            title_credit_name = extract_title_name_credit(title)
+            if title_credit_name:
+                candidates.append(('parsed_title', title_credit_name, title[:160]))
         if full_desc:
             candidates += [('parsed_desc', n, full_desc[:160]) for n, _ in extract_labelled_credits(full_desc)]
         if truncated_desc:

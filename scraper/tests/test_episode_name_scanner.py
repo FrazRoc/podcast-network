@@ -18,6 +18,8 @@ from episode_name_scanner import (
     extract_labelled_credits,
     extract_candidate_names,
     first_name_belongs_to_other,
+    extract_title_name_credit,
+    title_credit_shows,
 )
 
 
@@ -394,6 +396,130 @@ class TestGuestListPattern:
         )
         names = [n for n, _ in extract_candidate_names(text)]
         assert "Environment Division" not in names
+
+
+class TestExtractTitleNameCredit:
+    """Real incident: Titans Of Nuclear had 194 of 200 episodes with zero
+    credits (suggestion 3570 — "Juliann Edwards - Chair, United States Women
+    in Nuclear"), because interview shows like this put the guest's whole
+    credit directly in the title with no trigger phrase at all. Only the
+    first name-shaped segment is taken — a later "Name, Role, Org" segment
+    would otherwise look like a second person."""
+
+    def test_dash_separated_name_and_org(self):
+        assert extract_title_name_credit(
+            "Ep 452: Juliann Edwards - Chair, United States Women in Nuclear"
+        ) == "Juliann Edwards"
+
+    def test_comma_separated_name_and_org(self):
+        assert extract_title_name_credit("Liliane Ableitner – Exnaton") == "Liliane Ableitner"
+
+    def test_show_number_prefix_is_skipped(self):
+        # Not anchored to position 0 — "Leaders in Cleantech #107 -" isn't a
+        # name (lowercase "in" breaks the capitalized-word run), so the
+        # search continues to the real name after it.
+        assert extract_title_name_credit(
+            "Leaders in Cleantech #107 - David Martell – EVIOS"
+        ) == "David Martell"
+
+    def test_only_first_segment_is_credited(self):
+        # "Independent Researcher, University of..." is itself shaped like a
+        # second name — must not be returned instead of/alongside the guest.
+        assert extract_title_name_credit(
+            "Ep 408: Ryan Pickering - Independent Researcher, University of California, Berkeley"
+        ) == "Ryan Pickering"
+
+    def test_accented_characters_in_name(self):
+        # "è" isn't in [a-zA-Z] — without the extended Unicode range, the
+        # name match breaks mid-word and the role ("Executive VP") gets
+        # captured instead.
+        assert extract_title_name_credit(
+            "Dominique Minière - Executive VP, International and Domestic New Nuclear "
+            "Development, Ontario Power Generation"
+        ) == "Dominique Minière"
+
+    def test_topic_headline_title_rejected(self):
+        # "This Week In Cleantech - Episode 1" satisfies the Title-Case-
+        # words-then-dash shape as readily as a real name; "in" mid-name is
+        # the tell. _valid_name alone doesn't catch this because it only
+        # checks the first word, and re.search skips ahead to "Week In
+        # Cleantech" once "This Week In" fails to find a separator.
+        assert extract_title_name_credit("This Week In Cleantech - Episode 1") is None
+
+    def test_show_segment_name_not_credited_as_person(self):
+        assert extract_title_name_credit(
+            "Fully Charged Live, Robert Llewellyn & Dan Ceasar - 84"
+        ) is None
+
+    def test_no_separator_no_match(self):
+        assert extract_title_name_credit("Introducing Energy Impact") is None
+
+    def test_org_only_title_not_a_person(self):
+        assert extract_title_name_credit("Nuclear Technology Series - Liquid Metal Reactors") is None
+
+
+class TestTitleCreditShows:
+    def _insert_episodes(self, cur, podcast_id, titles):
+        for t in titles:
+            cur.execute(
+                "INSERT INTO episodes (podcast_id, title) VALUES (%s, %s)",
+                (podcast_id, t)
+            )
+
+    def test_show_with_consistent_name_dash_org_titles_qualifies(self, db_conn):
+        cur = db_conn.cursor()
+        cur.execute(
+            "INSERT INTO podcasts (title, apple_podcast_id) VALUES (%s, %s) RETURNING podcast_id",
+            ("Titans Of Nuclear", "titans")
+        )
+        podcast_id = cur.fetchone()[0]
+        first_names = ["Alice", "Bob", "Carla", "David", "Elena", "Frank",
+                        "Grace", "Hank", "Ivy", "Jack", "Kara", "Leo"]
+        self._insert_episodes(cur, podcast_id, [
+            f"{fn} Anderson - Some Organization" for fn in first_names
+        ])
+        db_conn.commit()
+
+        assert podcast_id in title_credit_shows(db_conn, min_episodes=10, min_rate=0.85)
+
+    def test_show_with_headline_style_titles_does_not_qualify(self, db_conn):
+        cur = db_conn.cursor()
+        cur.execute(
+            "INSERT INTO podcasts (title, apple_podcast_id) VALUES (%s, %s) RETURNING podcast_id",
+            ("Headline Show", "headline-show")
+        )
+        podcast_id = cur.fetchone()[0]
+        # Only a minority happen to look name-shaped, same as an ordinary
+        # headline-style show mixing topics, quotes, and the occasional name.
+        self._insert_episodes(cur, podcast_id, [
+            "How Green Hydrogen Can Decarbonize Hard-to-Abate Sectors",
+            "The Future of Grid Storage",
+            "Plasma Recycling, Hydrogen Ferry, and Plant Safety Lessons",
+            "Circular Economy - Making Things Last",
+            "Fake Meat, What's The Beef?",
+            "Real Guest Name - A Real Org",
+            "Another Topic Without A Person In It",
+            "Software Powered Grids",
+            "Using AI to Accelerate Renewable Energy",
+            "Behind-the-Meter Energy Basics",
+        ])
+        db_conn.commit()
+
+        assert podcast_id not in title_credit_shows(db_conn, min_episodes=10, min_rate=0.85)
+
+    def test_show_below_minimum_sample_size_excluded(self, db_conn):
+        cur = db_conn.cursor()
+        cur.execute(
+            "INSERT INTO podcasts (title, apple_podcast_id) VALUES (%s, %s) RETURNING podcast_id",
+            ("Tiny New Show", "tiny-new-show")
+        )
+        podcast_id = cur.fetchone()[0]
+        self._insert_episodes(cur, podcast_id, [
+            "Alice Anderson - Some Org", "Bob Baker - Some Org", "Carla Cruz - Some Org"
+        ])
+        db_conn.commit()
+
+        assert podcast_id not in title_credit_shows(db_conn, min_episodes=10, min_rate=0.85)
 
 
 class TestSurnameIndex:
