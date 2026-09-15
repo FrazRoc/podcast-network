@@ -276,6 +276,26 @@ def get_rejected_names(conn) -> set[str]:
     return names
 
 
+def get_already_credited_pairs(conn) -> set[tuple[str, int]]:
+    """Return (host full name lowercased, episode_id) pairs already in episode_host.
+
+    A belt-and-suspenders check alongside get_known_names(): real cases have
+    surfaced (e.g. suggestion_id 2930) where a pending suggestion was created
+    for a (name, episode) pair that was already a real credit, even though
+    the host existed well before the scan ran. Whatever the cause, checking
+    directly against episode_host — the source of truth — closes it without
+    needing to explain the discrepancy in the cache.
+    """
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT lower(h.first_name || ' ' || h.last_name), eh.episode_id
+        FROM episode_host eh JOIN hosts h ON h.host_id = eh.host_id
+    """)
+    pairs = {(r[0], r[1]) for r in cur.fetchall()}
+    cur.close()
+    return pairs
+
+
 def get_pending_suggestions(conn) -> set[str]:
     """Return set of (candidate_name.lower(), episode_id) already in suggestions."""
     cur = conn.cursor()
@@ -907,12 +927,13 @@ def suggest(title_only: bool = False, limit: int = None, show: str = None,
     """
     conn = psycopg2.connect(DB)
 
-    desc_skips      = load_desc_scan_skips(conn)
-    known_names     = get_known_names(conn)
-    rejected_names  = get_rejected_names(conn)
-    pending         = get_pending_suggestions(conn)
-    episodes        = get_all_episodes(conn, show=show)
-    show_hosts      = get_show_hosts(conn)
+    desc_skips        = load_desc_scan_skips(conn)
+    known_names       = get_known_names(conn)
+    rejected_names    = get_rejected_names(conn)
+    pending           = get_pending_suggestions(conn)
+    already_credited  = get_already_credited_pairs(conn)
+    episodes          = get_all_episodes(conn, show=show)
+    show_hosts        = get_show_hosts(conn)
 
     if limit:
         episodes = episodes[:limit]
@@ -921,7 +942,7 @@ def suggest(title_only: bool = False, limit: int = None, show: str = None,
     logger.info(f"Known hosts: {len(known_names)} | Rejected: {len(rejected_names)} | Already pending: {len(pending)}")
 
     cur = conn.cursor()
-    added = skipped_known = skipped_rejected = skipped_pending = 0
+    added = skipped_known = skipped_rejected = skipped_pending = skipped_credited = 0
     by_name = {}
 
     for episode in episodes:
@@ -959,6 +980,12 @@ def suggest(title_only: bool = False, limit: int = None, show: str = None,
                 # Skip if already pending for this episode
                 if (name_lower, episode_id) in pending:
                     skipped_pending += 1
+                    continue
+
+                # Skip if this exact person is already credited on this exact
+                # episode — see get_already_credited_pairs().
+                if (name_lower, episode_id) in already_credited:
+                    skipped_credited += 1
                     continue
 
                 # Split name
@@ -1007,6 +1034,7 @@ def suggest(title_only: bool = False, limit: int = None, show: str = None,
     print(f"  ⏭  Already known:      {skipped_known}")
     print(f"  ❌ Previously rejected: {skipped_rejected}")
     print(f"  ⚪ Already pending:     {skipped_pending}")
+    print(f"  ✅ Already credited:    {skipped_credited}")
 
     # Show pending count
     conn2 = psycopg2.connect(DB)

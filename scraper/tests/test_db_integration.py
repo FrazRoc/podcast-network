@@ -5,7 +5,7 @@ and cross-table lookups are involved — alias matching, host merging, and
 first-name host attribution — which the pure-function tests can't reach.
 """
 from host_extractor import get_or_create_host
-from episode_name_scanner import get_hosts, get_known_names, show_host_first_names
+from episode_name_scanner import get_hosts, get_known_names, show_host_first_names, get_already_credited_pairs
 
 
 def _insert_episode(cur, title="An Episode"):
@@ -31,6 +31,44 @@ def _insert_podcast(cur, title):
         (title, title.lower().replace(' ', '-'))
     )
     return cur.fetchone()[0]
+
+
+class TestAlreadyCreditedPairs:
+    def test_credited_pair_is_returned(self, db_conn):
+        # Real incident: suggestion_id 2930 proposed "Dawn Lippert" for an
+        # episode where she was already credited — get_known_names() alone
+        # should have caught this and didn't, so suggest() also checks
+        # episode_host directly.
+        cur = db_conn.cursor()
+        podcast_id = _insert_podcast(cur, "Some Show")
+        cur.execute(
+            "INSERT INTO episodes (podcast_id, title) VALUES (%s, %s) RETURNING episode_id",
+            (podcast_id, "An Episode")
+        )
+        episode_id = cur.fetchone()[0]
+        host_id = get_or_create_host(cur, "Dawn Lippert", "manual")
+        cur.execute(
+            "INSERT INTO episode_host (episode_id, host_id, is_guest, role, data_source) "
+            "VALUES (%s, %s, true, 'Guest', 'manual')",
+            (episode_id, host_id)
+        )
+        db_conn.commit()
+
+        pairs = get_already_credited_pairs(db_conn)
+        assert ("dawn lippert", episode_id) in pairs
+
+    def test_uncredited_pair_is_absent(self, db_conn):
+        cur = db_conn.cursor()
+        podcast_id = _insert_podcast(cur, "Some Other Show")
+        cur.execute(
+            "INSERT INTO episodes (podcast_id, title) VALUES (%s, %s) RETURNING episode_id",
+            (podcast_id, "Another Episode")
+        )
+        episode_id = cur.fetchone()[0]
+        db_conn.commit()
+
+        pairs = get_already_credited_pairs(db_conn)
+        assert ("dawn lippert", episode_id) not in pairs
 
 
 class TestAliasMatching:
