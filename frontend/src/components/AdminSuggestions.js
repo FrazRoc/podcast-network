@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { API_BASE_URL } from '../config';
 import { adminFetch } from '../adminAuth';
 import AdminHeader from './AdminHeader';
-import { highlightNames } from '../adminUtils';
+import { highlightNames, stripHtmlForDisplay } from '../adminUtils';
 
 const API = `${API_BASE_URL}/api/admin`;
 
@@ -350,7 +350,7 @@ export default function AdminSuggestions() {
                 )}
               </div>
               <div className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap text-left">
-                {highlightNames(suggestion.episode_description, [
+                {highlightNames(stripHtmlForDisplay(suggestion.episode_description), [
                   { name: suggestion.candidate_name, className: 'bg-yellow-200 rounded px-0.5 not-italic' },
                   ...(suggestion.existing_credits || []).map(c => ({
                     name: c.name,

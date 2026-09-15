@@ -266,6 +266,14 @@ class TestExtractCandidateNames:
         assert "Ari Matusiak" in names
         assert "Rewiring America" not in names
 
+    def test_title_cased_contraction_not_read_as_org_possessive(self):
+        # Real incident: SunCast episode 756's title, "... On What's Trending
+        # In Solar", satisfied the possessive pattern's capitalized-prefix
+        # requirement purely because titles are Title Cased — "What's" isn't
+        # an organisation, so "Trending In Solar" got queued as a person.
+        title = "756: Expert Analysis, 3 Perspectives On What's Trending In Solar"
+        assert extract_candidate_names(title) == []
+
     def test_does_not_credit_org_after_with(self):
         result = extract_candidate_names("This week we talk with Bedrock Robotics about mining.")
         assert result == []

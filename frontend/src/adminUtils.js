@@ -7,6 +7,35 @@ export const formatDateOnly = (dateStr) => {
   return new Date(year, month - 1, day).toLocaleDateString();
 };
 
+// Feeds like SunCast's ship raw HTML in the description (<p>, <ul><li>,
+// <a href>...). The scanner already handles this fine for name-matching
+// (backend/description_cleaner.py's strip_html), but the admin UI was
+// showing the literal, unstripped markup to reviewers — real incident:
+// suggestion 4603 on SunCast episode 92044 was unreadable, wall of <p> tags.
+// This is display-only cleaning, separate from the matching logic: it keeps
+// paragraph/list breaks as newlines (readable) rather than collapsing
+// everything to spaces (which is what the matcher wants instead).
+const _HTML_ENTITIES = {
+  '&nbsp;': ' ', '&amp;': '&', '&quot;': '"', '&#39;': "'", '&rsquo;': "'",
+  '&lsquo;': "'", '&mdash;': '—', '&ndash;': '–', '&hellip;': '…', '&lt;': '<', '&gt;': '>',
+};
+
+export const stripHtmlForDisplay = (html) => {
+  if (!html) return html;
+  let text = html
+    .replace(/<\/(p|div|li|h[1-6])>/gi, '\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '• ')
+    .replace(/<[^>]+>/g, '');
+  for (const [entity, char] of Object.entries(_HTML_ENTITIES)) {
+    text = text.split(entity).join(char);
+  }
+  return text
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+};
+
 // Wraps every occurrence of each highlight's name in text with a <mark> of
 // the given className. highlights: [{name, className}]
 export const highlightNames = (text, highlights) => {

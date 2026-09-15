@@ -271,8 +271,18 @@ _JOINS_RE = re.compile(
 # Possessive org then name: "Rewiring America's Ari Matusiak"
 _POSSESSIVE_RE = re.compile(
     r"[A-Z][A-Za-z&\s,.\-]+?'s\s+([A-Z][a-zA-Z\x27’-]+(?:[^\S\n]+[A-Z][a-zA-Z\x27’-]+){1,2})"
-    r"(?=\s+(?:of|at|from|about|for|,|and)|$)",
+    r"(?=\s+(?:of|at|from|about|for|,|and)|$)",
 )
+
+# Episode titles are Title Cased, so common words that happen to take an
+# apostrophe-s ("On What's Trending In Solar") satisfy _POSSESSIVE_RE's
+# capitalized-prefix requirement just as well as a real org name would —
+# SunCast ep 756 queued "Trending In Solar" as a person this way. Checked
+# against the word immediately before "'s", not the captured name.
+_POSSESSIVE_NON_ORG_WORDS = {
+    'what', 'that', 'it', 'here', 'there', 'who', 'this', 'today', 'now',
+    'one', 'everyone', 'everybody', 'someone', 'nobody',
+}
 
 _FALSE_POSITIVE_WORDS = {
     'how', 'why', 'what', 'when', 'where', 'which', 'who', 'will',
@@ -491,6 +501,10 @@ def extract_candidate_names(text: str) -> list[tuple[str, str]]:
             add(name, pos)
 
     for m in _POSSESSIVE_RE.finditer(text):
+        prefix = m.group(0)[:m.group(0).index("'")].strip()
+        prefix_last_word = prefix.split()[-1].lower() if prefix else ''
+        if prefix_last_word in _POSSESSIVE_NON_ORG_WORDS:
+            continue
         add(m.group(1), m.start())
         for name, pos in find_and_names(text, m.end()):
             add(name, pos)

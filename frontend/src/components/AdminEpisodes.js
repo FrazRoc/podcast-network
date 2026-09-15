@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { API_BASE_URL } from '../config';
 import { adminFetch } from '../adminAuth';
 import AdminHeader from './AdminHeader';
-import { formatDateOnly, highlightNames } from '../adminUtils';
+import { formatDateOnly, highlightNames, stripHtmlForDisplay } from '../adminUtils';
 
 const API = `${API_BASE_URL}/api/admin`;
 const PAGE_SIZE = 50;
@@ -209,7 +209,7 @@ function EpisodePanel({ episodeId, onChanged }) {
             <div className="mb-5 border-t border-gray-100 pt-4">
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Episode Description</p>
               <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
-                {highlightNames(episode.description, episode.credits.map(c => ({
+                {highlightNames(stripHtmlForDisplay(episode.description), episode.credits.map(c => ({
                   name: c.name,
                   className: c.is_guest
                     ? 'underline decoration-blue-400 decoration-2 bg-transparent'
