@@ -352,6 +352,13 @@ _ORG_WORDS = {
     'officer', 'president', 'chair', 'chairman', 'chairwoman', 'treasurer',
     'fellow', 'scholar', 'ambassador', 'counsel', 'administrator', 'commissioner',
     'director', 'directors', 'manager', 'strategist', 'advisor',
+    # _POSSESSIVE_RE assumes whatever follows "Org's" is a person, but Title
+    # Cased episode titles often follow a possessive with an abstract topic
+    # noun instead: "Big Oil's Frivolous Suits", "Nucera's Bold Forecast",
+    # "America's Economic Nervous System". None of these are plausible
+    # surnames, unlike some already-excluded words would have been.
+    'solution', 'problem', 'problems', 'threat', 'threats', 'forecast',
+    'forecasts', 'capacity', 'accelerator', 'accelerators', 'suits', 'system',
 }
 
 

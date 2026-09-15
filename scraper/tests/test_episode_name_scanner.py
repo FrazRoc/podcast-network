@@ -274,6 +274,34 @@ class TestExtractCandidateNames:
         title = "756: Expert Analysis, 3 Perspectives On What's Trending In Solar"
         assert extract_candidate_names(title) == []
 
+    def test_possessive_topic_noun_not_read_as_person(self):
+        # _POSSESSIVE_RE assumes whatever follows "Org's" is a person, but
+        # Title Cased titles often follow a real org's possessive with an
+        # abstract topic instead of a name — none of these were people.
+        titles = [
+            "University of New Mexico's Unique Energy Solution",
+            "Climate Change's Deadly Fish Problem",
+            "Alzheimer Risk Reduced By Cycling; Big Oil's Frivolous Suits",
+            "Fire Weather: Urban Wildfires are Climate Change's Biggest Threat",
+            "$5B Chevron Project, Tata Steel Hydrogen Breakthrough, & Nucera's Bold Forecast",
+            "Willie Phillips, Former FERC Chairman: The Grid Is America's Economic Nervous System",
+            "Episode 59: Marco Krapels of Enphase on EVs, VPPs, and Unlocking America's Hidden Energy Capacity",
+            "#83 - James Gutman - Why Geopolitics Is Europe's Strongest Climate Accelerator",
+        ]
+        for title in titles:
+            assert extract_candidate_names(title) == [], title
+
+    def test_possessive_real_person_still_captured(self):
+        # The fix above must not catch real people the same shape would name.
+        cases = [
+            ("Ask a Solar Vet: Uniting women across sustainable sectors with WRISE's Kristen Graf", "Kristen Graf"),
+            ("Ask a Solar Vet: Showing solar leadership with Borrego's Brendan Neagle", "Brendan Neagle"),
+            ("Rewiring America's Ari Matusiak joins the show.", "Ari Matusiak"),
+        ]
+        for title, expected in cases:
+            names = [n for n, _ in extract_candidate_names(title)]
+            assert expected in names, title
+
     def test_does_not_credit_org_after_with(self):
         result = extract_candidate_names("This week we talk with Bedrock Robotics about mining.")
         assert result == []
