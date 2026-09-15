@@ -16,7 +16,9 @@ import httpx
 from urllib.parse import urlparse
 from dotenv import load_dotenv
 
-from description_cleaner import clean_description, extract_labelled_credits
+from description_cleaner import (
+    clean_description, extract_labelled_credits, name_in_text, first_name_belongs_to_other,
+)
 
 load_dotenv()
 
@@ -146,10 +148,10 @@ def _verify_and_source(rows: list, name: str) -> list:
     name_lower = name.lower()
     verified = []
     for row in rows:
-        if name_lower in (row['title'] or '').lower():
+        if name_in_text(name, row['title'] or ''):
             verified.append({**row, 'source': 'parsed_title'})
             continue
-        if name_lower in clean_description(row['description'] or '').lower():
+        if name_in_text(name, clean_description(row['description'] or '')):
             verified.append({**row, 'source': 'parsed_desc'})
             continue
         full_desc = clean_description(row['description'] or '', max_chars=None)
@@ -224,6 +226,80 @@ def link_matching_episodes_with_role(cur, name: str, host_id: int, exclude_episo
     })
     inserted_ids = {r['episode_id'] for r in cur.fetchall()}
     return [{'podcast_title': m['podcast_title'], 'source': m['source']}
+            for m in matches if m['episode_id'] in inserted_ids]
+
+
+def link_matching_episodes_by_first_name(cur, host_id: int, first_name: str,
+                                          last_name: str, exclude_episode_id: int = None) -> list:
+    """Credit host_id as Host on any OTHER episode of a show they're already
+    a registered host_podcast member of, found by first name alone — the
+    same matching episode_name_scanner.py's run() does via
+    show_host_first_names(), which create/rescan/rename didn't otherwise
+    reach (those only ever checked full names).
+
+    Real incident: John Failla, created and registered as a host of Smart
+    Energy Voices, was found on the 44 episodes that name him in full but
+    not on ones that only say "John speaks with ..." — "rescan" from his
+    Edit Person page found nothing on those, even though run() (the
+    scheduled scanner) already matches this shape correctly.
+    """
+    if not first_name or len(first_name) < 3:
+        return []
+
+    # Only podcasts where this first name is unique among the show's OTHER
+    # registered hosts — same rule show_host_first_names() applies: there's
+    # no way to tell which host a bare first name means otherwise.
+    cur.execute("""
+        SELECT hp.podcast_id
+        FROM host_podcast hp
+        WHERE hp.host_id = %(host_id)s
+          AND NOT EXISTS (
+              SELECT 1 FROM host_podcast hp2
+              JOIN hosts h2 ON h2.host_id = hp2.host_id
+              WHERE hp2.podcast_id = hp.podcast_id
+                AND hp2.host_id != %(host_id)s
+                AND lower(h2.first_name) = lower(%(first_name)s)
+          )
+    """, {'host_id': host_id, 'first_name': first_name})
+    podcast_ids = [r['podcast_id'] for r in cur.fetchall()]
+    if not podcast_ids:
+        return []
+
+    cur.execute("""
+        SELECT e.episode_id, e.podcast_id, p.title AS podcast_title, e.title, e.description
+        FROM episodes e
+        JOIN podcasts p ON p.podcast_id = e.podcast_id
+        WHERE e.podcast_id = ANY(%(podcast_ids)s)
+          AND (%(exclude_id)s IS NULL OR e.episode_id != %(exclude_id)s)
+          AND (position(lower(%(first_name)s) IN lower(e.title)) > 0
+               OR position(lower(%(first_name)s) IN lower(COALESCE(e.description, ''))) > 0)
+    """, {'podcast_ids': podcast_ids, 'first_name': first_name, 'exclude_id': exclude_episode_id})
+    candidates = cur.fetchall()
+
+    matches = []
+    for row in candidates:
+        haystack = (row['title'] or '') + '\n' + clean_description(row['description'] or '')
+        if not name_in_text(first_name, haystack):
+            continue
+        if first_name_belongs_to_other(first_name, last_name or '', haystack):
+            continue
+        matches.append(row)
+
+    if not matches:
+        return []
+
+    cur.execute("""
+        WITH inserted AS (
+            INSERT INTO episode_host (episode_id, host_id, is_guest, role, data_source)
+            SELECT v.episode_id, %(host_id)s, false, 'Host', 'host_first_name'
+            FROM unnest(%(episode_ids)s::int[]) AS v(episode_id)
+            ON CONFLICT (episode_id, host_id) DO NOTHING
+            RETURNING episode_id
+        )
+        SELECT episode_id FROM inserted
+    """, {'host_id': host_id, 'episode_ids': [m['episode_id'] for m in matches]})
+    inserted_ids = {r['episode_id'] for r in cur.fetchall()}
+    return [{'podcast_title': m['podcast_title'], 'source': 'host_first_name'}
             for m in matches if m['episode_id'] in inserted_ids]
 
 
@@ -538,6 +614,69 @@ async def get_guest_reach():
         cur.close()
         conn.close()
         return {"guests": guests, "single_appearance_guests": single}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/show-connections")
+async def get_show_connections():
+    """The network one level up: shows as nodes, shared people as edges.
+
+    The person graph buries the communities it contains — at 1,952 nodes you
+    cannot see that Factor This, SunCast and Clean Power Hour form a solar
+    trade cluster distinct from the Volts/Inevitable/Catalyst interview
+    circuit. At 91 nodes that is the first thing visible.
+
+    Each edge carries two weights. `value` is the raw count of people both
+    shows have had on, which is intuitive but rewards size: Volts and
+    Inevitable share 44 largely because each has had around 200 guests.
+    `jaccard` divides that by the size of the combined guest pool, so two
+    small shows sharing most of their guests outrank two large ones sharing a
+    slice. Raw answers "who overlaps most", normalised answers "whose overlap
+    is surprising".
+    """
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            WITH person_show AS (
+                SELECT DISTINCT eh.host_id, e.podcast_id
+                FROM episode_host eh JOIN episodes e USING (episode_id)
+            ),
+            show_size AS (
+                SELECT podcast_id, COUNT(*) AS people FROM person_show GROUP BY 1
+            ),
+            shared AS (
+                SELECT a.podcast_id AS s1, b.podcast_id AS s2, COUNT(*) AS n
+                FROM person_show a
+                JOIN person_show b
+                  ON a.host_id = b.host_id AND a.podcast_id < b.podcast_id
+                GROUP BY 1, 2
+            )
+            SELECT sh.s1 AS source, sh.s2 AS target, sh.n AS value,
+                   ROUND(sh.n::numeric / (z1.people + z2.people - sh.n), 4) AS jaccard
+            FROM shared sh
+            JOIN show_size z1 ON z1.podcast_id = sh.s1
+            JOIN show_size z2 ON z2.podcast_id = sh.s2
+            ORDER BY sh.n DESC
+        """)
+        links = cur.fetchall()
+
+        cur.execute("""
+            SELECT p.podcast_id AS id, p.title AS name, p.cover_art_url AS image,
+                   COUNT(DISTINCT e.episode_id) AS episodes,
+                   COUNT(DISTINCT eh.host_id)   AS people,
+                   MAX(e.published_date)        AS latest_episode
+            FROM podcasts p
+            LEFT JOIN episodes e     ON e.podcast_id = p.podcast_id
+            LEFT JOIN episode_host eh ON eh.episode_id = e.episode_id
+            GROUP BY p.podcast_id, p.title, p.cover_art_url
+            ORDER BY p.title
+        """)
+        nodes = cur.fetchall()
+        cur.close()
+        conn.close()
+        return {"nodes": nodes, "links": links}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1483,6 +1622,7 @@ async def create_person(body: CreatePersonRequest):
         # person is already a recorded official host means "Host", not
         # "Guest" — same fix as episode_name_scanner.py's run() command.
         links = link_matching_episodes_with_role(cur, full_name, host_id)
+        links += link_matching_episodes_by_first_name(cur, host_id, first_name, last_name)
 
         conn.commit()
         cur.close()
@@ -1966,13 +2106,15 @@ async def update_person(host_id: int, body: CreatePersonRequest):
         if name_changed:
             cur.execute("""
                 DELETE FROM episode_host
-                WHERE host_id = %s AND data_source IN ('parsed_desc', 'parsed_title', 'approved_suggestion')
+                WHERE host_id = %s
+                  AND data_source IN ('parsed_desc', 'parsed_title', 'approved_suggestion', 'host_first_name')
             """, (host_id,))
 
         conn.commit()
 
         # Re-scan with new name
         links = link_matching_episodes(cur, full_name, host_id, exclude_episode_id=None)
+        links += link_matching_episodes_by_first_name(cur, host_id, first_name, last_name)
 
         conn.commit()
         cur.close()
@@ -2261,7 +2403,8 @@ async def scan_person_episodes(host_id: int):
         cur  = conn.cursor()
 
         cur.execute(
-            "SELECT first_name || ' ' || last_name AS name FROM hosts WHERE host_id = %s",
+            "SELECT first_name, last_name, first_name || ' ' || last_name AS name "
+            "FROM hosts WHERE host_id = %s",
             (host_id,)
         )
         row = cur.fetchone()
@@ -2271,6 +2414,7 @@ async def scan_person_episodes(host_id: int):
         name = row['name']
 
         links = link_matching_episodes_with_role(cur, name, host_id)
+        links += link_matching_episodes_by_first_name(cur, host_id, row['first_name'], row['last_name'])
 
         conn.commit()
         cur.close()

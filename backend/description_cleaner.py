@@ -393,3 +393,65 @@ def extract_labelled_credits(text: str) -> list[tuple[str, bool]]:
             found.append((name, True))
 
     return found
+
+
+# ------------------------------------------------------------------
+# WORD-BOUNDARY-SAFE NAME MATCHING
+# ------------------------------------------------------------------
+#
+# Shared so the admin backend's create/rescan-person actions check a name
+# the identical way the scheduled scanner's run() does — before this was
+# unified, the backend used a plain substring test with none of the
+# protections below, which is exactly the class of bug run() was already
+# fixed against (see name_in_text's docstring).
+
+_NAME_RE_CACHE = {}
+
+
+def _name_pattern(full_name: str):
+    """Match a full name only where it stands as a name in its own right.
+
+    A plain substring test credits the wrong person: "dan yates" is inside
+    "jordan yates", and "sara baldwin" inside "sara baldwin-griffin" — both
+    real pairs in this database, and both produced wrong credits. \\b is not
+    enough on its own, since it happily matches "Sara Baldwin" against
+    "Sara Baldwin-Griffin" (the hyphen is a word boundary), so hyphens are
+    excluded on either side as well.
+    """
+    pattern = _NAME_RE_CACHE.get(full_name)
+    if pattern is None:
+        pattern = re.compile(
+            r'(?<![\w-])' + re.escape(full_name) + r'(?![\w-])',
+            re.IGNORECASE
+        )
+        _NAME_RE_CACHE[full_name] = pattern
+    return pattern
+
+
+def name_in_text(full_name: str, text: str) -> bool:
+    return bool(_name_pattern(full_name).search(text))
+
+
+_NEXT_CAPITALIZED_WORD_RE_CACHE = {}
+
+
+def first_name_belongs_to_other(first_name: str, own_last_name: str, text: str) -> bool:
+    """True if this first name is attached to a DIFFERENT surname anywhere in
+    the text — a sign it names someone else who happens to share the host's
+    first name.
+
+    Real incident: Outrage + Optimism registers "Fiona" (McRaith) as a host,
+    but "Fiona Macklin" (a Global Optimism advisor, unrelated) and "Fiona
+    Morgan" (a one-off guest) each showed up in six different episodes and
+    were credited to McRaith because only the first name was checked.
+    """
+    pattern = _NEXT_CAPITALIZED_WORD_RE_CACHE.get(first_name)
+    if pattern is None:
+        pattern = re.compile(re.escape(first_name) + r"\s+([A-Z][a-zA-Z'’-]+)")
+        _NEXT_CAPITALIZED_WORD_RE_CACHE[first_name] = pattern
+    own_last = own_last_name.strip().lower()
+    for m in pattern.finditer(text):
+        candidate = m.group(1).rstrip('.,').lower()
+        if candidate and candidate != own_last:
+            return True
+    return False
