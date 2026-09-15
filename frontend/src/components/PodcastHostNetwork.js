@@ -10,6 +10,7 @@ import { API_BASE_URL } from '../config';
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const API_URL = `${API_BASE_URL}/api/host-connections`;
+const SHOW_API_URL = `${API_BASE_URL}/api/show-connections`;
 const LAST_UPDATED_URL = `${API_BASE_URL}/api/last-updated`;
 const SIDEBAR_WIDTH = 384;
 const MOBILE_BREAKPOINT = 768;
@@ -28,7 +29,13 @@ const RING_WIDTH = 1.5;
 // 2 it is more than half the radius, at degree 217 barely a tenth. Lowering it
 // takes 21% off the smallest circles — 61% of the visible graph is degree 4 or
 // under — while the biggest hub loses 4%, so the spread between them widens.
-const nodeRadius = (node) => (node.val <= 1 ? 2.5 : 2.5 + Math.sqrt(node.val) * 2.2);
+const nodeRadius = (node) =>
+  node.isShow
+    // Shows scale by guest pool, not by edge count: a show's weight in this
+    // view is how many people it has had on, and there are only 91 of them,
+    // so they can be drawn large enough for the cover art to be recognisable.
+    ? Math.max(8, 5 + Math.sqrt(node.people || 1) * 1.6)
+    : (node.val <= 1 ? 2.5 : 2.5 + Math.sqrt(node.val) * 2.2);
 
 const getAvatarUrl = (name) =>
   `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}&backgroundColor=65c9ff,92a1c6,dd6b7f,58c9b9,ade498`;
@@ -270,6 +277,99 @@ const CloseButton = ({ onClick }) => (
   </button>
 );
 
+// Overlap percentages run 0-35 and the threshold is a whole number, so
+// rounding to integers made the card contradict itself: 5.54% displayed as
+// "6%" while the >= 6 filter correctly excluded it, leaving "no show shares 6%"
+// directly above "its closest is 6%". One decimal, with a bare integer when
+// there is no fraction to show.
+const overlapPct = (jaccard) => {
+  const v = jaccard * 100;
+  return Number.isInteger(Math.round(v * 10) / 10) ? v.toFixed(0) : v.toFixed(1);
+};
+
+const ShowProfileCard = ({ show, connections, onClose, weighting, allLinks, nameById, threshold }) => {
+  const sorted = [...connections].sort((a, b) =>
+    weighting === 'jaccard' ? b.jaccard - a.jaccard : b.value - a.value);
+
+  // When the threshold has cut everything, say so — and say what the closest
+  // relationship actually is. "0 connected shows" on its own reads as missing
+  // data rather than a slider set high.
+  const best = connections.length ? null : allLinks
+    .filter(l => (l.source?.id ?? l.source) === show.id || (l.target?.id ?? l.target) === show.id)
+    .map(l => {
+      const otherId = (l.source?.id ?? l.source) === show.id
+        ? (l.target?.id ?? l.target) : (l.source?.id ?? l.source);
+      return { name: nameById.get(otherId), value: l.value, jaccard: l.jaccard };
+    })
+    .sort((a, b) => (weighting === 'jaccard' ? b.jaccard - a.jaccard : b.value - a.value))[0];
+  return (
+    <div className="bg-white rounded-lg shadow-lg p-6 relative">
+      <CloseButton onClick={onClose} />
+      <div className="flex flex-col items-center mb-6">
+        <div className="w-24 h-24 rounded-xl overflow-hidden mb-3 bg-gray-100">
+          <img src={show.image || getAvatarUrl(show.name)} alt={show.name}
+               className="w-full h-full object-cover"
+               onError={e => { e.target.onerror = null; e.target.src = getAvatarUrl(show.name); }} />
+        </div>
+        <h3 className="text-xl font-bold text-center leading-tight">{show.name}</h3>
+        <p className="text-gray-500 text-sm mt-1">
+          {connections.length} connected show{connections.length === 1 ? '' : 's'}
+        </p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 text-sm mb-6">
+        <div className="bg-teal-50 p-2 rounded text-center">
+          <p className="text-gray-500 text-xs">Episodes</p>
+          <p className="font-bold">{show.episodes}</p>
+        </div>
+        <div className="bg-teal-50 p-2 rounded text-center">
+          <p className="text-gray-500 text-xs">People</p>
+          <p className="font-bold">{show.people}</p>
+        </div>
+      </div>
+
+      {connections.length === 0 ? (
+        <div className="text-sm text-gray-500 space-y-2">
+          <p>
+            {weighting === 'jaccard'
+              ? `No other show shares ${threshold}% of its guests with this one.`
+              : `No other show has ${threshold} people in common with this one.`}
+          </p>
+          {best ? (
+            <p>
+              Its closest is <span className="font-medium text-gray-700">{best.name}</span> —
+              {' '}{best.value} {best.value === 1 ? 'person' : 'people'} in common,
+              {' '}{overlapPct(best.jaccard)}% of their combined guests.
+              Lower the threshold to bring it in.
+            </p>
+          ) : (
+            <p>It shares nobody with any other show in the network.</p>
+          )}
+        </div>
+      ) : (
+      <div>
+        <h4 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">
+          Shares Most People With
+        </h4>
+        <div className="space-y-2">
+          {sorted.slice(0, 6).map((c, i) => {
+            const other = c.source.id === show.id ? c.target : c.source;
+            return (
+              <div key={i} className="bg-gray-50 p-2 rounded text-sm">
+                <p className="font-medium leading-tight">{other.name}</p>
+                <p className="text-gray-500 text-xs">
+                  {c.value} in common · {overlapPct(c.jaccard)}% of their combined guests
+                </p>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      )}
+    </div>
+  );
+};
+
 const HostProfileCard = ({ host, connections, onClose, isAdmin }) => {
   const uniquePodcasts = new Set(connections.map(c => c.podcast)).size;
   const totalEpisodes = connections.reduce((s, c) => s + c.value, 0);
@@ -389,16 +489,42 @@ const ConnectionDetails = ({ connection, onClose }) => (
   </div>
 );
 
-const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuery, onSearchChange, loading, isAdmin }) => (
+const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuery, onSearchChange, loading, isAdmin, viewMode, onViewModeChange, showGraphError }) => (
   <div className="space-y-4">
-    <div className="grid grid-cols-3 gap-2">
-      {[
-        // "People", not "Hosts": 1,825 of the 1,952 in the graph appear only
-        // as guests.
-        { label: 'Podcasts', value: networkStats.visiblePodcasts },
-        { label: 'People', value: networkStats.visibleNodes },
-        { label: 'Connections', value: networkStats.visibleLinks },
-      ].map(({ label, value }) => (
+    <div className="flex rounded-lg bg-gray-100 p-0.5 text-sm">
+      {[['people', 'People'], ['shows', 'Shows']].map(([mode, label]) => (
+        <button
+          key={mode}
+          onClick={() => onViewModeChange(mode)}
+          className={`flex-1 rounded-md py-1.5 font-medium transition-colors ${
+            viewMode === mode ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+
+    {showGraphError && viewMode === 'shows' && (
+      <p className="text-sm text-red-500">Couldn't load the show network: {showGraphError}</p>
+    )}
+
+    <div className={`grid gap-2 ${viewMode === 'shows' ? 'grid-cols-2' : 'grid-cols-3'}`}>
+      {(viewMode === 'shows'
+        // Counting people here would sum each show's guest list and double
+        // count everyone who appears on more than one, which is the whole
+        // subject of the view.
+        ? [
+            { label: 'Podcasts', value: networkStats.visiblePodcasts },
+            { label: 'Connections', value: networkStats.visibleLinks },
+          ]
+        : [
+            // "People", not "Hosts": 1,825 of the 1,952 in the graph appear
+            // only as guests.
+            { label: 'Podcasts', value: networkStats.visiblePodcasts },
+            { label: 'People', value: networkStats.visibleNodes },
+            { label: 'Connections', value: networkStats.visibleLinks },
+          ]
+      ).map(({ label, value }) => (
         <div key={label} className="bg-teal-50 rounded-lg text-center py-2">
           <p className="text-lg font-bold text-gray-900 leading-tight">{loading ? ' ' : value}</p>
           <p className="text-xs text-gray-500">{label}</p>
@@ -406,7 +532,9 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
       ))}
     </div>
 
-    {/* Name search */}
+    {/* Name search — people only. 91 shows are all on screen at once and
+        carry their own artwork, so there is nothing to hunt for. */}
+    {viewMode !== 'shows' && (
     <div className="space-y-1">
       <label className="block text-sm font-medium text-gray-700">Search by name</label>
       <input
@@ -417,7 +545,52 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
         className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
       />
     </div>
+    )}
 
+    {viewMode === 'shows' ? (
+      currentFilters.weighting === 'jaccard' ? (
+      <div className="space-y-1">
+        <label className="block text-sm font-medium text-gray-700">
+          Overlap: {currentFilters.minOverlap}%
+        </label>
+        <input
+          type="range" min="2" max="25"
+          value={currentFilters.minOverlap}
+          onChange={e => onFiltersChange({ minOverlap: parseInt(e.target.value) })}
+          className="w-full"
+        />
+        <div className="flex justify-between text-xs text-gray-400">
+          <span>2%</span><span>25%</span>
+        </div>
+        <p className="text-xs text-gray-400">
+          Share of two shows' combined guests that appear on both. Around 10%
+          the network separates into the solar trade, the policy press, the
+          international circuit and the nuclear pair.
+        </p>
+      </div>
+      ) : (
+      <div className="space-y-1">
+        <label className="block text-sm font-medium text-gray-700">
+          People in Common: {currentFilters.minShared}
+        </label>
+        <input
+          type="range" min="1" max="20"
+          value={currentFilters.minShared}
+          onChange={e => onFiltersChange({ minShared: parseInt(e.target.value) })}
+          className="w-full"
+        />
+        <div className="flex justify-between text-xs text-gray-400">
+          <span>1</span><span>20</span>
+        </div>
+        <p className="text-xs text-gray-400">
+          How many people two shows must both have had on. Raw counts favour
+          the biggest shows, which connect to everything — this stays a single
+          mass at any threshold.
+        </p>
+      </div>
+      )
+    ) : (
+    <>
     {/* Connections slider */}
     <div className="space-y-1">
       <label className="block text-sm font-medium text-gray-700">
@@ -471,11 +644,13 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
         </label>
       ))}
     </div>
+    </>
+    )}
 
     <button
       onClick={() => onFiltersChange({
         minConnections: 2, minPodcasts: 1,
-        minEpisodes: 1,
+        minEpisodes: 1, minShared: 4, minOverlap: 5, weighting: 'jaccard',
         minClusterSize: 8, repulsion: 60, centering: 8, spacing: 1,
         drawMinEpisodes: 1,
         selectedRoles: ['Host', 'Guest'],
@@ -491,6 +666,30 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
     {isAdmin && (
     <div className="space-y-4 border-t border-gray-200 pt-4">
       <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Admin</p>
+
+      {viewMode === 'shows' && (
+        <div className="space-y-1">
+          <label className="block text-sm font-medium text-gray-700">Edge weight</label>
+          <div className="flex rounded-md bg-gray-100 p-0.5 text-xs">
+            {[['raw', 'Shared people'], ['jaccard', 'Normalised']].map(([w, label]) => (
+              <button
+                key={w}
+                onClick={() => onFiltersChange({ weighting: w })}
+                className={`flex-1 rounded py-1 font-medium ${
+                  currentFilters.weighting === w ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-gray-400">
+            Raw counts favour big shows — Volts and Inevitable share 44 mostly
+            because both have had ~200 guests. Normalised divides by their
+            combined pool, which surfaces Nuclear Barbarians and Titans Of
+            Nuclear: 6 people, but 30% of everyone either has ever had on.
+          </p>
+        </div>
+      )}
 
       {/* Genre and Channel are podcast properties shown against people, so a
           person's genre is whichever show happened to be listed first. Hidden
@@ -666,6 +865,19 @@ const PodcastLegend = ({ podcasts, isOpen, onToggle }) => (
 
 const PodcastHostNetwork = () => {
   const [graphData, setGraphData] = useState({ nodes: [], links: [] });
+  // The same network one level up: shows as nodes, shared people as edges.
+  // Fetched lazily the first time it is asked for — most visits never switch.
+  // ?view=shows survives a refresh and makes either view linkable.
+  const [viewMode, setViewMode] = useState(() => {
+    try {
+      return new URLSearchParams(window.location.search).get('view') === 'shows'
+        ? 'shows' : 'people';
+    } catch {
+      return 'people';   // URLSearchParams is absent in some embedded webviews
+    }
+  });
+  const [showGraph, setShowGraph] = useState(null);
+  const [showGraphError, setShowGraphError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [highlightNodes, setHighlightNodes] = useState(new Set());
@@ -686,6 +898,14 @@ const PodcastHostNetwork = () => {
     minConnections: 2,
     minPodcasts: 1,
     minEpisodes: 1,
+    minShared: 4,          // shows view, raw weighting: people two shows must have in common
+    minOverlap: 5,         // shows view, normalised: shared share of the combined pool, in %
+    // Normalised by default. Raw counts are the more intuitive number but they
+    // produce a single mass at every threshold — the biggest shows connect to
+    // everything, so a raw floor keeps exactly the edges carrying no
+    // information. Dividing by the combined guest pool is what separates the
+    // solar trade from the policy press from the nuclear pair.
+    weighting: 'jaccard',
     minClusterSize: 8,
     repulsion: 60,
     drawMinEpisodes: 1,
@@ -745,7 +965,12 @@ const PodcastHostNetwork = () => {
       forceCollide(node => nodeRadius(node) + RING_WIDTH + spacingRef.current).iterations(2));
     graph._forcesSet = true;
   }, []);
-  const imageCache = useImageCache(graphData.nodes);
+  // Whichever set is on screen. Pointing this at graphData only meant show
+  // cover art was never preloaded, so the painter found an empty cache and
+  // every show fell back to initials.
+  const imageCache = useImageCache(
+    viewMode === 'shows' ? (showGraph?.nodes || []) : graphData.nodes
+  );
 
   // Window resize
   useEffect(() => {
@@ -774,6 +999,17 @@ const PodcastHostNetwork = () => {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    if (viewMode !== 'shows' || showGraph) return;
+    fetch(SHOW_API_URL)
+      .then(r => { if (!r.ok) throw new Error(`API error ${r.status}`); return r.json(); })
+      .then(d => setShowGraph({
+        nodes: (d.nodes || []).map(n => ({ ...n, isShow: true })),
+        links: (d.links || []).map(l => ({ ...l, jaccard: Number(l.jaccard), isShowLink: true })),
+      }))
+      .catch(e => setShowGraphError(e.message || 'Failed to load the show network'));
+  }, [viewMode, showGraph]);
 
   // Last-updated timestamp — fetched once, then re-rendered periodically
   // so the relative time ("3 hours ago") stays fresh without a refetch
@@ -852,8 +1088,68 @@ const PodcastHostNetwork = () => {
     return filterSmallClusters({ nodes: filteredNodes, links: filteredLinks }, currentFilters.minClusterSize);
   }, [graphData, currentFilters, searchQuery]);
 
+  // The shows view. Far smaller — 91 nodes against 1,952 — so it needs no
+  // cluster pruning or degree floor, just a threshold on how much two shows
+  // have to have in common before a line is worth drawing.
+  const filteredShowData = useMemo(() => {
+    if (!showGraph) return { nodes: [], links: [] };
+    // Deliberately ignores searchQuery: the box is hidden in this view, so a
+    // term left over from the people graph would filter shows invisibly with
+    // no control on screen to clear it.
+    const nodes = showGraph.nodes;
+    const ids = new Set(nodes.map(n => n.id));
+
+    // The threshold is always on the raw count, even when the width is drawn
+    // from jaccard: a pair sharing one person out of two tiny pools scores
+    // 0.17 and would otherwise outrank real relationships.
+    // The threshold follows the weighting. Cutting on the raw count while
+    // drawing normalised widths is what left the graph a blob: big shows
+    // connect to everything, so a raw floor keeps exactly the edges that carry
+    // no information. Cutting on overlap instead separates it into the solar
+    // trade, the policy press, the international circuit and the nuclear pair.
+    const normalised = currentFilters.weighting === 'jaccard';
+    const links = showGraph.links.filter(l => {
+      if (normalised) {
+        // A raw floor still applies: one shared person between two small shows
+        // scores 17% and would otherwise outrank real relationships.
+        if (l.value < 3 || l.jaccard * 100 < currentFilters.minOverlap) return false;
+      } else if (l.value < currentFilters.minShared) {
+        return false;
+      }
+      const src = l.source?.id ?? l.source;
+      const tgt = l.target?.id ?? l.target;
+      return ids.has(src) && ids.has(tgt);
+    });
+
+    // Shows with no surviving link stay on screen. They were being dropped,
+    // which at a 10% overlap threshold silently removed 58 of 91 shows — and
+    // "this show shares almost nobody" is a finding, not an absence of one.
+    // With no edges holding them they drift to the edge of their own accord.
+    return { nodes, links };
+  }, [showGraph, currentFilters.minShared, currentFilters.minOverlap, currentFilters.weighting]);
+
+  const showingShows = viewMode === 'shows';
+  const showNameById = useMemo(
+    () => new Map((showGraph?.nodes || []).map(n => [n.id, n.name])),
+    [showGraph]
+  );
+  const activeGraphData = showingShows ? filteredShowData : filteredGraphData;
+
+  // Interaction handlers read this rather than closing over one graph, so a
+  // click in the shows view does not search the person links and find nothing.
+  const activeLinksRef = useRef([]);
+  activeLinksRef.current = activeGraphData.links;
+
   // Update visible stats when filtered data changes
   useEffect(() => {
+    if (showingShows) {
+      setNetworkStats(prev => ({
+        ...prev,
+        visiblePodcasts: filteredShowData.nodes.length,
+        visibleLinks: filteredShowData.links.length,
+      }));
+      return;
+    }
     const visiblePodcasts = new Set(filteredGraphData.links.map(l => l.podcast)).size;
     setNetworkStats(prev => ({
       ...prev,
@@ -861,19 +1157,21 @@ const PodcastHostNetwork = () => {
       visibleLinks: filteredGraphData.links.length,
       visiblePodcasts,
     }));
-  }, [filteredGraphData]);
+  }, [filteredGraphData, filteredShowData, showingShows]);
 
   // All podcasts for legend
   // The legend colours the links on screen, so it lists the shows those links
   // belong to. Taking them from the unfiltered data made it disagree with the
   // Podcasts stat — 78 against 73 — and name shows with nothing drawn for them.
+  // In the shows view the nodes are the podcasts, so a colour key listing them
+  // would restate the labels already on screen.
   const visiblePodcastList = useMemo(() =>
-    [...new Set(
+    showingShows ? [] : [...new Set(
       filteredGraphData.links
         .filter(l => l.value >= currentFilters.drawMinEpisodes)
         .map(l => l.podcast)
     )].sort(),
-    [filteredGraphData, currentFilters.drawMinEpisodes]
+    [filteredGraphData, currentFilters.drawMinEpisodes, showingShows]
   );
 
   // Interaction handlers
@@ -882,20 +1180,42 @@ const PodcastHostNetwork = () => {
     setHighlightNodes(new Set()); setHighlightLinks(new Set()); setSelectedLinks(new Set());
   }, []);
 
+  // Switching view drops a selection that belongs to the other graph, and
+  // re-arms the fit: 91 shows and 1,952 people occupy very different extents.
+  useEffect(() => {
+    clearSelection();
+    hasAutoFitted.current = false;
+  }, [viewMode, clearSelection]);
+
+  // Keep the address bar in step. replaceState rather than pushState: toggling
+  // the view a few times should not bury the page the visitor arrived from
+  // under a stack of back presses.
+  useEffect(() => {
+    try {
+      const url = new URL(window.location.href);
+      if (viewMode === 'shows') url.searchParams.set('view', 'shows');
+      else url.searchParams.delete('view');
+      window.history.replaceState(null, '', url.toString());
+    } catch {
+      /* history is unavailable in some sandboxed frames; the view still works */
+    }
+  }, [viewMode]);
+
   const handleNodeClick = useCallback(node => {
     if (selectedNode?.id === node.id) {
       setSelectedNode(null); setSelectedNodeConnections([]);
       setHighlightNodes(new Set()); setHighlightLinks(new Set()); setSelectedLinks(new Set());
     } else {
       setSelectedNode(node); setSelectedLink(null);
-      const conns = graphData.links.filter(l => l.source.id === node.id || l.target.id === node.id);
+      const conns = activeLinksRef.current.filter(
+        l => l.source.id === node.id || l.target.id === node.id);
       setSelectedNodeConnections(conns);
       setHighlightNodes(new Set([node.id]));
       setSelectedLinks(new Set(conns));
       setHighlightLinks(new Set(conns));
       if (window.innerWidth < MOBILE_BREAKPOINT) setSidebarOpen(true);
     }
-  }, [selectedNode, graphData.links]);
+  }, [selectedNode]);
 
   const handleNodeHover = useCallback(node => {
     if (!node) {
@@ -903,10 +1223,11 @@ const PodcastHostNetwork = () => {
       setHighlightLinks(selectedLinks);
       return;
     }
-    const conns = graphData.links.filter(l => l.source.id === node.id || l.target.id === node.id);
+    const conns = activeLinksRef.current.filter(
+      l => l.source.id === node.id || l.target.id === node.id);
     setHighlightNodes(new Set([node.id, ...(selectedNode ? [selectedNode.id] : [])]));
     setHighlightLinks(new Set([...selectedLinks, ...conns]));
-  }, [selectedNode, selectedLinks, graphData.links]);
+  }, [selectedNode, selectedLinks]);
 
   const handleLinkClick = useCallback(link => {
     setSelectedLink(link); setSelectedNode(null);
@@ -929,6 +1250,7 @@ const PodcastHostNetwork = () => {
     // Ring color
     const ringColor = isSelected ? '#dc2626'
       : isHighlighted ? '#f59e0b'
+      : node.isShow ? podcastColor(node.name)
       : node.podcasts?.length > 0 ? podcastColor(node.podcasts[0]) : '#94a3b8';
 
     // Outer ring (podcast/state color) — 2px
@@ -960,13 +1282,16 @@ const PodcastHostNetwork = () => {
       ctx.font = `bold ${Math.max(size * 0.85, 4)}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      const initials = node.name.split(' ').map(w => w[0]).filter(Boolean).join('').slice(0, 2).toUpperCase();
+      const initials = node.name.split(/[\s—–-]+/).map(w => w[0]).filter(Boolean).join('').slice(0, 2).toUpperCase();
       ctx.fillText(initials, node.x, node.y);
     }
     ctx.restore();
 
-    // Label only at high zoom — small, with background pill for readability
-    if (globalScale >= 2.5) {
+    // Shows carry no drawn label at all: the cover art identifies them, and 91
+    // titles at once buried the artwork they were labelling. Hovering still
+    // gives the full name through nodeLabel.
+    // People keep the high-zoom label — initials are not an identity.
+    if (!node.isShow && globalScale >= 2.5) {
       const fontSize = 10 / globalScale;
       const label = node.name;
       ctx.font = `${fontSize}px Arial`;
@@ -1002,8 +1327,11 @@ const PodcastHostNetwork = () => {
   // link declutters the view without moving a single node — unlike Minimum
   // Episodes Together, which removes them from the layout and relaxes it.
   const linkVisibility = useCallback(
-    link => link.value >= currentFilters.drawMinEpisodes,
-    [currentFilters.drawMinEpisodes]
+    // Only meaningful for the person graph: there link.value is episodes
+    // together, in the shows view it is people in common, and carrying a
+    // threshold across would hide edges for reasons the slider does not say.
+    link => showingShows || link.value >= currentFilters.drawMinEpisodes,
+    [currentFilters.drawMinEpisodes, showingShows]
   );
 
   const nodePointerAreaPaint = useCallback((node, color, ctx) => {
@@ -1067,7 +1395,18 @@ const PodcastHostNetwork = () => {
           </div>
         </div>
 
-        {selectedNode ? (
+        {selectedNode && selectedNode.isShow ? (
+          <ShowProfileCard
+            show={selectedNode}
+            connections={selectedNodeConnections}
+            weighting={currentFilters.weighting}
+            allLinks={showGraph?.links || []}
+            nameById={showNameById}
+            threshold={currentFilters.weighting === 'jaccard'
+              ? currentFilters.minOverlap : currentFilters.minShared}
+            onClose={clearSelection}
+          />
+        ) : selectedNode ? (
           <HostProfileCard
             host={selectedNode}
             connections={selectedNodeConnections}
@@ -1094,6 +1433,9 @@ const PodcastHostNetwork = () => {
             onSearchChange={setSearchQuery}
             loading={loading}
             isAdmin={isAdmin}
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
+            showGraphError={showGraphError}
           />
         )}
 
@@ -1128,7 +1470,7 @@ const PodcastHostNetwork = () => {
         {!loading && !error && (
         <ForceGraph2D
           ref={installForces}
-          graphData={filteredGraphData}
+          graphData={activeGraphData}
 
           // Node rendering
           nodeRelSize={0}
@@ -1137,8 +1479,18 @@ const PodcastHostNetwork = () => {
           nodeLabel={node => node.name}
 
           // Link rendering
-          linkLabel={link => `${link.value} episode${link.value !== 1 ? 's' : ''} on ${link.podcast}`}
+          linkLabel={link => link.isShowLink
+            ? `${link.value} people in common · ${overlapPct(link.jaccard)}% of their combined guests`
+            : `${link.value} episode${link.value !== 1 ? 's' : ''} on ${link.podcast}`}
           linkWidth={link => {
+            if (link.isShowLink) {
+              // Jaccard runs 0-0.3 in practice, raw runs 1-44; each gets its
+              // own curve so the widths are comparable between weightings.
+              const w = currentFilters.weighting === 'jaccard'
+                ? Math.min(7, Math.max(0.6, link.jaccard * 26))
+                : Math.min(7, Math.max(0.6, Math.sqrt(link.value) * 1.1));
+              return (selectedLinks.has(link) || highlightLinks.has(link)) ? w + 2 : w;
+            }
             // Was value/2 capped at 10, which saturated at 20 episodes: 36
             // links sat at the cap and a 20-episode tie was drawn the same as
             // a 350-episode one. Square root keeps separating them all the way
@@ -1150,7 +1502,11 @@ const PodcastHostNetwork = () => {
           linkColor={link =>
             selectedLinks.has(link) || highlightLinks.has(link)
               ? '#f59e0b'
-              : linkColor(link.podcast, Math.min(0.6, 0.12 + Math.sqrt(link.value) * 0.1))
+              : link.isShowLink
+                ? `rgba(100, 116, 139, ${currentFilters.weighting === 'jaccard'
+                    ? Math.min(0.65, 0.1 + link.jaccard * 2.2)
+                    : Math.min(0.65, 0.1 + link.value / 55)})`
+                : linkColor(link.podcast, Math.min(0.6, 0.12 + Math.sqrt(link.value) * 0.1))
           }
           linkDirectionalParticles={link =>
             selectedLinks.has(link) || highlightLinks.has(link) ? 3 : 0
@@ -1207,8 +1563,9 @@ const PodcastHostNetwork = () => {
         )}
       </div>
 
-      {/* Legend */}
-      {!loading && !error && (
+      {/* Legend — a colour key for podcasts, which in the shows view are the
+          nodes themselves, labelled by their own artwork. */}
+      {!loading && !error && !showingShows && (
         <PodcastLegend
           podcasts={visiblePodcastList}
           isOpen={legendOpen}
