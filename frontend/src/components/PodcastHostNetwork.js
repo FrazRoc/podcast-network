@@ -270,7 +270,7 @@ const CloseButton = ({ onClick }) => (
   </button>
 );
 
-const HostProfileCard = ({ host, connections, onClose }) => {
+const HostProfileCard = ({ host, connections, onClose, isAdmin }) => {
   const uniquePodcasts = new Set(connections.map(c => c.podcast)).size;
   const totalEpisodes = connections.reduce((s, c) => s + c.value, 0);
 
@@ -288,7 +288,14 @@ const HostProfileCard = ({ host, connections, onClose }) => {
             />
           </div>
         </div>
-        <h3 className="text-xl font-bold text-center">{host.name}</h3>
+        {isAdmin ? (
+          <a href={`/admin/people?host_id=${host.id}`}
+             className="text-xl font-bold text-center hover:text-teal-600 hover:underline">
+            {host.name}
+          </a>
+        ) : (
+          <h3 className="text-xl font-bold text-center">{host.name}</h3>
+        )}
         <p className="text-gray-500 text-sm">{connections.length} connections</p>
         {host.linkedin_url && (
           <a
@@ -326,16 +333,26 @@ const HostProfileCard = ({ host, connections, onClose }) => {
           {connections
             .sort((a, b) => b.value - a.value)
             .slice(0, 5)
-            .map((conn, idx) => (
-              <div key={idx} className="bg-gray-50 p-2 rounded text-sm">
-                <p className="font-medium">
-                  {conn.target.name === host.name ? conn.source.name : conn.target.name}
-                </p>
-                <p className="text-gray-500 text-xs">
-                  {conn.value} episode{conn.value !== 1 ? 's' : ''} together on {conn.podcast}
-                </p>
-              </div>
-            ))}
+            .map((conn, idx) => {
+              // By id, not by name: two people can share a name, and this app
+              // has spent a lot of time untangling exactly that.
+              const other = conn.source.id === host.id ? conn.target : conn.source;
+              return (
+                <div key={idx} className="bg-gray-50 p-2 rounded text-sm">
+                  {isAdmin ? (
+                    <a href={`/admin/people?host_id=${other.id}`}
+                       className="font-medium hover:text-teal-600 hover:underline">
+                      {other.name}
+                    </a>
+                  ) : (
+                    <p className="font-medium">{other.name}</p>
+                  )}
+                  <p className="text-gray-500 text-xs">
+                    {conn.value} episode{conn.value !== 1 ? 's' : ''} together on {conn.podcast}
+                  </p>
+                </div>
+              );
+            })}
         </div>
       </div>
     </div>
@@ -1054,6 +1071,7 @@ const PodcastHostNetwork = () => {
           <HostProfileCard
             host={selectedNode}
             connections={selectedNodeConnections}
+            isAdmin={isAdmin}
             onClose={() => {
               setSelectedNode(null); setSelectedNodeConnections([]);
               setHighlightNodes(new Set()); setHighlightLinks(new Set()); setSelectedLinks(new Set());
