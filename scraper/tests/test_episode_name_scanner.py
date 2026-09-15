@@ -68,6 +68,20 @@ class TestCleanDescription:
         result = clean_description(text)
         assert "Produced by" not in result
 
+    def test_strips_past_episode_reference_with_extra_words_before_with(self):
+        # Real incident: Reversing Climate Change's sponsor footer writes
+        # "Listen to the RCC episode I made with David LaGreca ..." — the
+        # existing pattern only allowed extra words before "episode", not
+        # between "episode" and "with", so this exact phrasing slipped
+        # through and credited LaGreca (and, by the same footer, Lisett Luik
+        # and Peter Minor) on dozens of unrelated episodes.
+        text = ("Great show today. Listen to the RCC episode I made with David LaGreca "
+                "from EcoEngineers about how to choose, hire, and fire carbon market "
+                "contractors.")
+        result = clean_description(text)
+        assert "LaGreca" not in result
+        assert "Great show today" in result
+
     def test_hosted_by_after_credits_label_survives(self):
         # A "Credits:" block that opens with "Hosted by ..." names the hosts;
         # 136 of 193 such blocks do, and cutting there threw those away.

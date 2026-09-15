@@ -157,9 +157,11 @@ REMOVE_PATTERNS = [
     # Up to three words may sit between the verb and "episode" — Reversing
     # Climate Change writes "Listen to the RCC episode with Ryan Covington",
     # and that one line, repeated across 62 episodes, gave him 39 credits for
-    # a single appearance.
+    # a single appearance. Up to three more may sit between "episode" and
+    # "with" too — the same show also writes "the RCC episode I made with
+    # David LaGreca", which the first gap alone didn't cover.
     r'(?i)(?:click here to\s+)?(?:listen to|watch|hear|check out|revisit)\s+'
-    r'(?:\w+\s+){0,3}(?:episode|ep\.?)\s*#?\d*\s*(?:with|featuring|w/)[^.\n]{0,70}',
+    r'(?:\w+\s+){0,3}(?:episode|ep\.?)\s*#?\d*\s*(?:\w+\s+){0,3}(?:with|featuring|w/)[^.\n]{0,70}',
     r'(?i)our episodes? featuring[^.\n]{0,90}',
     r'(?i)(?:podcast )?interview with[^.\n]{0,50}(?=\s*(?:https?://|\n|$))',
     # Sponsor blocks and promotions for upcoming events name people who are not
