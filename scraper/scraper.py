@@ -51,6 +51,21 @@ def normalize_episode_title(title: str, strip_numbering: bool = True) -> str:
     return re.sub(r'[^a-z0-9]+', '', t.lower())
 
 
+def _safe_int(value) -> Optional[int]:
+    """Parse a value as an int, or None if it isn't cleanly one.
+
+    itunes:episode/season are usually plain integers but some feeds use
+    fractional bonus-episode numbers like "8.5" — not representable in an
+    INTEGER column, so this drops them to NULL rather than raising.
+    """
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def compute_duration_seconds(episode_data: Dict, rss_data: Optional[Dict] = None) -> Optional[int]:
     """Convert an episode's duration to seconds, from RSS ("HH:MM:SS") or iTunes (millis)."""
     duration = rss_data.get('duration', '') if rss_data else episode_data.get('trackTimeMillis', 0)
@@ -196,8 +211,14 @@ class PodcastScraper:
                 'description': entry.description if hasattr(entry, 'description') else '',
                 'published_date': datetime(*entry.published_parsed[:6]).date() if hasattr(entry, 'published_parsed') else None,
                 'duration': entry.get('itunes_duration', ''),
-                'episode_number': entry.get('itunes_episode', None),
-                'season_number': entry.get('itunes_season', None),
+                # itunes:episode/season are usually integers but some feeds use
+                # fractional bonus-episode numbers ("8.5") — episode_number and
+                # season_number are INTEGER columns, and one bad value used to
+                # abort the whole transaction, silently discarding every other
+                # episode's refresh for that show (Shift Key: 34 episodes lost
+                # to a single "8.5"). Not representable as INTEGER, so NULL.
+                'episode_number': _safe_int(entry.get('itunes_episode', None)),
+                'season_number': _safe_int(entry.get('itunes_season', None)),
                 'author': entry.get('author', ''),
                 'itunes_author': entry.get('itunes_author', ''),
                 'link': entry.get('link', '')
@@ -462,6 +483,13 @@ class PodcastScraper:
                 logger.info(f"  [dry-run] would add: {published} — {title[:80]}")
                 continue
 
+            # A SAVEPOINT scopes one episode's failure to itself. Without it, a
+            # single bad row (e.g. episode_number "8.5") poisons the whole
+            # transaction — every subsequent execute() on this connection then
+            # raises "current transaction is aborted" until a rollback, so one
+            # bad episode silently failed every episode after it in the same
+            # show. Shift Key lost 34 legitimate refreshes to a single "8.5".
+            self.cursor.execute("SAVEPOINT episode_insert")
             try:
                 # Passed as both arguments on purpose: the first supplies the
                 # RSS-shaped fields, the second makes insert_episode take its
@@ -473,11 +501,13 @@ class PodcastScraper:
                 self.insert_episode(rss_episode, podcast_id, rss_episode)
                 existing_titles.add(key)   # feeds can repeat a title
                 existing_by_key.setdefault(key, rss_episode.get('title'))
+                self.cursor.execute("RELEASE SAVEPOINT episode_insert")
                 if was_present:
                     result['refreshed'] += 1
                 else:
                     result['inserted'] += 1
             except Exception as e:
+                self.cursor.execute("ROLLBACK TO SAVEPOINT episode_insert")
                 logger.error(f"  Failed to add '{title[:60]}': {e}")
                 result['failed'] += 1
 

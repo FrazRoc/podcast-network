@@ -8,6 +8,7 @@ from scraper import (
     compute_duration_seconds,
     compute_published_date,
     compute_match_gate,
+    _safe_int,
     MIN_TITLE_MATCH_RATIO,
     MIN_EPISODES_FOR_MATCH_CHECK,
 )
@@ -58,6 +59,25 @@ class TestPickTitleKey:
         titles = ["1: Intro to Solar", "2: Intro to Wind"]
         key_of = pick_title_key(titles)
         assert key_of("1: Intro to Solar") == key_of("Intro to Solar")
+
+
+class TestSafeInt:
+    def test_plain_int_string(self):
+        assert _safe_int('8') == 8
+
+    def test_none_stays_none(self):
+        assert _safe_int(None) is None
+
+    def test_fractional_bonus_episode_number_becomes_none(self):
+        # Real incident: Shift Key's feed uses "8.5" for a bonus episode.
+        # episode_number/season_number are INTEGER columns, and passing this
+        # through unchanged raised "invalid input syntax for type integer",
+        # which (before the SAVEPOINT fix) aborted the whole transaction and
+        # silently discarded 34 other episodes' refreshes in the same show.
+        assert _safe_int('8.5') is None
+
+    def test_non_numeric_becomes_none(self):
+        assert _safe_int('bonus') is None
 
 
 class TestComputeDurationSeconds:
