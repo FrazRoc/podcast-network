@@ -179,6 +179,13 @@ REMOVE_PATTERNS = [
     # cross-promotion reads the same way.
     r'(?i)(?:and\s+)?make sure to (?:also )?listen to our new podcast,[^.\n]*\.'
     r'(?:\s*Tune in[^.\n]*\.)?(?:\s*Available on[^.\n]*\.)?',
+    # Shift Key's sponsor block cross-promotes a University of Chicago show,
+    # "Shocked": "Listen to Shocked ... and hear journalist Amy Harder and
+    # economist Michael Greenstone share new ways of thinking ... Find it
+    # here." Amy Harder is a real, frequent guest on OTHER shows, so her full
+    # name matched here and credited her on 4 Shift Key episodes she never
+    # appeared in.
+    r'(?i)Listen to Shocked,.*?Find it here\.',
 ]
 
 

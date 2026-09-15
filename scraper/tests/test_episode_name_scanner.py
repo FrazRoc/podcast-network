@@ -115,6 +115,22 @@ class TestCleanDescription:
         assert "Hurlbut" not in result
         assert "Tesla news" in result
 
+    def test_shocked_cross_promo_blurb_stripped(self):
+        # Real incident: Shift Key's sponsor block cross-promotes "Shocked",
+        # naming Amy Harder — an already-known host from other shows — as if
+        # she'd appeared on this Shift Key episode. Credited her on 4 episodes
+        # she never appeared in.
+        text = ("Great episode with Michael Davidson. A warmer world is here. Now "
+                "what? Listen to Shocked, from the University of Chicago’s "
+                "Institute for Climate and Sustainable Growth, and hear journalist "
+                "Amy Harder and economist Michael Greenstone share new ways of "
+                "thinking about climate change and cutting-edge solutions. Find it "
+                "here.")
+        result = clean_description(text)
+        assert "Harder" not in result
+        assert "Greenstone" not in result
+        assert "Michael Davidson" in result
+
     def test_zero_climate_race_footer_stripped(self):
         # cleanup_zero_guests.py fixed the case where "Explore further: Past
         # episode with X" credited a guest from a different episode.
