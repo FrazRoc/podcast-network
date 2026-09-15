@@ -93,6 +93,75 @@ def find_host_by_full_name(cur, name: str):
     return row['host_id'] if row else None
 
 
+def link_matching_episodes(cur, name: str, host_id: int, exclude_episode_id: int = None) -> list:
+    """Link host_id as a Guest on every OTHER episode whose title or
+    description contains `name`, and return the podcast title + matched
+    source for each one actually inserted.
+
+    Done as one query rather than fetching every episode's full title and
+    description into Python and looping — some descriptions run past
+    100,000 characters (Volts' transcripts), and pulling all ~10k episodes'
+    text over the wire on every single suggestion approval was the reason
+    each approve took ~8 seconds in the admin UI.
+    """
+    cur.execute("""
+        WITH matches AS (
+            SELECT e.episode_id, e.podcast_id,
+                   CASE WHEN position(%(name_lower)s IN lower(e.title)) > 0
+                        THEN 'parsed_title' ELSE 'parsed_desc' END AS source
+            FROM episodes e
+            WHERE (%(exclude_id)s IS NULL OR e.episode_id != %(exclude_id)s)
+              AND (position(%(name_lower)s IN lower(e.title)) > 0
+                   OR position(%(name_lower)s IN lower(COALESCE(e.description, ''))) > 0)
+        ),
+        inserted AS (
+            INSERT INTO episode_host (episode_id, host_id, is_guest, role, data_source)
+            SELECT episode_id, %(host_id)s, true, 'Guest', source FROM matches
+            ON CONFLICT (episode_id, host_id) DO NOTHING
+            RETURNING episode_id
+        )
+        SELECT p.title AS podcast_title, m.source
+        FROM matches m
+        JOIN podcasts p ON p.podcast_id = m.podcast_id
+        WHERE m.episode_id IN (SELECT episode_id FROM inserted)
+    """, {'name_lower': name.lower(), 'exclude_id': exclude_episode_id, 'host_id': host_id})
+    return cur.fetchall()
+
+
+def link_matching_episodes_with_role(cur, name: str, host_id: int, exclude_episode_id: int = None) -> list:
+    """Same as link_matching_episodes(), but credits "Host" instead of "Guest"
+    on any show this person is already a registered host_podcast member of —
+    used when creating/editing/rescanning a person directly, as opposed to
+    approving a suggestion (which is always a Guest credit on the source show).
+    """
+    cur.execute("""
+        WITH matches AS (
+            SELECT e.episode_id, e.podcast_id,
+                   CASE WHEN position(%(name_lower)s IN lower(e.title)) > 0
+                        THEN 'parsed_title' ELSE 'parsed_desc' END AS source,
+                   (hp.host_id IS NOT NULL) AS is_show_host
+            FROM episodes e
+            LEFT JOIN host_podcast hp ON hp.podcast_id = e.podcast_id AND hp.host_id = %(host_id)s
+            WHERE (%(exclude_id)s IS NULL OR e.episode_id != %(exclude_id)s)
+              AND (position(%(name_lower)s IN lower(e.title)) > 0
+                   OR position(%(name_lower)s IN lower(COALESCE(e.description, ''))) > 0)
+        ),
+        inserted AS (
+            INSERT INTO episode_host (episode_id, host_id, is_guest, role, data_source)
+            SELECT episode_id, %(host_id)s, NOT is_show_host,
+                   CASE WHEN is_show_host THEN 'Host' ELSE 'Guest' END, source
+            FROM matches
+            ON CONFLICT (episode_id, host_id) DO NOTHING
+            RETURNING episode_id
+        )
+        SELECT p.title AS podcast_title, m.source
+        FROM matches m
+        JOIN podcasts p ON p.podcast_id = m.podcast_id
+        WHERE m.episode_id IN (SELECT episode_id FROM inserted)
+    """, {'name_lower': name.lower(), 'exclude_id': exclude_episode_id, 'host_id': host_id})
+    return cur.fetchall()
+
+
 app = FastAPI()
 
 
@@ -802,41 +871,8 @@ async def approve_suggestion(suggestion_id: int, body: NameOverrideRequest = Non
             ON CONFLICT (episode_id, host_id) DO NOTHING
         """, (episode_id, host_id, source))
 
-        # 3. Scan ALL episodes for this name
-        cur.execute("""
-            SELECT e.episode_id, e.title, e.description,
-                   p.podcast_id, p.title AS podcast_title
-            FROM episodes e
-            JOIN podcasts p ON e.podcast_id = p.podcast_id
-            WHERE e.episode_id != %s
-        """, (episode_id,))
-        all_episodes = cur.fetchall()
-
-        additional_links = []
-        name_lower = name.lower()
-
-        for ep in all_episodes:
-            matched_source = None
-            title = (ep['title'] or '').lower()
-            desc  = (ep['description'] or '').lower()
-
-            if name_lower in title:
-                matched_source = 'parsed_title'
-            elif name_lower in desc:
-                matched_source = 'parsed_desc'
-
-            if matched_source:
-                cur.execute("""
-                    INSERT INTO episode_host (episode_id, host_id, is_guest, role, data_source)
-                    VALUES (%s, %s, true, 'Guest', %s)
-                    ON CONFLICT (episode_id, host_id) DO NOTHING
-                """, (ep['episode_id'], host_id, matched_source))
-                if cur.rowcount > 0:
-                    additional_links.append({
-                        'podcast': ep['podcast_title'],
-                        'episode': ep['title'],
-                        'source':  matched_source,
-                    })
+        # 3. Link every OTHER episode whose title/description names this person
+        additional_links = link_matching_episodes(cur, name, host_id, episode_id)
 
         # 4. Mark suggestion approved
         cur.execute("""
@@ -860,7 +896,7 @@ async def approve_suggestion(suggestion_id: int, body: NameOverrideRequest = Non
         from collections import defaultdict
         by_podcast = defaultdict(int)
         for link in additional_links:
-            by_podcast[link['podcast']] += 1
+            by_podcast[link['podcast_title']] += 1
 
         return {
             "success": True,
@@ -932,35 +968,8 @@ async def approve_suggestion_only(suggestion_id: int, body: NameOverrideRequest 
             """, (first_name, last_name))
             host_id = cur.fetchone()['host_id']
 
-        # Scan ALL episodes EXCEPT the source episode
-        cur.execute("""
-            SELECT e.episode_id, e.title, e.description,
-                   p.podcast_id, p.title AS podcast_title
-            FROM episodes e
-            JOIN podcasts p ON e.podcast_id = p.podcast_id
-            WHERE e.episode_id != %s
-        """, (episode_id,))
-        all_episodes = cur.fetchall()
-
-        additional_links = []
-        name_lower = name.lower()
-
-        for ep in all_episodes:
-            matched_source = None
-            title = (ep['title'] or '').lower()
-            desc  = (ep['description'] or '').lower()
-            if name_lower in title:
-                matched_source = 'parsed_title'
-            elif name_lower in desc:
-                matched_source = 'parsed_desc'
-            if matched_source:
-                cur.execute("""
-                    INSERT INTO episode_host (episode_id, host_id, is_guest, role, data_source)
-                    VALUES (%s, %s, true, 'Guest', %s)
-                    ON CONFLICT (episode_id, host_id) DO NOTHING
-                """, (ep['episode_id'], host_id, matched_source))
-                if cur.rowcount > 0:
-                    additional_links.append({'podcast': ep['podcast_title']})
+        # Link every OTHER episode whose title/description names this person
+        additional_links = link_matching_episodes(cur, name, host_id, episode_id)
 
         # Mark suggestion approved
         cur.execute("""
@@ -981,7 +990,7 @@ async def approve_suggestion_only(suggestion_id: int, body: NameOverrideRequest 
         from collections import defaultdict
         by_podcast = defaultdict(int)
         for l in additional_links:
-            by_podcast[l['podcast']] += 1
+            by_podcast[l['podcast_title']] += 1
 
         return {
             "success": True,
@@ -1357,37 +1366,7 @@ async def create_person(body: CreatePersonRequest):
         # Scan all episodes for name matches. A match on a show where this
         # person is already a recorded official host means "Host", not
         # "Guest" — same fix as episode_name_scanner.py's run() command.
-        cur.execute("""
-            SELECT e.episode_id, e.title, e.description, e.podcast_id, p.title AS podcast_title
-            FROM episodes e
-            JOIN podcasts p ON e.podcast_id = p.podcast_id
-        """)
-        all_episodes = cur.fetchall()
-
-        cur.execute("SELECT podcast_id FROM host_podcast WHERE host_id = %s", (host_id,))
-        show_host_podcast_ids = {r['podcast_id'] for r in cur.fetchall()}
-
-        name_lower = full_name.lower()
-        links = []
-
-        for ep in all_episodes:
-            matched_source = None
-            if name_lower in (ep['title'] or '').lower():
-                matched_source = 'parsed_title'
-            elif name_lower in (ep['description'] or '').lower():
-                matched_source = 'parsed_desc'
-
-            if matched_source:
-                is_show_host = ep['podcast_id'] in show_host_podcast_ids
-                is_guest = not is_show_host
-                role = 'Guest' if is_guest else 'Host'
-                cur.execute("""
-                    INSERT INTO episode_host (episode_id, host_id, is_guest, role, data_source)
-                    VALUES (%s, %s, %s, %s, %s)
-                    ON CONFLICT (episode_id, host_id) DO NOTHING
-                """, (ep['episode_id'], host_id, is_guest, role, matched_source))
-                if cur.rowcount > 0:
-                    links.append({'podcast': ep['podcast_title'], 'episode': ep['title']})
+        links = link_matching_episodes_with_role(cur, full_name, host_id)
 
         conn.commit()
         cur.close()
@@ -1396,7 +1375,7 @@ async def create_person(body: CreatePersonRequest):
         from collections import defaultdict
         by_podcast = defaultdict(int)
         for l in links:
-            by_podcast[l['podcast']] += 1
+            by_podcast[l['podcast_title']] += 1
 
         return {
             "success": True,
@@ -1877,28 +1856,7 @@ async def update_person(host_id: int, body: CreatePersonRequest):
         conn.commit()
 
         # Re-scan with new name
-        cur.execute("""
-            SELECT e.episode_id, e.title, e.description, p.title AS podcast_title
-            FROM episodes e JOIN podcasts p ON e.podcast_id = p.podcast_id
-        """)
-        all_episodes = cur.fetchall()
-
-        name_lower = full_name.lower()
-        links = []
-        for ep in all_episodes:
-            matched_source = None
-            if name_lower in (ep['title'] or '').lower():
-                matched_source = 'parsed_title'
-            elif name_lower in (ep['description'] or '').lower():
-                matched_source = 'parsed_desc'
-            if matched_source:
-                cur.execute("""
-                    INSERT INTO episode_host (episode_id, host_id, is_guest, role, data_source)
-                    VALUES (%s, %s, true, 'Guest', %s)
-                    ON CONFLICT (episode_id, host_id) DO NOTHING
-                """, (ep['episode_id'], host_id, matched_source))
-                if cur.rowcount > 0:
-                    links.append({'podcast': ep['podcast_title']})
+        links = link_matching_episodes(cur, full_name, host_id, exclude_episode_id=None)
 
         conn.commit()
         cur.close()
@@ -1907,7 +1865,7 @@ async def update_person(host_id: int, body: CreatePersonRequest):
         from collections import defaultdict
         by_podcast = defaultdict(int)
         for l in links:
-            by_podcast[l['podcast']] += 1
+            by_podcast[l['podcast_title']] += 1
 
         return {
             "success": True,
@@ -2194,36 +2152,9 @@ async def scan_person_episodes(host_id: int):
         if not row:
             raise HTTPException(status_code=404, detail="Person not found")
 
-        name       = row['name']
-        name_lower = name.lower()
+        name = row['name']
 
-        cur.execute("""
-            SELECT e.episode_id, e.title, e.description, e.podcast_id, p.title AS podcast_title
-            FROM episodes e JOIN podcasts p ON e.podcast_id = p.podcast_id
-        """)
-        all_episodes = cur.fetchall()
-
-        cur.execute("SELECT podcast_id FROM host_podcast WHERE host_id = %s", (host_id,))
-        show_host_podcast_ids = {r['podcast_id'] for r in cur.fetchall()}
-
-        links = []
-        for ep in all_episodes:
-            matched_source = None
-            if name_lower in (ep['title'] or '').lower():
-                matched_source = 'parsed_title'
-            elif name_lower in (ep['description'] or '').lower():
-                matched_source = 'parsed_desc'
-            if matched_source:
-                is_show_host = ep['podcast_id'] in show_host_podcast_ids
-                is_guest = not is_show_host
-                role = 'Guest' if is_guest else 'Host'
-                cur.execute("""
-                    INSERT INTO episode_host (episode_id, host_id, is_guest, role, data_source)
-                    VALUES (%s, %s, %s, %s, %s)
-                    ON CONFLICT (episode_id, host_id) DO NOTHING
-                """, (ep['episode_id'], host_id, is_guest, role, matched_source))
-                if cur.rowcount > 0:
-                    links.append({'podcast': ep['podcast_title']})
+        links = link_matching_episodes_with_role(cur, name, host_id)
 
         conn.commit()
         cur.close()
@@ -2232,7 +2163,7 @@ async def scan_person_episodes(host_id: int):
         from collections import defaultdict
         by_podcast = defaultdict(int)
         for l in links:
-            by_podcast[l['podcast']] += 1
+            by_podcast[l['podcast_title']] += 1
 
         return {
             "success": True,
