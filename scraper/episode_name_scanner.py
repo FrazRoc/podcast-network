@@ -242,6 +242,10 @@ def get_show_hosts(conn) -> dict:
 # Intro phrases that signal a guest is being introduced
 _INTRO_RE = re.compile(
     r"""(?:with|joined\s+by|featuring|
+        # "(ft. Name - Org)" / "(feat. Name)" — Climate Insiders' entire
+        # title convention (suggestion 5538, "Ben James"), abbreviations
+        # "featuring" alone didn't cover.
+        feat\.?|ft\.?|
         # "speak to" as well as "speak with" — "we speak to Benjamin Bartle"
         # matched nothing, because only the "with" form was listed.
         (?:speak|spoke|speaks)\s+(?:to|with)|
@@ -261,9 +265,11 @@ _INTRO_RE = re.compile(
         # list above ("reporter", "activist", ...) are meant to be captured
         # as part of this group too and cleaned up by strip_honorific()
         # downstream, which knows a much longer list of them.
-        ([A-Z][a-zA-Z\x27’-]+(?:[^\S\n]+[A-Z][a-zA-Z\x27’-]+){1,2})
-        # Stop before: " of", " at", " from", ",", possessive, title words
-        (?=\s+(?:of|at|from|about|for|on|to|and)|,|'s|\s+(?:CEO|CTO|CFO|COO|Director|Founder)|$)
+        ([A-Z][a-zA-ZÀ-ž\x27’-]+(?:[^\S\n]+[A-Z][a-zA-ZÀ-ž\x27’-]+){1,2})
+        # Stop before: " of", " at", " from", ",", possessive, title words,
+        # or a dash/closing paren — "(ft. Ben James - Climate Tech
+        # specialist)" has no other stop word between the name and the dash.
+        (?=\s+(?:of|at|from|about|for|on|to|and)|,|'s|\s+(?:CEO|CTO|CFO|COO|Director|Founder)|\s*[-–)]|$)
     """,
     re.VERBOSE | re.IGNORECASE
 )

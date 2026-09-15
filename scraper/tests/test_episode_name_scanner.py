@@ -279,6 +279,26 @@ class TestExtractCandidateNames:
         result = extract_candidate_names("Jane Smith joins us to discuss the grid.")
         assert any(n == "Jane Smith" for n, _ in result)
 
+    def test_ft_and_feat_abbreviations(self):
+        # Real incident: Climate Insiders titles every episode "(ft. Name -
+        # Org)" / "(feat. Name)" — "featuring" alone didn't cover the
+        # abbreviated forms, so suggestion 5538 never surfaced "Ben James"
+        # and only found garbled description text instead.
+        cases = [
+            ("Is Hydrogen the Fuel of the Future? (ft. Ben James - Climate Tech specialist)", "Ben James"),
+            ("Continuum - Tackling the Wind Turbine Recycling Challenge (feat. Nicolas Derrien)", "Nicolas Derrien"),
+            ("Pioneering A New VC Model To Drive Systemic Change (ft Marie Ekeland of 2050)", "Marie Ekeland"),
+        ]
+        for title, expected in cases:
+            names = [n for n, _ in extract_candidate_names(title)]
+            assert expected in names, title
+
+    def test_accented_name_after_trigger(self):
+        # "è" isn't in [a-zA-Z] — without the extended Unicode range in the
+        # name-capture group, matching breaks mid-word.
+        result = extract_candidate_names("This week we talk with Dominique Minière about nuclear.")
+        assert any(n == "Dominique Minière" for n, _ in result)
+
     def test_possessive_org_pattern(self):
         result = extract_candidate_names("Rewiring America's Ari Matusiak joins the show.")
         names = [n for n, _ in result]
