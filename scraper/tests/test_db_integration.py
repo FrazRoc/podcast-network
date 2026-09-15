@@ -120,7 +120,7 @@ class TestShowHostFirstNames:
         db_conn.commit()
 
         result = show_host_first_names(db_conn)
-        first_names = {fn for _, fn in result.get(podcast_id, [])}
+        first_names = {fn for _, fn, _ in result.get(podcast_id, [])}
         assert first_names == {"Gerard", "Laurent"}
 
     def test_duplicate_first_name_within_show_is_excluded(self, db_conn):

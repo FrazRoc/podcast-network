@@ -696,26 +696,55 @@ def show_host_first_names(conn) -> dict:
 
     A first name shared by two of the same show's hosts is left out: there is
     no way to tell which one is meant.
+
+    Returns (host_id, first_name, last_name) triples — the last name is kept
+    so a match can be checked against a *different* full name sharing the
+    same first name elsewhere in the text (see `first_name_belongs_to_other`).
     """
     cur = conn.cursor()
     cur.execute("""
-        SELECT hp.podcast_id, hp.host_id, h.first_name
+        SELECT hp.podcast_id, hp.host_id, h.first_name, h.last_name
         FROM host_podcast hp JOIN hosts h ON h.host_id = hp.host_id
         WHERE h.first_name IS NOT NULL AND length(h.first_name) >= 3
     """)
     by_show = {}
-    for podcast_id, host_id, first_name in cur.fetchall():
-        by_show.setdefault(podcast_id, []).append((host_id, first_name))
+    for podcast_id, host_id, first_name, last_name in cur.fetchall():
+        by_show.setdefault(podcast_id, []).append((host_id, first_name, last_name or ''))
     cur.close()
 
     result = {}
     for podcast_id, entries in by_show.items():
         seen = defaultdict(int)
-        for _, first_name in entries:
+        for _, first_name, _ in entries:
             seen[first_name.lower()] += 1
-        result[podcast_id] = [(host_id, first_name) for host_id, first_name in entries
+        result[podcast_id] = [(host_id, first_name, last_name) for host_id, first_name, last_name in entries
                               if seen[first_name.lower()] == 1]
     return result
+
+
+_NEXT_CAPITALIZED_WORD_RE_CACHE = {}
+
+
+def first_name_belongs_to_other(first_name: str, own_last_name: str, text: str) -> bool:
+    """True if this first name is attached to a DIFFERENT surname anywhere in
+    the text — a sign it names someone else who happens to share the host's
+    first name.
+
+    Real incident: Outrage + Optimism registers "Fiona" (McRaith) as a host,
+    but "Fiona Macklin" (a Global Optimism advisor, unrelated) and "Fiona
+    Morgan" (a one-off guest) each showed up in six different episodes and
+    were credited to McRaith because only the first name was checked.
+    """
+    pattern = _NEXT_CAPITALIZED_WORD_RE_CACHE.get(first_name)
+    if pattern is None:
+        pattern = re.compile(re.escape(first_name) + r"\s+([A-Z][a-zA-Z'’-]+)")
+        _NEXT_CAPITALIZED_WORD_RE_CACHE[first_name] = pattern
+    own_last = own_last_name.strip().lower()
+    for m in pattern.finditer(text):
+        candidate = m.group(1).rstrip('.,').lower()
+        if candidate and candidate != own_last:
+            return True
+    return False
 
 
 def run(dry_run: bool = True, title_only: bool = False, min_length: int = 7,
@@ -783,18 +812,23 @@ def run(dry_run: bool = True, title_only: bool = False, min_length: int = 7,
                 })
 
         # A registered host named only by their first name still counts, but
-        # only where their full name did not already match on this episode.
+        # only where their full name did not already match on this episode,
+        # and only where that first name isn't also attached to someone
+        # else's surname in the same text (see first_name_belongs_to_other).
         haystack = title + ('\n' + clean_desc if scan_desc else '')
-        for host_id, first_name in host_first_names.get(podcast_id, ()):
+        for host_id, first_name, last_name in host_first_names.get(podcast_id, ()):
             if host_id in matched_here:
                 continue
-            if name_in_text(first_name, haystack):
-                matches.append({
-                    'episode_id': episode_id, 'host_id': host_id,
-                    'full_name': first_name, 'podcast_title': podcast_title,
-                    'episode_title': title, 'source': 'host_first_name',
-                    'is_show_host': True,
-                })
+            if not name_in_text(first_name, haystack):
+                continue
+            if first_name_belongs_to_other(first_name, last_name, haystack):
+                continue
+            matches.append({
+                'episode_id': episode_id, 'host_id': host_id,
+                'full_name': first_name, 'podcast_title': podcast_title,
+                'episode_title': title, 'source': 'host_first_name',
+                'is_show_host': True,
+            })
 
     logger.info(f"Found {len(matches)} matches")
 

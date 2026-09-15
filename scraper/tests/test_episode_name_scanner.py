@@ -17,6 +17,7 @@ from episode_name_scanner import (
     _valid_name,
     extract_labelled_credits,
     extract_candidate_names,
+    first_name_belongs_to_other,
 )
 
 
@@ -268,3 +269,23 @@ class TestSurnameIndex:
         hosts = [{'host_id': 1, 'full_name': 'Amy Westervelt'}]
         index = build_surname_index(hosts)
         assert candidate_hosts("Nothing relevant here.", index) == []
+
+
+class TestFirstNameBelongsToOther:
+    """Real incident: Outrage + Optimism registers "Fiona" (McRaith) as a
+    host, so bare-first-name matching credited her on 7 episodes that were
+    actually about "Fiona Macklin" (a Global Optimism advisor) or "Fiona
+    Morgan" (a one-off guest) — neither of whom share her surname."""
+
+    def test_different_surname_flags_collision(self):
+        text = "This week, with the help of co-host Fiona Macklin, part two of..."
+        assert first_name_belongs_to_other("Fiona", "McRaith", text)
+
+    def test_own_surname_does_not_flag(self):
+        text = "Christiana Figueres, Tom Rivett-Carnac and new co-host Fiona McRaith take you on the road."
+        assert not first_name_belongs_to_other("Fiona", "McRaith", text)
+
+    def test_bare_first_name_alone_does_not_flag(self):
+        # "Gerard and Laurent welcome ..." — no surname follows at all.
+        text = "Gerard and Laurent welcome a guest to discuss the grid."
+        assert not first_name_belongs_to_other("Gerard", "Reid", text)
