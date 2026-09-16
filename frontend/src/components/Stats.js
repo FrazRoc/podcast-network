@@ -2,6 +2,7 @@ import ShowOverlapMatrix from './ShowOverlapMatrix';
 import GuestAppearanceChart from './GuestAppearanceChart';
 import GuestReachChart from './GuestReachChart';
 import BridgeChart from './BridgeChart';
+import GuestMomentumGrid from './GuestMomentumGrid';
 import ShowTimelineGantt from './ShowTimelineGantt';
 import EpisodeCalendarHeatmap from './EpisodeCalendarHeatmap';
 
@@ -21,6 +22,15 @@ export default function Stats() {
             How many guests the top 25 most-connected shows share with each other.
           </p>
           <ShowOverlapMatrix />
+        </div>
+
+        <div className="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6">
+          <h2 className="text-base font-semibold text-gray-900 mb-1">Who's On Right Now</h2>
+          <p className="text-sm text-gray-500 mb-4">
+            The sixteen guests with the most appearances in the last 18 months,
+            by year. Guests who have appeared on at least four different shows.
+          </p>
+          <GuestMomentumGrid />
         </div>
 
         <div className="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6">

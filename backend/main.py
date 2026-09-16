@@ -681,6 +681,100 @@ async def get_show_connections():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/stats/guest-momentum")
+async def get_guest_momentum():
+    """Appearances per year for the guests most present recently.
+
+    A ranking chart was the obvious shape and does not work here: 44 people
+    reach some year's top eight and only 10 manage it twice, so the lines
+    would be mostly disconnected dots. The churn is the finding, and a small
+    chart each shows it — a flat line then a cliff is a new arrival, a
+    mountain now descending is someone fading, and both are legible at a
+    glance where sixteen crossing lines would not be.
+
+    Ordered by appearances in the last 18 months, so the grid is "who is
+    around now" and the shape says whether that is new. Sorting by growth
+    rate instead would put anyone going from one appearance to three at the
+    top, which is noise at these counts.
+    """
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            WITH app AS (
+                SELECT eh.host_id,
+                       EXTRACT(YEAR FROM e.published_date)::int AS yr,
+                       e.published_date,
+                       e.podcast_id
+                FROM episode_host eh
+                JOIN episodes e USING (episode_id)
+                WHERE eh.is_guest
+                  AND e.published_date IS NOT NULL
+                  AND e.published_date >= DATE '2019-01-01'
+            ),
+            scored AS (
+                SELECT host_id,
+                       COUNT(*) FILTER (
+                         WHERE published_date >= (CURRENT_DATE - INTERVAL '18 months')
+                       ) AS recent,
+                       COUNT(*) FILTER (
+                         WHERE published_date <  (CURRENT_DATE - INTERVAL '18 months')
+                       ) AS earlier
+                FROM app
+                GROUP BY 1
+                -- Four shows minimum. Without it the top of the list is people
+                -- with a dozen appearances on one podcast — a recurring
+                -- contributor or a miscredited co-host, not a guest moving
+                -- through the network, which is what "trending" should mean.
+                HAVING COUNT(DISTINCT podcast_id) >= 4
+            ),
+            top AS (
+                SELECT host_id, recent, earlier FROM scored
+                ORDER BY recent DESC, earlier ASC LIMIT 16
+            )
+            SELECT t.host_id,
+                   h.first_name || ' ' || h.last_name AS name,
+                   t.recent, t.earlier,
+                   a.yr, COUNT(*) AS n
+            FROM top t
+            JOIN hosts h USING (host_id)
+            JOIN app a  USING (host_id)
+            GROUP BY t.host_id, h.first_name, h.last_name, t.recent, t.earlier, a.yr
+            ORDER BY t.recent DESC, t.earlier ASC, a.yr
+        """)
+        rows = cur.fetchall()
+        cur.execute("SELECT EXTRACT(YEAR FROM MAX(published_date))::int AS y FROM episodes")
+        last_year = cur.fetchone()["y"]
+        cur.close()
+        conn.close()
+
+        years = list(range(2019, last_year + 1))
+        index = {y: i for i, y in enumerate(years)}
+        guests, order = {}, []
+        for r in rows:
+            g = guests.get(r["host_id"])
+            if g is None:
+                g = guests[r["host_id"]] = {
+                    "host_id": r["host_id"], "name": r["name"],
+                    "recent": r["recent"], "earlier": r["earlier"],
+                    "counts": [0] * len(years),
+                }
+                order.append(g)
+            if r["yr"] in index:
+                g["counts"][index[r["yr"]]] = r["n"]
+
+        return {
+            "years": years,
+            # The current year is only partly published, so its point is low
+            # for everyone. Said plainly rather than projected — a projection
+            # would be inventing episodes that do not exist.
+            "partial_year": last_year,
+            "guests": order,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/stats/bridges")
 async def get_bridges():
     """The two routes to reaching most of the network.
