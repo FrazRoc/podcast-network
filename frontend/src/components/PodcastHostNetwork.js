@@ -839,7 +839,7 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
   </div>
 );
 
-const PodcastLegend = ({ podcasts, isOpen, onToggle }) => (
+const PodcastLegend = ({ podcasts, isOpen, onToggle, selected, onSelect }) => (
   <div className="absolute bottom-4 right-4 bg-white rounded-lg shadow-lg max-w-xs">
     <button
       onClick={onToggle}
@@ -849,12 +849,26 @@ const PodcastLegend = ({ podcasts, isOpen, onToggle }) => (
       <span>{isOpen ? '▲' : '▼'}</span>
     </button>
     {isOpen && (
-      <div className="px-4 pb-3 space-y-1 max-h-64 overflow-y-auto">
+      <div className="px-4 pb-3 space-y-0.5 max-h-64 overflow-y-auto">
+        {selected && (
+          <button
+            onClick={() => onSelect(null)}
+            className="w-full text-left text-xs text-teal-700 hover:text-teal-900 py-1"
+          >
+            ← show everything
+          </button>
+        )}
         {podcasts.map(p => (
-          <div key={p} className="flex items-center text-xs">
-            <div className="w-3 h-3 rounded-full mr-2 flex-shrink-0" style={{ backgroundColor: podcastColor(p) }} />
+          <button
+            key={p}
+            onClick={() => onSelect(selected === p ? null : p)}
+            className={`w-full flex items-center text-xs text-left rounded px-1 py-0.5 ${
+              selected === p ? 'bg-amber-50 font-semibold text-gray-900' : 'hover:bg-gray-50'}`}
+          >
+            <div className="w-3 h-3 rounded-full mr-2 flex-shrink-0"
+                 style={{ backgroundColor: podcastColor(p) }} />
             <span className="truncate">{p}</span>
-          </div>
+          </button>
         ))}
       </div>
     )}
@@ -886,6 +900,7 @@ const PodcastHostNetwork = () => {
   const [selectedLink, setSelectedLink] = useState(null);
   const [selectedNodeConnections, setSelectedNodeConnections] = useState([]);
   const [selectedLinks, setSelectedLinks] = useState(new Set());
+  const [selectedPodcast, setSelectedPodcast] = useState(null);
   const [legendOpen, setLegendOpen] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -1176,8 +1191,30 @@ const PodcastHostNetwork = () => {
 
   // Interaction handlers
   const clearSelection = useCallback(() => {
+    setSelectedPodcast(null);
     setSelectedNode(null); setSelectedNodeConnections([]); setSelectedLink(null);
     setHighlightNodes(new Set()); setHighlightLinks(new Set()); setSelectedLinks(new Set());
+  }, []);
+
+  // Picking a show in the legend lights up its whole subgraph — every link
+  // recorded on that show and the people at both ends. It reuses the same
+  // highlight set a node click uses, so the two cannot both be lit at once.
+  const handlePodcastSelect = useCallback(podcast => {
+    setSelectedPodcast(podcast);
+    setSelectedNode(null); setSelectedLink(null); setSelectedNodeConnections([]);
+    if (!podcast) {
+      setHighlightNodes(new Set()); setHighlightLinks(new Set()); setSelectedLinks(new Set());
+      return;
+    }
+    const links = activeLinksRef.current.filter(l => l.podcast === podcast);
+    const people = new Set();
+    links.forEach(l => {
+      people.add(l.source?.id ?? l.source);
+      people.add(l.target?.id ?? l.target);
+    });
+    setSelectedLinks(new Set(links));
+    setHighlightLinks(new Set(links));
+    setHighlightNodes(people);
   }, []);
 
   // Switching view drops a selection that belongs to the other graph, and
@@ -1570,6 +1607,8 @@ const PodcastHostNetwork = () => {
           podcasts={visiblePodcastList}
           isOpen={legendOpen}
           onToggle={() => setLegendOpen(o => !o)}
+          selected={selectedPodcast}
+          onSelect={handlePodcastSelect}
         />
       )}
     </div>
