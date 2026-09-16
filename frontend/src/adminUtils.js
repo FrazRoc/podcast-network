@@ -68,3 +68,29 @@ export const highlightNames = (text, highlights) => {
   if (pos < text.length) parts.push(text.slice(pos));
   return parts;
 };
+
+// suggestions.source is tagged "title_<pattern>" / "desc_<pattern>" (e.g.
+// "title_dash", "desc_bio_sentence") — see extract_candidate_names_tagged()
+// in episode_name_scanner.py. Older rows predate the tagging and are still
+// just the bare "parsed_title"/"parsed_desc". This splits a value into
+// where it was found and which specific heuristic found it there, for
+// display in the suggestions list/review UI.
+const PATTERN_LABELS = {
+  labelled:     'Labelled credit',
+  intro:        'Trigger phrase',
+  joins:        '"joins us"',
+  possessive:   "Org's Name",
+  and:          '"...and Name"',
+  guest_list:   'Guest list',
+  bio_sentence: 'Bio sentence',
+  dash:         'Title dash/comma',
+};
+
+export const formatSuggestionSource = (source) => {
+  if (source === 'parsed_title') return { scope: 'Episode Title', pattern: null };
+  if (source === 'parsed_desc') return { scope: 'Description', pattern: null };
+  const [scopeKey, ...rest] = (source || '').split('_');
+  const pattern = rest.join('_');
+  const scope = scopeKey === 'title' ? 'Episode Title' : scopeKey === 'desc' ? 'Description' : source;
+  return { scope, pattern: PATTERN_LABELS[pattern] || pattern || null };
+};

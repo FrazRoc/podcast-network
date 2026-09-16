@@ -1231,6 +1231,100 @@ async def get_suggestion_stats():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/admin/suggestions/sources", dependencies=[Depends(verify_admin)])
+async def get_suggestion_sources(apple_podcast_id: str = None, status: str = "pending"):
+    """Counts of pending suggestions grouped by the specific pattern that
+    found them (source, e.g. "title_dash", "desc_bio_sentence" — see
+    extract_candidate_names_tagged() in the scanner). Powers the filter
+    chips on the list view: an admin picks a pattern they trust, sees how
+    many suggestions it covers, and reviews that batch as a group instead
+    of one row at a time.
+    """
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT s.source, COUNT(*) AS count
+            FROM suggestions s
+            JOIN episodes e ON s.episode_id = e.episode_id
+            JOIN podcasts p ON e.podcast_id = p.podcast_id
+            WHERE s.status = %(status)s
+              AND (%(apple_podcast_id)s IS NULL OR p.apple_podcast_id = %(apple_podcast_id)s)
+            GROUP BY s.source
+            ORDER BY count DESC
+        """, {"status": status, "apple_podcast_id": apple_podcast_id})
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return rows
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/suggestions/list", dependencies=[Depends(verify_admin)])
+async def list_suggestions(apple_podcast_id: str = None, source: str = None,
+                            search: str = "", status: str = "pending",
+                            sort: str = "newest", limit: int = 50, offset: int = 0):
+    """Paginated, filterable suggestions — the table view behind bulk
+    review, as opposed to /suggestions/next's one-row-at-a-time queue.
+    Filtering by source (the specific pattern tag) is what lets an admin
+    preview a batch before acting on it.
+    """
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        sort_map = {
+            "newest":    "s.created_at DESC",
+            "oldest":    "s.created_at ASC",
+            "name_asc":  "s.candidate_name ASC",
+        }
+        order = sort_map.get(sort, "s.created_at DESC")
+
+        params = {
+            "apple_podcast_id": apple_podcast_id,
+            "source": source,
+            "search": search,
+            "status": status,
+            "limit": limit,
+            "offset": offset,
+        }
+        where = """
+            s.status = %(status)s
+            AND (%(apple_podcast_id)s IS NULL OR p.apple_podcast_id = %(apple_podcast_id)s)
+            AND (%(source)s IS NULL OR s.source = %(source)s)
+            AND (%(search)s = '' OR s.candidate_name ILIKE '%%' || %(search)s || '%%')
+        """
+
+        cur.execute(f"""
+            SELECT s.suggestion_id, s.candidate_name, s.source, s.matched_text,
+                   s.created_at, e.episode_id, e.title AS episode_title,
+                   p.title AS podcast_title, p.apple_podcast_id
+            FROM suggestions s
+            JOIN episodes e ON s.episode_id = e.episode_id
+            JOIN podcasts p ON e.podcast_id = p.podcast_id
+            WHERE {where}
+            ORDER BY {order}
+            LIMIT %(limit)s OFFSET %(offset)s
+        """, params)
+        items = cur.fetchall()
+
+        cur.execute(f"""
+            SELECT COUNT(*) AS total
+            FROM suggestions s
+            JOIN episodes e ON s.episode_id = e.episode_id
+            JOIN podcasts p ON e.podcast_id = p.podcast_id
+            WHERE {where}
+        """, params)
+        total = cur.fetchone()["total"]
+
+        cur.close()
+        conn.close()
+        return {"items": items, "total": total}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/admin/suggestions/{suggestion_id}/approve", dependencies=[Depends(verify_admin)])
 async def approve_suggestion(suggestion_id: int, body: NameOverrideRequest = None):
     """

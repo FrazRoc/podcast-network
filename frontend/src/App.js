@@ -1,5 +1,6 @@
 import PodcastHostNetwork from './components/PodcastHostNetwork';
 import AdminSuggestions from './components/AdminSuggestions';
+import AdminSuggestionsList from './components/AdminSuggestionsList';
 import AdminImages from './components/AdminImages';
 import AdminPeople from './components/AdminPeople';
 import AdminShows from './components/AdminShows';
@@ -14,6 +15,8 @@ function App() {
 
   if (path === '/stats' || path.startsWith('/stats/'))
     return <Stats />;
+  if (path === '/admin/suggestions/list')
+    return <AdminLoginGate><div className="w-full min-h-screen"><AdminSuggestionsList /></div></AdminLoginGate>;
   if (path === '/admin/images' || path.startsWith('/admin/images/'))
     return <AdminLoginGate><div className="w-full min-h-screen"><AdminImages /></div></AdminLoginGate>;
   if (path === '/admin/people' || path.startsWith('/admin/people/'))

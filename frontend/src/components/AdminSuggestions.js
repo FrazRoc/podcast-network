@@ -2,24 +2,20 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { API_BASE_URL } from '../config';
 import { adminFetch } from '../adminAuth';
 import AdminHeader from './AdminHeader';
-import { highlightNames, stripHtmlForDisplay } from '../adminUtils';
+import { highlightNames, stripHtmlForDisplay, formatSuggestionSource } from '../adminUtils';
 
 const API = `${API_BASE_URL}/api/admin`;
 
 // ─── Source badge ──────────────────────────────────────────────────────────────
 const SourceBadge = ({ source }) => {
-  // source is now tagged with the specific pattern that fired (e.g.
-  // "title_dash", "desc_bio_sentence") rather than just "parsed_title" /
-  // "parsed_desc" — checked by prefix so this badge still reads correctly.
-  // (Older rows keep their untagged "parsed_title"/"parsed_desc" values.)
-  const isTitle = source === 'parsed_title' || source.startsWith('title_');
-  const label = isTitle ? 'Episode Title' : 'Description';
+  const { scope, pattern } = formatSuggestionSource(source);
+  const isTitle = scope === 'Episode Title';
   const color = isTitle
     ? 'bg-blue-100 text-blue-700'
     : 'bg-purple-100 text-purple-700';
   return (
     <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${color}`}>
-      {label}
+      {scope}{pattern ? ` · ${pattern}` : ''}
     </span>
   );
 };
@@ -250,6 +246,12 @@ export default function AdminSuggestions() {
             </option>
           ))}
         </select>
+        <a
+          href={selectedShow ? `/admin/suggestions/list?apple_podcast_id=${selectedShow}` : '/admin/suggestions/list'}
+          className="ml-auto text-sm text-teal-700 hover:text-teal-900 hover:underline"
+        >
+          Browse all →
+        </a>
       </div>
 
       {/* Loading */}
