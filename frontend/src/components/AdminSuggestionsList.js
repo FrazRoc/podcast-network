@@ -26,6 +26,11 @@ export default function AdminSuggestionsList() {
   const [actionError, setActionError] = useState(null);
   const [bulk, setBulk] = useState(null); // { done, total, failed } while Approve All is running
   const bulkStopRef = useRef(false);
+  // suggestion_id -> corrected name, e.g. "Elin Bergman COO" -> "Elin Bergman".
+  // Kept keyed by id (not row-local state) so an edit survives a re-render
+  // and so Approve All can pick it up too, not just the single-row button.
+  const [editedNames, setEditedNames] = useState({});
+  const [editingId, setEditingId] = useState(null);
   const [searchQ, setSearchQ] = useState('');
   const [showFilter, setShowFilter] = useState(
     () => new URLSearchParams(window.location.search).get('apple_podcast_id') || ''
@@ -114,6 +119,26 @@ export default function AdminSuggestionsList() {
   const removeItem = (suggestionId) => {
     setItems(prev => prev.filter(i => i.suggestion_id !== suggestionId));
     setTotal(t => Math.max(0, t - 1));
+    setEditedNames(prev => {
+      if (!(suggestionId in prev)) return prev;
+      const next = { ...prev };
+      delete next[suggestionId];
+      return next;
+    });
+  };
+
+  // approve_suggestion accepts an optional {name} override — an edited row
+  // sends its corrected name, an untouched row sends no body at all so the
+  // scanner's original candidate_name is used exactly as before.
+  const approveOptions = (item) => {
+    const edited = editedNames[item.suggestion_id]?.trim();
+    const body = edited && edited !== item.candidate_name ? JSON.stringify({ name: edited }) : undefined;
+    return { method: 'POST', ...(body && { body, headers: { 'Content-Type': 'application/json' } }) };
+  };
+
+  const startEditing = (item) => {
+    setEditedNames(prev => (item.suggestion_id in prev ? prev : { ...prev, [item.suggestion_id]: item.candidate_name }));
+    setEditingId(item.suggestion_id);
   };
 
   const handleReject = async (suggestionId) => {
@@ -130,15 +155,15 @@ export default function AdminSuggestionsList() {
     }
   };
 
-  const handleApprove = async (suggestionId) => {
-    setActioningId(suggestionId);
+  const handleApprove = async (item) => {
+    setActioningId(item.suggestion_id);
     setActionError(null);
     try {
-      const res = await adminFetch(`${API}/suggestions/${suggestionId}/approve`, { method: 'POST' });
+      const res = await adminFetch(`${API}/suggestions/${item.suggestion_id}/approve`, approveOptions(item));
       if (!res.ok) throw new Error(`API error ${res.status}`);
-      removeItem(suggestionId);
+      removeItem(item.suggestion_id);
     } catch (e) {
-      setActionError({ id: suggestionId, message: e.message || 'Failed to approve' });
+      setActionError({ id: item.suggestion_id, message: e.message || 'Failed to approve' });
     } finally {
       setActioningId(null);
     }
@@ -164,7 +189,7 @@ export default function AdminSuggestionsList() {
     for (const item of targets) {
       if (bulkStopRef.current) break;
       try {
-        const res = await adminFetch(`${API}/suggestions/${item.suggestion_id}/approve`, { method: 'POST' });
+        const res = await adminFetch(`${API}/suggestions/${item.suggestion_id}/approve`, approveOptions(item));
         if (!res.ok) throw new Error(`API error ${res.status}`);
         removeItem(item.suggestion_id);
         setBulk(prev => prev && { ...prev, done: prev.done + 1 });
@@ -299,23 +324,59 @@ export default function AdminSuggestionsList() {
                   const { scope, pattern } = formatSuggestionSource(item.source);
                   const isTitle = scope === 'Episode Title';
                   const isActioning = actioningId === item.suggestion_id;
+                  const isEditing = editingId === item.suggestion_id;
+                  const hasEdit = item.suggestion_id in editedNames && editedNames[item.suggestion_id].trim() !== item.candidate_name;
+                  const displayName = editedNames[item.suggestion_id] ?? item.candidate_name;
                   return (
                     <div key={item.suggestion_id} className="px-4 py-3 hover:bg-gray-50 transition-colors">
                       <div className="flex items-start justify-between gap-3">
-                        <a href={`/admin?suggestion_id=${item.suggestion_id}`} className="min-w-0 flex-1 block">
-                          <p className="text-sm font-semibold text-gray-900 truncate">{item.candidate_name}</p>
-                          <p className="text-xs text-gray-400 truncate mt-0.5">
-                            {item.podcast_title} · {item.episode_title}
-                            {item.created_at && ` · ${formatDateOnly(item.created_at.slice(0, 10))}`}
-                          </p>
-                          {item.matched_text && (
-                            <p className="text-xs text-gray-500 truncate mt-1 italic">
-                              {highlightNames(item.matched_text, [
-                                { name: item.candidate_name, className: 'bg-yellow-100 not-italic font-medium text-gray-900' },
-                              ])}
-                            </p>
+                        <div className="min-w-0 flex-1">
+                          {isEditing ? (
+                            <input
+                              autoFocus
+                              type="text"
+                              value={editedNames[item.suggestion_id] ?? item.candidate_name}
+                              onChange={e => setEditedNames(prev => ({ ...prev, [item.suggestion_id]: e.target.value }))}
+                              onBlur={() => setEditingId(null)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') { e.preventDefault(); setEditingId(null); }
+                                if (e.key === 'Escape') {
+                                  setEditedNames(prev => {
+                                    const next = { ...prev };
+                                    delete next[item.suggestion_id];
+                                    return next;
+                                  });
+                                  setEditingId(null);
+                                }
+                              }}
+                              className="text-sm font-semibold text-gray-900 border border-teal-400 rounded px-1 -mx-1 focus:outline-none w-full max-w-xs"
+                            />
+                          ) : (
+                            <button
+                              onClick={() => startEditing(item)}
+                              disabled={isActioning || !!bulk}
+                              title="Click to edit name"
+                              className={`text-sm font-semibold truncate text-left hover:underline decoration-dotted ${
+                                hasEdit ? 'text-teal-700' : 'text-gray-900'
+                              }`}
+                            >
+                              {displayName}{hasEdit && <span className="text-xs text-teal-500 font-normal"> (edited)</span>}
+                            </button>
                           )}
-                        </a>
+                          <a href={`/admin?suggestion_id=${item.suggestion_id}`} className="block">
+                            <p className="text-xs text-gray-400 truncate mt-0.5">
+                              {item.podcast_title} · {item.episode_title}
+                              {item.created_at && ` · ${formatDateOnly(item.created_at.slice(0, 10))}`}
+                            </p>
+                            {item.matched_text && (
+                              <p className="text-xs text-gray-500 truncate mt-1 italic">
+                                {highlightNames(item.matched_text, [
+                                  { name: item.candidate_name, className: 'bg-yellow-100 not-italic font-medium text-gray-900' },
+                                ])}
+                              </p>
+                            )}
+                          </a>
+                        </div>
                         <div className="flex-shrink-0 flex items-center gap-2">
                           <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap ${
                             isTitle ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'
@@ -323,9 +384,9 @@ export default function AdminSuggestionsList() {
                             {scope}{pattern ? ` · ${pattern}` : ''}
                           </span>
                           <button
-                            onClick={() => handleApprove(item.suggestion_id)}
+                            onClick={() => handleApprove(item)}
                             disabled={isActioning || !!bulk}
-                            title="Approve"
+                            title={hasEdit ? `Approve as "${editedNames[item.suggestion_id].trim()}"` : 'Approve'}
                             className="px-2 py-1 rounded text-xs font-medium bg-green-100 text-green-700 hover:bg-green-200 disabled:opacity-50"
                           >
                             ✓
