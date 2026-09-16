@@ -681,6 +681,73 @@ async def get_show_connections():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/stats/guest-cohorts")
+async def get_guest_cohorts():
+    """Each year's guest roster, split by the year those guests first appeared.
+
+    The headline is that first-timers fall from 94% of the roster to 40%, but
+    as a single line that hides what is actually happening. Around a quarter of
+    each year's intake comes back the following year, and those who do then
+    stay: the 2019 cohort has put 61 to 82 people on air every year since,
+    seven years running. The network is not so much consolidating as accreting
+    a stable core, one layer at a time.
+
+    Anyone whose first appearance predates 2019 is folded into the 2019 band —
+    there are few of them and they would otherwise need six more bands of
+    almost nothing.
+    """
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            WITH firsts AS (
+                SELECT eh.host_id,
+                       MIN(EXTRACT(YEAR FROM e.published_date))::int AS debut
+                FROM episode_host eh JOIN episodes e USING (episode_id)
+                WHERE eh.is_guest AND e.published_date IS NOT NULL
+                GROUP BY 1
+            ),
+            yearly AS (
+                SELECT DISTINCT EXTRACT(YEAR FROM e.published_date)::int AS yr,
+                       eh.host_id
+                FROM episode_host eh JOIN episodes e USING (episode_id)
+                WHERE eh.is_guest AND e.published_date >= DATE '2019-01-01'
+            )
+            SELECT y.yr, GREATEST(f.debut, 2019) AS cohort, COUNT(*) AS n
+            FROM yearly y JOIN firsts f USING (host_id)
+            GROUP BY 1, 2 ORDER BY 1, 2
+        """)
+        rows = cur.fetchall()
+        cur.execute("SELECT EXTRACT(YEAR FROM MAX(published_date))::int AS y FROM episodes")
+        last_year = cur.fetchone()["y"]
+        cur.close()
+        conn.close()
+
+        years = list(range(2019, last_year + 1))
+        index = {y: i for i, y in enumerate(years)}
+        # One row per cohort, aligned to the same year axis, so a band is just
+        # an array the chart can stack without any lookup.
+        cohorts = [
+            {"cohort": c, "counts": [0] * len(years)}
+            for c in years
+        ]
+        by_cohort = {c["cohort"]: c for c in cohorts}
+        for r in rows:
+            band = by_cohort.get(r["cohort"])
+            if band is not None and r["yr"] in index:
+                band["counts"][index[r["yr"]]] = r["n"]
+
+        totals = [sum(c["counts"][i] for c in cohorts) for i in range(len(years))]
+        return {
+            "years": years,
+            "cohorts": cohorts,
+            "totals": totals,
+            "partial_year": last_year,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/stats/guest-momentum")
 async def get_guest_momentum():
     """Appearances per year for the guests most present recently.
