@@ -13,16 +13,17 @@ const SORTS = [
   { id: 'name_asc', label: 'Name A–Z' },
 ];
 
-// Read-only browse/filter view over the suggestions queue — a preview
-// surface for a future bulk approve/reject action, so a batch can be seen
-// and trusted (or not) before anything is done to it. Acting on a
-// suggestion still happens one at a time on the existing review page;
-// each row links there rather than duplicating the approve/reject flow.
+// Browse/filter view over the suggestions queue, with quick inline
+// approve/reject per row so a batch can be scanned and cleared without
+// leaving the list — full context (existing credits, name override) is
+// still one click away via the review page each row links to.
 export default function AdminSuggestionsList() {
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState(null);
+  const [actioningId, setActioningId] = useState(null);
+  const [actionError, setActionError] = useState(null);
   const [searchQ, setSearchQ] = useState('');
   const [showFilter, setShowFilter] = useState(
     () => new URLSearchParams(window.location.search).get('apple_podcast_id') || ''
@@ -103,6 +104,42 @@ export default function AdminSuggestionsList() {
 
   const handleLoadMore = () => {
     fetchItems(searchQ, showFilter, source, sort, items.length, true);
+  };
+
+  // Removes the row locally on success rather than refetching the whole
+  // page — scanning a long list and clearing rows one by one shouldn't
+  // reset scroll position or re-request everything after each click.
+  const removeItem = (suggestionId) => {
+    setItems(prev => prev.filter(i => i.suggestion_id !== suggestionId));
+    setTotal(t => Math.max(0, t - 1));
+  };
+
+  const handleReject = async (suggestionId) => {
+    setActioningId(suggestionId);
+    setActionError(null);
+    try {
+      const res = await adminFetch(`${API}/suggestions/${suggestionId}/reject`, { method: 'POST' });
+      if (!res.ok) throw new Error(`API error ${res.status}`);
+      removeItem(suggestionId);
+    } catch (e) {
+      setActionError({ id: suggestionId, message: e.message || 'Failed to reject' });
+    } finally {
+      setActioningId(null);
+    }
+  };
+
+  const handleApprove = async (suggestionId) => {
+    setActioningId(suggestionId);
+    setActionError(null);
+    try {
+      const res = await adminFetch(`${API}/suggestions/${suggestionId}/approve`, { method: 'POST' });
+      if (!res.ok) throw new Error(`API error ${res.status}`);
+      removeItem(suggestionId);
+    } catch (e) {
+      setActionError({ id: suggestionId, message: e.message || 'Failed to approve' });
+    } finally {
+      setActioningId(null);
+    }
   };
 
   return (
@@ -189,14 +226,11 @@ export default function AdminSuggestionsList() {
                 {items.map(item => {
                   const { scope, pattern } = formatSuggestionSource(item.source);
                   const isTitle = scope === 'Episode Title';
+                  const isActioning = actioningId === item.suggestion_id;
                   return (
-                    <a
-                      key={item.suggestion_id}
-                      href={`/admin?suggestion_id=${item.suggestion_id}`}
-                      className="block px-4 py-3 hover:bg-gray-50 transition-colors"
-                    >
+                    <div key={item.suggestion_id} className="px-4 py-3 hover:bg-gray-50 transition-colors">
                       <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
+                        <a href={`/admin?suggestion_id=${item.suggestion_id}`} className="min-w-0 flex-1 block">
                           <p className="text-sm font-semibold text-gray-900 truncate">{item.candidate_name}</p>
                           <p className="text-xs text-gray-400 truncate mt-0.5">
                             {item.podcast_title} · {item.episode_title}
@@ -209,14 +243,35 @@ export default function AdminSuggestionsList() {
                               ])}
                             </p>
                           )}
+                        </a>
+                        <div className="flex-shrink-0 flex items-center gap-2">
+                          <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap ${
+                            isTitle ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'
+                          }`}>
+                            {scope}{pattern ? ` · ${pattern}` : ''}
+                          </span>
+                          <button
+                            onClick={() => handleApprove(item.suggestion_id)}
+                            disabled={isActioning}
+                            title="Approve"
+                            className="px-2 py-1 rounded text-xs font-medium bg-green-100 text-green-700 hover:bg-green-200 disabled:opacity-50"
+                          >
+                            ✓
+                          </button>
+                          <button
+                            onClick={() => handleReject(item.suggestion_id)}
+                            disabled={isActioning}
+                            title="Reject"
+                            className="px-2 py-1 rounded text-xs font-medium bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50"
+                          >
+                            ✕
+                          </button>
                         </div>
-                        <span className={`flex-shrink-0 inline-block px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap ${
-                          isTitle ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'
-                        }`}>
-                          {scope}{pattern ? ` · ${pattern}` : ''}
-                        </span>
                       </div>
-                    </a>
+                      {actionError?.id === item.suggestion_id && (
+                        <p className="text-xs text-red-500 mt-1">{actionError.message}</p>
+                      )}
+                    </div>
                   );
                 })}
               </div>
