@@ -115,8 +115,12 @@ export default function AdminSuggestionsList() {
 
   // Removes the row locally on success rather than refetching the whole
   // page — scanning a long list and clearing rows one by one shouldn't
-  // reset scroll position or re-request everything after each click.
-  const removeItem = (suggestionId) => {
+  // reset scroll position or re-request everything after each click. Also
+  // decrements the show/pattern dropdown counts, which otherwise go stale
+  // the moment the first row in a filtered batch is resolved — they're
+  // fetched once on mount/filter-change, not on every action.
+  const removeItem = (item) => {
+    const { suggestion_id: suggestionId, apple_podcast_id, source: itemSource } = item;
     setItems(prev => prev.filter(i => i.suggestion_id !== suggestionId));
     setTotal(t => Math.max(0, t - 1));
     setEditedNames(prev => {
@@ -125,6 +129,12 @@ export default function AdminSuggestionsList() {
       delete next[suggestionId];
       return next;
     });
+    setShowOptions(prev => prev.map(s => s.apple_podcast_id === apple_podcast_id
+      ? { ...s, pending_suggestion_count: Math.max(0, (s.pending_suggestion_count || 0) - 1) }
+      : s));
+    setSourceOptions(prev => prev.map(s => s.source === itemSource
+      ? { ...s, count: Math.max(0, s.count - 1) }
+      : s));
   };
 
   // approve_suggestion accepts an optional {name} override — an edited row
@@ -141,15 +151,15 @@ export default function AdminSuggestionsList() {
     setEditingId(item.suggestion_id);
   };
 
-  const handleReject = async (suggestionId) => {
-    setActioningId(suggestionId);
+  const handleReject = async (item) => {
+    setActioningId(item.suggestion_id);
     setActionError(null);
     try {
-      const res = await adminFetch(`${API}/suggestions/${suggestionId}/reject`, { method: 'POST' });
+      const res = await adminFetch(`${API}/suggestions/${item.suggestion_id}/reject`, { method: 'POST' });
       if (!res.ok) throw new Error(`API error ${res.status}`);
-      removeItem(suggestionId);
+      removeItem(item);
     } catch (e) {
-      setActionError({ id: suggestionId, message: e.message || 'Failed to reject' });
+      setActionError({ id: item.suggestion_id, message: e.message || 'Failed to reject' });
     } finally {
       setActioningId(null);
     }
@@ -161,7 +171,7 @@ export default function AdminSuggestionsList() {
     try {
       const res = await adminFetch(`${API}/suggestions/${item.suggestion_id}/approve`, approveOptions(item));
       if (!res.ok) throw new Error(`API error ${res.status}`);
-      removeItem(item.suggestion_id);
+      removeItem(item);
     } catch (e) {
       setActionError({ id: item.suggestion_id, message: e.message || 'Failed to approve' });
     } finally {
@@ -191,7 +201,7 @@ export default function AdminSuggestionsList() {
       try {
         const res = await adminFetch(`${API}/suggestions/${item.suggestion_id}/approve`, approveOptions(item));
         if (!res.ok) throw new Error(`API error ${res.status}`);
-        removeItem(item.suggestion_id);
+        removeItem(item);
         setBulk(prev => prev && { ...prev, done: prev.done + 1 });
       } catch (e) {
         setActionError({ id: item.suggestion_id, message: e.message || 'Failed to approve' });
@@ -392,7 +402,7 @@ export default function AdminSuggestionsList() {
                             ✓
                           </button>
                           <button
-                            onClick={() => handleReject(item.suggestion_id)}
+                            onClick={() => handleReject(item)}
                             disabled={isActioning || !!bulk}
                             title="Reject"
                             className="px-2 py-1 rounded text-xs font-medium bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50"
