@@ -17,10 +17,12 @@ from episode_name_scanner import (
     _valid_name,
     extract_labelled_credits,
     extract_candidate_names,
+    extract_candidate_names_tagged,
     first_name_belongs_to_other,
     extract_title_name_credit,
     title_credit_shows,
 )
+from description_cleaner import coarse_source
 
 
 class TestWordBoundaryMatching:
@@ -387,6 +389,80 @@ class TestExtractCandidateNames:
         names = [n for n, _ in extract_candidate_names(text)]
         assert "Ben Chehebar" in names
         assert "Jason Gates" in names
+
+
+class TestExtractCandidateNamesTagged:
+    """extract_candidate_names_tagged() backs the bulk-suggestion-review
+    groundwork: suggest() stores which specific pattern found a name (e.g.
+    "title_dash", "desc_bio_sentence") on the suggestion, so the review
+    queue can eventually filter/trust batches by pattern instead of only by
+    title-vs-description. extract_candidate_names() must stay a pure
+    (name, context) wrapper for the many existing callers that don't need
+    the tag."""
+
+    def test_wrapper_matches_tagged_names(self):
+        text = "This week we talk with Jane Smith about solar."
+        untagged_names = [n for n, _ in extract_candidate_names(text)]
+        tagged_names = [n for n, _, _ in extract_candidate_names_tagged(text)]
+        assert untagged_names == tagged_names
+
+    def test_intro_pattern_tagged_intro(self):
+        result = extract_candidate_names_tagged("This week we talk with Jane Smith about solar.")
+        assert ("Jane Smith", "intro") in [(n, tag) for n, _, tag in result]
+
+    def test_joins_pattern_tagged_joins(self):
+        result = extract_candidate_names_tagged("Jane Smith joins us to discuss the grid.")
+        assert ("Jane Smith", "joins") in [(n, tag) for n, _, tag in result]
+
+    def test_possessive_pattern_tagged_possessive(self):
+        # Isolated from the "joins" trigger, which also matches this name and
+        # would otherwise win the dedup by running first.
+        result = extract_candidate_names_tagged("Rewiring America's Ari Matusiak of the think tank.")
+        tags = {n: tag for n, _, tag in result}
+        assert tags.get("Ari Matusiak") == "possessive"
+
+    def test_and_continuation_tagged_and(self):
+        text = "We talk with Jane Smith and John Doe about the grid."
+        tags = {n: tag for n, _, tag in extract_candidate_names_tagged(text)}
+        assert tags.get("Jane Smith") == "intro"
+        assert tags.get("John Doe") == "and"
+
+    def test_guest_list_tagged_guest_list(self):
+        text = (
+            "We hear from three guests who are leading us to a world beyond "
+            "petrochemicals and plastics: Michele Fetting, program director at "
+            "the Breathe Project in Pittsburgh; Shilpi Chhotray, co-founder of "
+            "People Over Plastics, a storytelling collective."
+        )
+        tags = {n: tag for n, _, tag in extract_candidate_names_tagged(text)}
+        assert tags.get("Michele Fetting") == "guest_list"
+
+    def test_bio_sentence_tagged_bio_sentence(self):
+        text = "Adam Greenberg is the CEO and co-founder. He previously worked at a Fortune 100 company."
+        tags = {n: tag for n, _, tag in extract_candidate_names_tagged(text)}
+        assert tags.get("Adam Greenberg") == "bio_sentence"
+
+
+class TestCoarseSource:
+    """coarse_source() maps a fine-grained suggestion tag back down to the
+    plain "parsed_title"/"parsed_desc" episode_host.data_source expects —
+    several places (cleanup_zero_guests.py, update_person's rename cleanup)
+    check that column's value with an exact IN (...) list, which a new
+    fine-grained value would silently fall outside of."""
+
+    def test_title_tag_coarsens_to_parsed_title(self):
+        assert coarse_source("title_dash") == "parsed_title"
+        assert coarse_source("title_bio_sentence") == "parsed_title"
+
+    def test_desc_tag_coarsens_to_parsed_desc(self):
+        assert coarse_source("desc_bio_sentence") == "parsed_desc"
+        assert coarse_source("desc_guest_list") == "parsed_desc"
+
+    def test_untagged_legacy_values_pass_through(self):
+        assert coarse_source("parsed_title") == "parsed_title"
+        assert coarse_source("parsed_desc") == "parsed_desc"
+        assert coarse_source("host_first_name") == "host_first_name"
+        assert coarse_source("manual") == "manual"
 
 
 class TestGuestListPattern:

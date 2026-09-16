@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 
 from description_cleaner import (
     clean_description, extract_labelled_credits, name_in_text, first_name_belongs_to_other,
+    coarse_source,
 )
 
 load_dotenv()
@@ -1280,12 +1281,16 @@ async def approve_suggestion(suggestion_id: int, body: NameOverrideRequest = Non
             """, (first_name, last_name))
             host_id = cur.fetchone()['host_id']
 
-        # 2. Link to the source episode
+        # 2. Link to the source episode. episode_host.data_source stays
+        # coarse ("parsed_title"/"parsed_desc") even though suggestions.source
+        # is now tagged with the specific pattern that fired — see
+        # coarse_source()'s docstring for why several other places key off
+        # the coarse value exactly.
         cur.execute("""
             INSERT INTO episode_host (episode_id, host_id, is_guest, role, data_source)
             VALUES (%s, %s, true, 'Guest', %s)
             ON CONFLICT (episode_id, host_id) DO NOTHING
-        """, (episode_id, host_id, source))
+        """, (episode_id, host_id, coarse_source(source)))
 
         # 3. Link every OTHER episode whose title/description names this person
         additional_links = link_matching_episodes(cur, name, host_id, episode_id)

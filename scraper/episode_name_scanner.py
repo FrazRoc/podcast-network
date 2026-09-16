@@ -475,22 +475,29 @@ def title_credit_shows(conn, min_episodes: int = 10, min_rate: float = 0.85) -> 
             if total >= min_episodes and fired / total >= min_rate}
 
 
-def extract_candidate_names(text: str) -> list[tuple[str, str]]:
+def extract_candidate_names_tagged(text: str) -> list[tuple[str, str, str]]:
     """
     Extract candidate person names from text.
-    Returns list of (name, matched_context) tuples.
+    Returns list of (name, matched_context, pattern_tag) triples.
+
+    The tag records which specific heuristic found the name — "intro"
+    (with/featuring/ft./...), "joins", "possessive" (Org's Name), "and"
+    (the "...and NAME" continuation off one of those three), "guest_list",
+    or "bio_sentence" — so suggest() can store it on the suggestion for
+    later filtering/review (see coarse_source() in description_cleaner.py
+    for why episode_host.data_source itself stays coarse-grained).
     """
     found = []
     seen = set()
 
-    def add(name, pos):
+    def add(name, pos, tag):
         name = strip_honorific(strip_possessive_prefix(name))
         if _valid_name(name) and name.lower() not in seen:
             seen.add(name.lower())
             start = max(0, pos - 60)
             end = min(len(text), pos + 80)
             context = text[start:end].strip()
-            found.append((name, context))
+            found.append((name, context, tag))
 
     _AND_RE = re.compile(
         r'\s+and\s+'
@@ -511,31 +518,43 @@ def extract_candidate_names(text: str) -> list[tuple[str, str]]:
             yield and_m.group(1), after_pos + and_m.start()
 
     for m in _INTRO_RE.finditer(text):
-        add(m.group(1), m.start())
+        add(m.group(1), m.start(), 'intro')
         for name, pos in find_and_names(text, m.end()):
-            add(name, pos)
+            add(name, pos, 'and')
 
     for m in _JOINS_RE.finditer(text):
-        add(m.group(1), m.start())
+        add(m.group(1), m.start(), 'joins')
         for name, pos in find_and_names(text, m.end()):
-            add(name, pos)
+            add(name, pos, 'and')
 
     for m in _POSSESSIVE_RE.finditer(text):
         prefix = m.group(0)[:m.group(0).index("'")].strip()
         prefix_last_word = prefix.split()[-1].lower() if prefix else ''
         if prefix_last_word in _POSSESSIVE_NON_ORG_WORDS:
             continue
-        add(m.group(1), m.start())
+        add(m.group(1), m.start(), 'possessive')
         for name, pos in find_and_names(text, m.end()):
-            add(name, pos)
+            add(name, pos, 'and')
 
     for name, pos in find_guest_list_names(text):
-        add(name, pos)
+        add(name, pos, 'guest_list')
 
     for name, pos in find_bio_sentence_names(text):
-        add(name, pos)
+        add(name, pos, 'bio_sentence')
 
     return found
+
+
+def extract_candidate_names(text: str) -> list[tuple[str, str]]:
+    """
+    Extract candidate person names from text.
+    Returns list of (name, matched_context) tuples.
+
+    Thin wrapper over extract_candidate_names_tagged() for the many callers
+    that don't need to know which pattern matched — kept so existing
+    call sites and tests don't have to unpack a third element.
+    """
+    return [(name, context) for name, context, _tag in extract_candidate_names_tagged(text)]
 
 
 # ------------------------------------------------------------------
@@ -824,16 +843,21 @@ def suggest(title_only: bool = False, limit: int = None, show: str = None,
             full_desc = clean_description(description, max_chars=None)
             truncated_desc = clean_description(description)
 
-        candidates = [('parsed_title', n, title[:160]) for n, _ in extract_labelled_credits(title)]
-        candidates += [('parsed_title', n, c) for n, c in extract_candidate_names(title)]
+        # source is tagged with which specific pattern found the name
+        # (e.g. "title_labelled", "desc_bio_sentence") — see
+        # extract_candidate_names_tagged()'s docstring and coarse_source()
+        # in description_cleaner.py, which un-does this before it reaches
+        # episode_host.data_source on approval.
+        candidates = [('title_labelled', n, title[:160]) for n, _ in extract_labelled_credits(title)]
+        candidates += [(f'title_{tag}', n, c) for n, c, tag in extract_candidate_names_tagged(title)]
         if episode['podcast_id'] in title_credit_pids:
             title_credit_name = extract_title_name_credit(title)
             if title_credit_name:
-                candidates.append(('parsed_title', title_credit_name, title[:160]))
+                candidates.append(('title_dash', title_credit_name, title[:160]))
         if full_desc:
-            candidates += [('parsed_desc', n, full_desc[:160]) for n, _ in extract_labelled_credits(full_desc)]
+            candidates += [('desc_labelled', n, full_desc[:160]) for n, _ in extract_labelled_credits(full_desc)]
         if truncated_desc:
-            candidates += [('parsed_desc', n, c) for n, c in extract_candidate_names(truncated_desc)]
+            candidates += [(f'desc_{tag}', n, c) for n, c, tag in extract_candidate_names_tagged(truncated_desc)]
 
         for source, name, context in candidates:
             name_lower = name.lower()

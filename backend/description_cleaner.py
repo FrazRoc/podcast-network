@@ -361,6 +361,25 @@ def _names_from_entry(entry: str, is_guest: bool, found: list, split_on_and: boo
             found.append((name, is_guest))
 
 
+# suggest() tags each suggestion with which specific pattern found it
+# (e.g. "title_dash", "desc_bio_sentence") so the admin review queue can
+# filter/trust batches by pattern rather than only by title-vs-description.
+# But suggestions.source also gets copied straight into episode_host.
+# data_source on approval (see backend/main.py's approve_suggestion), and
+# several places elsewhere key off that column's value EXACTLY —
+# cleanup_zero_guests.py and update_person's rename cleanup both check
+# `data_source IN ('parsed_desc', 'parsed_title', ...)`. Introducing new
+# fine-grained values there directly would silently break those checks, so
+# this coarsens back down at the one place a suggestion's source flows into
+# episode_host — the granularity stays in the suggestions table only.
+def coarse_source(source: str) -> str:
+    if source.startswith('title_'):
+        return 'parsed_title'
+    if source.startswith('desc_'):
+        return 'parsed_desc'
+    return source
+
+
 def extract_labelled_credits(text: str) -> list[tuple[str, bool]]:
     """Names from explicit Host:/Guest:/Connect-with statements, as (name, is_guest).
 
