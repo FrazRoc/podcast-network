@@ -48,7 +48,10 @@ function SortHeader({ label, field, sort, setSort, align = 'right' }) {
 const COVERAGE_METRICS = {
   any:   { label: 'Any credit',   key: 'episodes_with_credit', colLabel: 'Episodes credited',    noun: 'a credit', creditFilter: 'no_credit' },
   host:  { label: 'Host credit',  key: 'episodes_with_host',   colLabel: 'Episodes with a host',  noun: 'a host',   creditFilter: 'no_host' },
-  guest: { label: 'Guest credit', key: 'episodes_with_guest',  colLabel: 'Episodes with a guest', noun: 'a guest',  creditFilter: 'no_guest' },
+  // denomKey: an episode confirmed to genuinely have no guest is excluded
+  // from what "100%" means for this metric, not counted against the show —
+  // see migrate_add_no_guest_confirmed.sql.
+  guest: { label: 'Guest credit', key: 'episodes_with_guest',  colLabel: 'Episodes with a guest', noun: 'a guest',  creditFilter: 'no_guest', denomKey: 'episodes_guest_eligible' },
 };
 
 export default function AdminDiagnostics() {
@@ -73,12 +76,14 @@ export default function AdminDiagnostics() {
   const shows = useMemo(() => {
     if (!data) return [];
     const coverageKey = COVERAGE_METRICS[metric].key;
+    const denomKey = COVERAGE_METRICS[metric].denomKey || 'episodes';
     const rows = data.shows
       .filter(s => s.episodes >= minEpisodes)
       .map(s => ({
         ...s,
-        coverage: pct(s[coverageKey], s.episodes),
+        coverage: pct(s[coverageKey], s[denomKey]),
         coverageCount: s[coverageKey],
+        coverageDenom: s[denomKey],
         pctGuest: pct(s.guest_credits, s.credits),
         pctApple: pct(s.apple_credits, s.credits),
       }));
@@ -214,7 +219,8 @@ export default function AdminDiagnostics() {
                         <td className="px-2 py-1.5 text-right text-gray-500 tabular-nums">{s.episodes.toLocaleString()}</td>
                         <td className="px-2 py-1.5">
                           <Bar value={s.coverage} max={100} color={teal(s.coverage / 100)}
-                               title={`${s.coverageCount} of ${s.episodes} episodes have ${COVERAGE_METRICS[metric].noun}`} />
+                               title={`${s.coverageCount} of ${s.coverageDenom} episodes have ${COVERAGE_METRICS[metric].noun}` +
+                                 (s.coverageDenom !== s.episodes ? ` (${s.episodes - s.coverageDenom} confirmed to have no guest, excluded)` : '')} />
                         </td>
                         <td className={`px-2 py-1.5 text-right tabular-nums ${
                           s.coverage <= 20 && s.scan_descriptions !== false ? 'text-red-600 font-medium' : 'text-gray-600'}`}>

@@ -2011,6 +2011,11 @@ async def get_diagnostics():
                    COUNT(DISTINCT e.episode_id) FILTER (WHERE c.n > 0)            AS episodes_with_credit,
                    COUNT(DISTINCT e.episode_id) FILTER (WHERE c.h > 0)            AS episodes_with_host,
                    COUNT(DISTINCT e.episode_id) FILTER (WHERE c.g > 0)            AS episodes_with_guest,
+                   -- Denominator for guest coverage: an episode confirmed to
+                   -- have no guest at all isn't a coverage gap, so it's
+                   -- excluded from what "100%" means for that metric — see
+                   -- migrate_add_no_guest_confirmed.sql.
+                   COUNT(DISTINCT e.episode_id) FILTER (WHERE NOT e.no_guest_confirmed) AS episodes_guest_eligible,
                    COALESCE(SUM(c.n), 0)                                          AS credits,
                    COALESCE(SUM(c.g), 0)                                          AS guest_credits,
                    COALESCE(SUM(c.apple), 0)                                      AS apple_credits,
@@ -2992,6 +2997,10 @@ class AddCreditRequest(BaseModel):
     is_guest: bool = True
 
 
+class SetNoGuestConfirmedRequest(BaseModel):
+    no_guest_confirmed: bool
+
+
 @app.get("/api/admin/episodes", dependencies=[Depends(verify_admin)])
 async def list_episodes(q: str = "", show: str = "", sort: str = "newest", limit: int = 50, offset: int = 0,
                          credit_filter: str = ""):
@@ -3019,7 +3028,7 @@ async def list_episodes(q: str = "", show: str = "", sort: str = "newest", limit
         credit_filter_sql = """
               AND (
                 %(credit_filter)s = ''
-                OR (%(credit_filter)s = 'no_guest' AND NOT EXISTS (
+                OR (%(credit_filter)s = 'no_guest' AND NOT e.no_guest_confirmed AND NOT EXISTS (
                     SELECT 1 FROM episode_host eh2 WHERE eh2.episode_id = e.episode_id AND eh2.is_guest))
                 OR (%(credit_filter)s = 'no_host' AND NOT EXISTS (
                     SELECT 1 FROM episode_host eh2 WHERE eh2.episode_id = e.episode_id AND NOT eh2.is_guest))
@@ -3030,7 +3039,7 @@ async def list_episodes(q: str = "", show: str = "", sort: str = "newest", limit
 
         cur.execute(f"""
             SELECT
-                e.episode_id, e.title, e.published_date,
+                e.episode_id, e.title, e.published_date, e.no_guest_confirmed,
                 p.podcast_id, p.title AS podcast_title, p.cover_art_url, p.apple_podcast_id,
                 COUNT(DISTINCT eh.host_id) AS credit_count,
                 COUNT(DISTINCT eh.host_id) FILTER (WHERE NOT eh.is_guest) AS host_count,
@@ -3043,7 +3052,7 @@ async def list_episodes(q: str = "", show: str = "", sort: str = "newest", limit
             WHERE (%(q)s = '' OR e.title ILIKE '%%' || %(q)s || '%%' OR p.title ILIKE '%%' || %(q)s || '%%')
               AND (%(show)s = '' OR p.title = %(show)s)
               {credit_filter_sql}
-            GROUP BY e.episode_id, e.title, e.published_date, p.podcast_id, p.title, p.cover_art_url, p.apple_podcast_id
+            GROUP BY e.episode_id, e.title, e.published_date, e.no_guest_confirmed, p.podcast_id, p.title, p.cover_art_url, p.apple_podcast_id
             ORDER BY {order}
             LIMIT %(limit)s OFFSET %(offset)s;
         """, {"q": q, "show": show, "limit": limit, "offset": offset, "credit_filter": credit_filter})
@@ -3072,7 +3081,7 @@ async def get_episode(episode_id: int):
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("""
-            SELECT e.episode_id, e.title, e.description, e.published_date,
+            SELECT e.episode_id, e.title, e.description, e.published_date, e.no_guest_confirmed,
                    p.podcast_id, p.title AS podcast_title, p.cover_art_url, p.apple_podcast_id
             FROM episodes e
             JOIN podcasts p ON e.podcast_id = p.podcast_id
@@ -3105,6 +3114,33 @@ async def get_episode(episode_id: int):
         cur.close()
         conn.close()
         return {**episode, "credits": credits, "pending_suggestions": pending_suggestions}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/episodes/{episode_id}/no_guest", dependencies=[Depends(verify_admin)])
+async def set_no_guest_confirmed(episode_id: int, body: SetNoGuestConfirmedRequest):
+    """Record a human's statement that this episode genuinely has no guest —
+    see migrate_add_no_guest_confirmed.sql for why this needs to be distinct
+    from "the scanner hasn't found one yet"."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE episodes SET no_guest_confirmed = %s WHERE episode_id = %s RETURNING episode_id",
+            (body.no_guest_confirmed, episode_id),
+        )
+        row = cur.fetchone()
+        if not row:
+            cur.close()
+            conn.close()
+            raise HTTPException(status_code=404, detail="Episode not found")
+        conn.commit()
+        cur.close()
+        conn.close()
+        return {"success": True, "episode_id": episode_id, "no_guest_confirmed": body.no_guest_confirmed}
     except HTTPException:
         raise
     except Exception as e:

@@ -156,7 +156,13 @@ def get_pending_suggestions(conn) -> set[str]:
 
 
 def get_all_episodes(conn, show: str = None) -> list[dict]:
-    """Load all episodes with podcast context, optionally filtered by show title."""
+    """Load all episodes with podcast context, optionally filtered by show
+    title. Used only by suggest() — episodes a human has confirmed have no
+    guest at all (episodes.no_guest_confirmed) are excluded, since there is
+    nothing left for a new-name heuristic to usefully find there; any name
+    it did turn up would be a producer, a person mentioned in passing, or
+    similar noise, not a missed guest. See
+    migrate_add_no_guest_confirmed.sql."""
     cur = conn.cursor()
     if show:
         cur.execute("""
@@ -164,7 +170,7 @@ def get_all_episodes(conn, show: str = None) -> list[dict]:
                    p.podcast_id, p.title AS podcast_title
             FROM episodes e
             JOIN podcasts p ON e.podcast_id = p.podcast_id
-            WHERE p.title ILIKE %s
+            WHERE p.title ILIKE %s AND NOT e.no_guest_confirmed
             ORDER BY e.published_date DESC
         """, (f'%{show}%',))
     else:
@@ -173,6 +179,7 @@ def get_all_episodes(conn, show: str = None) -> list[dict]:
                    p.podcast_id, p.title AS podcast_title
             FROM episodes e
             JOIN podcasts p ON e.podcast_id = p.podcast_id
+            WHERE NOT e.no_guest_confirmed
             ORDER BY p.title, e.published_date DESC
         """)
     rows = cur.fetchall()

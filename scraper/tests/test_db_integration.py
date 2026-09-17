@@ -5,7 +5,10 @@ and cross-table lookups are involved — alias matching, host merging, and
 first-name host attribution — which the pure-function tests can't reach.
 """
 from host_extractor import get_or_create_host
-from episode_name_scanner import get_hosts, get_known_names, show_host_first_names, get_already_credited_pairs
+from episode_name_scanner import (
+    get_hosts, get_known_names, show_host_first_names, get_already_credited_pairs,
+    get_all_episodes,
+)
 
 
 def _insert_episode(cur, title="An Episode"):
@@ -254,3 +257,26 @@ class TestCreditSuppression:
             "SELECT COUNT(*) FROM episode_host WHERE episode_id=%s AND host_id=%s",
             (ep, host))
         assert cur.fetchone()[0] == 1
+
+
+class TestNoGuestConfirmedExclusion:
+    """An episode a human has confirmed genuinely has no guest
+    (episodes.no_guest_confirmed) must not be handed to suggest()'s
+    new-name heuristics — see migrate_add_no_guest_confirmed.sql."""
+
+    def test_confirmed_no_guest_episode_is_excluded(self, db_conn):
+        cur = db_conn.cursor()
+        ep = _insert_episode(cur, "Solo Update")
+        cur.execute("UPDATE episodes SET no_guest_confirmed = TRUE WHERE episode_id = %s", (ep,))
+        db_conn.commit()
+
+        episode_ids = {e['episode_id'] for e in get_all_episodes(db_conn)}
+        assert ep not in episode_ids
+
+    def test_unconfirmed_episode_is_still_scanned(self, db_conn):
+        cur = db_conn.cursor()
+        ep = _insert_episode(cur, "Regular Interview")
+        db_conn.commit()
+
+        episode_ids = {e['episode_id'] for e in get_all_episodes(db_conn)}
+        assert ep in episode_ids

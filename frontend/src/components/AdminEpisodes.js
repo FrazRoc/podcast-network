@@ -40,6 +40,7 @@ function EpisodePanel({ episodeId, onChanged }) {
   const [personResults, setPersonResults] = useState([]);
   const [addingHostId, setAddingHostId] = useState(null);
   const [removingHostId, setRemovingHostId] = useState(null);
+  const [savingNoGuest, setSavingNoGuest] = useState(false);
 
   const fetchEpisode = useCallback(async () => {
     if (!episodeId) { setEpisode(null); return; }
@@ -104,6 +105,25 @@ function EpisodePanel({ episodeId, onChanged }) {
     }
   };
 
+  const handleToggleNoGuest = async () => {
+    const next = !episode.no_guest_confirmed;
+    setSavingNoGuest(true);
+    try {
+      const res = await adminFetch(`${API}/episodes/${episodeId}/no_guest`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ no_guest_confirmed: next }),
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || 'Failed to update');
+      await fetchEpisode();
+      onChanged?.();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSavingNoGuest(false);
+    }
+  };
+
   if (!episodeId) {
     return (
       <div className="bg-white rounded-2xl border border-gray-200 p-6 text-center text-sm text-gray-400 md:sticky md:top-6">
@@ -134,6 +154,23 @@ function EpisodePanel({ episodeId, onChanged }) {
               )}
             </div>
           </div>
+
+          {/* No-guest confirmation */}
+          <label className="flex items-start gap-2 mb-5 p-3 rounded-lg bg-gray-50 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              checked={!!episode.no_guest_confirmed}
+              onChange={handleToggleNoGuest}
+              disabled={savingNoGuest}
+              className="mt-0.5"
+            />
+            <span className="text-gray-700">
+              This episode genuinely has no guest
+              <span className="block text-xs text-gray-400">
+                Excludes it from "missing a guest" scans and diagnostics
+              </span>
+            </span>
+          </label>
 
           {/* Current credits */}
           <div className="mb-5">
@@ -424,7 +461,15 @@ export default function AdminEpisodes() {
                             className="w-8 h-8 rounded object-cover flex-shrink-0" />
                         )}
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-gray-900 truncate">{ep.title}</p>
+                          <p className="text-sm font-medium text-gray-900 truncate">
+                            {ep.title}
+                            {ep.no_guest_confirmed && (
+                              <span className="ml-1.5 text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 align-middle"
+                                title="Confirmed: no guest on this episode">
+                                No guest
+                              </span>
+                            )}
+                          </p>
                           <p className="text-xs text-gray-400 truncate">
                             <a href={`/admin/shows?apple_podcast_id=${ep.apple_podcast_id}`}
                               onClick={e => e.stopPropagation()}

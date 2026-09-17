@@ -18,7 +18,7 @@ psql -h "$PSQL_HOST" -d "$DB_NAME" -v ON_ERROR_STOP=1 -f podcast-schema.sql > /d
 for f in migrate_add_data_source.sql migrate_add_host_aliases.sql \
          migrate_add_image_suggestions.sql migrate_add_scan_descriptions.sql \
          migrate_add_scrape_status.sql migrate_add_suggestions.sql \
-         migrate_add_credit_suppressions.sql; do
+         migrate_add_credit_suppressions.sql migrate_add_no_guest_confirmed.sql; do
     psql -h "$PSQL_HOST" -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$f" > /dev/null
 done
 
