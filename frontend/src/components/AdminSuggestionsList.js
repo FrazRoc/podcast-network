@@ -400,7 +400,7 @@ export default function AdminSuggestionsList() {
                   const dupCount = nameCounts[item.candidate_name.toLowerCase()];
                   return (
                     <div key={item.suggestion_id} className="px-4 py-3 hover:bg-gray-50 transition-colors">
-                      <div className="flex items-start justify-between gap-3">
+                      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-3">
                         <div className="min-w-0 flex-1">
                           {isEditing ? (
                             <input
@@ -443,12 +443,12 @@ export default function AdminSuggestionsList() {
                             </span>
                           )}
                           <a href={`/admin?suggestion_id=${item.suggestion_id}`} className="block">
-                            <p className="text-xs text-gray-400 truncate mt-0.5">
+                            <p className="text-xs text-gray-400 mt-0.5">
                               {item.podcast_title} · {item.episode_title}
                               {item.created_at && ` · ${formatDateOnly(item.created_at.slice(0, 10))}`}
                             </p>
                             {item.matched_text && (
-                              <p className="text-xs text-gray-500 truncate mt-1 italic">
+                              <p className="text-xs text-gray-500 mt-1 italic">
                                 {highlightNames(item.matched_text, [
                                   { name: item.candidate_name, className: 'bg-yellow-100 not-italic font-medium text-gray-900' },
                                 ])}
@@ -456,7 +456,7 @@ export default function AdminSuggestionsList() {
                             )}
                           </a>
                         </div>
-                        <div className="flex-shrink-0 flex items-center gap-2">
+                        <div className="flex-shrink-0 flex items-center flex-wrap gap-2">
                           <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap ${
                             isTitle ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'
                           }`}>
