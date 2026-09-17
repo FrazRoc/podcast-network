@@ -377,7 +377,16 @@ export default function AdminSuggestionsList() {
               </button>
             </div>
           ) : items.length === 0 ? (
-            <div className="py-12 text-center text-gray-400 text-sm">No pending suggestions match these filters</div>
+            <div className="py-12 flex flex-col items-center gap-3">
+              <p className="text-sm text-gray-400">No pending suggestions match these filters</p>
+              <button
+                onClick={() => fetchItems(searchQ, showFilter, source, sort, 0, false)}
+                disabled={loading}
+                className="px-3 py-1.5 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700 disabled:opacity-50"
+              >
+                {loading ? 'Loading…' : 'Refresh'}
+              </button>
+            </div>
           ) : (
             <>
               <div className="divide-y divide-gray-100">
