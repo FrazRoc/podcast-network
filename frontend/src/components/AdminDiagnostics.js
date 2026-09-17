@@ -46,9 +46,9 @@ function SortHeader({ label, field, sort, setSort, align = 'right' }) {
 // What "coverage" means in the main table — which of these an episode needs
 // at least one of to count as covered, and how to talk about it.
 const COVERAGE_METRICS = {
-  any:   { label: 'Any credit',   key: 'episodes_with_credit', colLabel: 'Episodes credited',       noun: 'a credit' },
-  host:  { label: 'Host credit',  key: 'episodes_with_host',   colLabel: 'Episodes with a host',     noun: 'a host' },
-  guest: { label: 'Guest credit', key: 'episodes_with_guest',  colLabel: 'Episodes with a guest',    noun: 'a guest' },
+  any:   { label: 'Any credit',   key: 'episodes_with_credit', colLabel: 'Episodes credited',    noun: 'a credit', creditFilter: 'no_credit' },
+  host:  { label: 'Host credit',  key: 'episodes_with_host',   colLabel: 'Episodes with a host',  noun: 'a host',   creditFilter: 'no_host' },
+  guest: { label: 'Guest credit', key: 'episodes_with_guest',  colLabel: 'Episodes with a guest', noun: 'a guest',  creditFilter: 'no_guest' },
 };
 
 export default function AdminDiagnostics() {
@@ -219,6 +219,11 @@ export default function AdminDiagnostics() {
                         <td className={`px-2 py-1.5 text-right tabular-nums ${
                           s.coverage <= 20 && s.scan_descriptions !== false ? 'text-red-600 font-medium' : 'text-gray-600'}`}>
                           {s.coverage}%
+                          {s.coverage < 100 && (
+                            <a href={`/admin/episodes?show=${encodeURIComponent(s.title)}&credit_filter=${COVERAGE_METRICS[metric].creditFilter}`}
+                               title={`View episodes missing ${COVERAGE_METRICS[metric].noun}`}
+                               className="ml-1.5 text-teal-600 hover:text-teal-800 no-underline">→</a>
+                          )}
                         </td>
                         <td className="px-2 py-1.5">
                           <Bar value={s.pctApple} max={100} color={teal(s.pctApple / 100)}

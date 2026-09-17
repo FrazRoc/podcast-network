@@ -2990,10 +2990,16 @@ class AddCreditRequest(BaseModel):
 
 
 @app.get("/api/admin/episodes", dependencies=[Depends(verify_admin)])
-async def list_episodes(q: str = "", show: str = "", sort: str = "newest", limit: int = 50, offset: int = 0):
+async def list_episodes(q: str = "", show: str = "", sort: str = "newest", limit: int = 50, offset: int = 0,
+                         credit_filter: str = ""):
     """List/search episodes with filtering, sorting, and pagination —
     the episode table is far larger than shows or people, so unlike
-    those this can't just return everything and filter client-side."""
+    those this can't just return everything and filter client-side.
+
+    credit_filter narrows to episodes missing a specific kind of credit
+    entirely ("no_guest"/"no_host"/"no_credit") — the worklist for finding
+    real scanner misses to fix, as opposed to browsing everything.
+    """
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -3007,6 +3013,18 @@ async def list_episodes(q: str = "", show: str = "", sort: str = "newest", limit
         }
         order = sort_map.get(sort, "e.published_date DESC NULLS LAST")
 
+        credit_filter_sql = """
+              AND (
+                %(credit_filter)s = ''
+                OR (%(credit_filter)s = 'no_guest' AND NOT EXISTS (
+                    SELECT 1 FROM episode_host eh2 WHERE eh2.episode_id = e.episode_id AND eh2.is_guest))
+                OR (%(credit_filter)s = 'no_host' AND NOT EXISTS (
+                    SELECT 1 FROM episode_host eh2 WHERE eh2.episode_id = e.episode_id AND NOT eh2.is_guest))
+                OR (%(credit_filter)s = 'no_credit' AND NOT EXISTS (
+                    SELECT 1 FROM episode_host eh2 WHERE eh2.episode_id = e.episode_id))
+              )
+        """
+
         cur.execute(f"""
             SELECT
                 e.episode_id, e.title, e.published_date,
@@ -3017,19 +3035,21 @@ async def list_episodes(q: str = "", show: str = "", sort: str = "newest", limit
             LEFT JOIN episode_host eh ON eh.episode_id = e.episode_id
             WHERE (%(q)s = '' OR e.title ILIKE '%%' || %(q)s || '%%' OR p.title ILIKE '%%' || %(q)s || '%%')
               AND (%(show)s = '' OR p.title = %(show)s)
+              {credit_filter_sql}
             GROUP BY e.episode_id, e.title, e.published_date, p.podcast_id, p.title, p.cover_art_url, p.apple_podcast_id
             ORDER BY {order}
             LIMIT %(limit)s OFFSET %(offset)s;
-        """, {"q": q, "show": show, "limit": limit, "offset": offset})
+        """, {"q": q, "show": show, "limit": limit, "offset": offset, "credit_filter": credit_filter})
         items = cur.fetchall()
 
-        cur.execute("""
+        cur.execute(f"""
             SELECT COUNT(*) AS total
             FROM episodes e
             JOIN podcasts p ON e.podcast_id = p.podcast_id
             WHERE (%(q)s = '' OR e.title ILIKE '%%' || %(q)s || '%%' OR p.title ILIKE '%%' || %(q)s || '%%')
-              AND (%(show)s = '' OR p.title = %(show)s);
-        """, {"q": q, "show": show})
+              AND (%(show)s = '' OR p.title = %(show)s)
+              {credit_filter_sql};
+        """, {"q": q, "show": show, "credit_filter": credit_filter})
         total = cur.fetchone()["total"]
 
         cur.close()

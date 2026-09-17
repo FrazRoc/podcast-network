@@ -7,6 +7,13 @@ import { formatDateOnly, highlightNames, stripHtmlForDisplay } from '../adminUti
 const API = `${API_BASE_URL}/api/admin`;
 const PAGE_SIZE = 50;
 
+const CREDIT_FILTERS = [
+  { id: '',          label: 'All episodes' },
+  { id: 'no_guest',  label: 'Missing any guest' },
+  { id: 'no_host',   label: 'Missing any host' },
+  { id: 'no_credit', label: 'Missing all credits' },
+];
+
 const SORTS = [
   { id: 'newest',       label: 'Newest first' },
   { id: 'oldest',       label: 'Oldest first' },
@@ -236,6 +243,11 @@ export default function AdminEpisodes() {
   const [showFilter, setShowFilter] = useState(() => new URLSearchParams(window.location.search).get('show') || '');
   const [showOptions, setShowOptions] = useState([]);
   const [sort, setSort] = useState('newest');
+  // Deep-link support: /admin/episodes?credit_filter=no_guest lands
+  // straight on the worklist of episodes the scanner found nothing on.
+  const [creditFilter, setCreditFilter] = useState(
+    () => new URLSearchParams(window.location.search).get('credit_filter') || ''
+  );
   // Deep-link support: /admin/episodes?episode_id=X auto-opens that episode
   const [selectedId, setSelectedId] = useState(() => {
     const id = new URLSearchParams(window.location.search).get('episode_id');
@@ -243,11 +255,11 @@ export default function AdminEpisodes() {
   });
   const searchRef = useRef(null);
 
-  const fetchEpisodes = useCallback(async (q, show, s, offset, append) => {
+  const fetchEpisodes = useCallback(async (q, show, s, offset, append, creditFilterArg) => {
     setLoading(true);
     setListError(null);
     try {
-      const params = new URLSearchParams({ q, show, sort: s, limit: PAGE_SIZE, offset });
+      const params = new URLSearchParams({ q, show, sort: s, limit: PAGE_SIZE, offset, credit_filter: creditFilterArg });
       const res = await adminFetch(`${API}/episodes?${params}`);
       if (!res.ok) throw new Error(`API error ${res.status}`);
       const data = await res.json();
@@ -263,7 +275,7 @@ export default function AdminEpisodes() {
   // Runs once: the filters are read at call time and applied by the
   // controls themselves, so depending on them would refetch per keystroke.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { fetchEpisodes(searchQ, showFilter, sort, 0, false); }, [fetchEpisodes]);
+  useEffect(() => { fetchEpisodes(searchQ, showFilter, sort, 0, false, creditFilter); }, [fetchEpisodes]);
 
   useEffect(() => {
     adminFetch(`${API}/shows`)
@@ -275,25 +287,33 @@ export default function AdminEpisodes() {
   const handleSearch = (e) => {
     const q = e.target.value;
     setSearchQ(q);
-    fetchEpisodes(q, showFilter, sort, 0, false);
+    fetchEpisodes(q, showFilter, sort, 0, false, creditFilter);
   };
 
   const handleShowFilter = (show) => {
     setShowFilter(show);
-    fetchEpisodes(searchQ, show, sort, 0, false);
+    fetchEpisodes(searchQ, show, sort, 0, false, creditFilter);
   };
 
   const handleSort = (s) => {
     setSort(s);
-    fetchEpisodes(searchQ, showFilter, s, 0, false);
+    fetchEpisodes(searchQ, showFilter, s, 0, false, creditFilter);
+  };
+
+  const handleCreditFilter = (cf) => {
+    setCreditFilter(cf);
+    fetchEpisodes(searchQ, showFilter, sort, 0, false, cf);
+    const params = new URLSearchParams(window.location.search);
+    if (cf) params.set('credit_filter', cf); else params.delete('credit_filter');
+    window.history.replaceState({}, '', `${window.location.pathname}${params.toString() ? `?${params}` : ''}`);
   };
 
   const handleLoadMore = () => {
-    fetchEpisodes(searchQ, showFilter, sort, episodes.length, true);
+    fetchEpisodes(searchQ, showFilter, sort, episodes.length, true, creditFilter);
   };
 
   const handleChanged = () => {
-    fetchEpisodes(searchQ, showFilter, sort, 0, false);
+    fetchEpisodes(searchQ, showFilter, sort, 0, false, creditFilter);
   };
 
   return (
@@ -313,7 +333,7 @@ export default function AdminEpisodes() {
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none pr-7" />
               {searchQ && (
                 <button
-                  onClick={() => { setSearchQ(''); fetchEpisodes('', showFilter, sort, 0, false); }}
+                  onClick={() => { setSearchQ(''); fetchEpisodes('', showFilter, sort, 0, false, creditFilter); }}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-lg leading-none"
                 >×</button>
               )}
@@ -324,6 +344,11 @@ export default function AdminEpisodes() {
                 className="text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:border-teal-400">
                 <option value="">All Shows</option>
                 {showOptions.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <select value={creditFilter} onChange={e => handleCreditFilter(e.target.value)}
+                className={`text-xs border rounded px-2 py-1 focus:outline-none focus:border-teal-400 ${
+                  creditFilter ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-gray-200'}`}>
+                {CREDIT_FILTERS.map(cf => <option key={cf.id} value={cf.id}>{cf.label}</option>)}
               </select>
               <span className="text-xs text-gray-400">Sort:</span>
               <select value={sort} onChange={e => handleSort(e.target.value)}
@@ -343,7 +368,7 @@ export default function AdminEpisodes() {
                 <p className="text-xs text-gray-500">{listError}</p>
                 <button
                   className="px-3 py-1.5 bg-teal-600 text-white text-sm rounded hover:bg-teal-700"
-                  onClick={() => fetchEpisodes(searchQ, showFilter, sort, 0, false)}
+                  onClick={() => fetchEpisodes(searchQ, showFilter, sort, 0, false, creditFilter)}
                 >
                   Retry
                 </button>
