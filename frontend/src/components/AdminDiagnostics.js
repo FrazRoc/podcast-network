@@ -34,11 +34,20 @@ function SortHeader({ label, field, sort, setSort, align = 'right' }) {
   );
 }
 
+// What "coverage" means in the main table — which of these an episode needs
+// at least one of to count as covered, and how to talk about it.
+const COVERAGE_METRICS = {
+  any:   { label: 'Any credit',   key: 'episodes_with_credit', colLabel: 'Episodes credited',       noun: 'a credit' },
+  host:  { label: 'Host credit',  key: 'episodes_with_host',   colLabel: 'Episodes with a host',     noun: 'a host' },
+  guest: { label: 'Guest credit', key: 'episodes_with_guest',  colLabel: 'Episodes with a guest',    noun: 'a guest' },
+};
+
 export default function AdminDiagnostics() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [sort, setSort] = useState({ field: 'coverage', dir: 'asc' });
   const [minEpisodes, setMinEpisodes] = useState(20);
+  const [metric, setMetric] = useState('any');
 
   const load = useCallback(async () => {
     try {
@@ -54,12 +63,13 @@ export default function AdminDiagnostics() {
 
   const shows = useMemo(() => {
     if (!data) return [];
+    const coverageKey = COVERAGE_METRICS[metric].key;
     const rows = data.shows
       .filter(s => s.episodes >= minEpisodes)
       .map(s => ({
         ...s,
-        coverage: pct(s.episodes_with_credit, s.episodes),
-        guestCoverage: pct(s.episodes_with_guest, s.episodes),
+        coverage: pct(s[coverageKey], s.episodes),
+        coverageCount: s[coverageKey],
         pctGuest: pct(s.guest_credits, s.credits),
         pctApple: pct(s.apple_credits, s.credits),
       }));
@@ -69,7 +79,7 @@ export default function AdminDiagnostics() {
       if (typeof av === 'string') return dir * av.localeCompare(bv);
       return dir * (av - bv);
     });
-  }, [data, sort, minEpisodes]);
+  }, [data, sort, minEpisodes, metric]);
 
   const perEpisode = data?.credits_per_episode || [];
   const maxBucket = Math.max(1, ...perEpisode.map(b => b.episodes));
@@ -134,20 +144,37 @@ export default function AdminDiagnostics() {
             <div className="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6">
               <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
                 <h2 className="text-base font-semibold text-gray-900">Coverage and confidence by show</h2>
-                <label className="text-xs text-gray-500">
-                  min episodes{' '}
-                  <select
-                    value={minEpisodes}
-                    onChange={e => setMinEpisodes(Number(e.target.value))}
-                    className="border border-gray-300 rounded px-1 py-0.5"
-                  >
-                    {[0, 20, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
-                  </select>
-                </label>
+                <div className="flex items-center gap-3">
+                  <div className="flex text-xs border border-gray-300 rounded overflow-hidden">
+                    {Object.entries(COVERAGE_METRICS).map(([key, m]) => (
+                      <button
+                        key={key}
+                        onClick={() => setMetric(key)}
+                        className={`px-2 py-1 ${metric === key
+                          ? 'bg-teal-600 text-white'
+                          : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+                      >
+                        {m.label}
+                      </button>
+                    ))}
+                  </div>
+                  <label className="text-xs text-gray-500">
+                    min episodes{' '}
+                    <select
+                      value={minEpisodes}
+                      onChange={e => setMinEpisodes(Number(e.target.value))}
+                      className="border border-gray-300 rounded px-1 py-0.5"
+                    >
+                      {[0, 20, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                  </label>
+                </div>
               </div>
               <p className="text-sm text-gray-500 mb-4">
-                How much of each show is credited at all, and what those credits rest on.
-                Apple states its credits; everything else is inferred from the episode text.
+                {metric === 'any'
+                  ? 'How much of each show is credited at all, and what those credits rest on.'
+                  : `How many episodes are missing ${COVERAGE_METRICS[metric].noun === 'a host' ? 'any host credit' : 'any guest credit'}.`}
+                {' '}Apple states its credits; everything else is inferred from the episode text.
               </p>
 
               <div className="overflow-x-auto">
@@ -156,7 +183,7 @@ export default function AdminDiagnostics() {
                     <tr className="border-b border-gray-200 text-xs">
                       <SortHeader label="Show" field="title" sort={sort} setSort={setSort} align="left" />
                       <SortHeader label="Episodes" field="episodes" sort={sort} setSort={setSort} />
-                      <th className="px-2 py-2 text-left font-medium text-gray-400 w-40">Episodes credited</th>
+                      <th className="px-2 py-2 text-left font-medium text-gray-400 w-40">{COVERAGE_METRICS[metric].colLabel}</th>
                       <SortHeader label="%" field="coverage" sort={sort} setSort={setSort} />
                       <th className="px-2 py-2 text-left font-medium text-gray-400 w-40">From Apple</th>
                       <SortHeader label="%" field="pctApple" sort={sort} setSort={setSort} />
@@ -178,7 +205,7 @@ export default function AdminDiagnostics() {
                         <td className="px-2 py-1.5 text-right text-gray-500 tabular-nums">{s.episodes.toLocaleString()}</td>
                         <td className="px-2 py-1.5">
                           <Bar value={s.coverage} max={100} color={teal(s.coverage / 100)}
-                               title={`${s.episodes_with_credit} of ${s.episodes} episodes`} />
+                               title={`${s.coverageCount} of ${s.episodes} episodes have ${COVERAGE_METRICS[metric].noun}`} />
                         </td>
                         <td className={`px-2 py-1.5 text-right tabular-nums ${
                           s.coverage <= 20 && s.scan_descriptions !== false ? 'text-red-600 font-medium' : 'text-gray-600'}`}>

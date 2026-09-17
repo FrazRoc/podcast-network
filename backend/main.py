@@ -2005,6 +2005,7 @@ async def get_diagnostics():
                    p.title,
                    COUNT(DISTINCT e.episode_id)                                   AS episodes,
                    COUNT(DISTINCT e.episode_id) FILTER (WHERE c.n > 0)            AS episodes_with_credit,
+                   COUNT(DISTINCT e.episode_id) FILTER (WHERE c.h > 0)            AS episodes_with_host,
                    COUNT(DISTINCT e.episode_id) FILTER (WHERE c.g > 0)            AS episodes_with_guest,
                    COALESCE(SUM(c.n), 0)                                          AS credits,
                    COALESCE(SUM(c.g), 0)                                          AS guest_credits,
@@ -2017,6 +2018,7 @@ async def get_diagnostics():
             LEFT JOIN (
                 SELECT episode_id,
                        COUNT(*)                                              AS n,
+                       COUNT(*) FILTER (WHERE NOT is_guest)                  AS h,
                        COUNT(*) FILTER (WHERE is_guest)                      AS g,
                        COUNT(*) FILTER (WHERE data_source = 'apple_verified') AS apple,
                        COUNT(*) FILTER (WHERE data_source LIKE 'parsed%')     AS inferred
