@@ -255,6 +255,16 @@ export default function AdminEpisodes() {
   });
   const searchRef = useRef(null);
 
+  // Keeps the address bar pointed at whatever's open, so the URL for a
+  // specific episode can be copied straight out and shared without any
+  // extra step.
+  const selectEpisode = (id) => {
+    setSelectedId(id);
+    const params = new URLSearchParams(window.location.search);
+    if (id) params.set('episode_id', id); else params.delete('episode_id');
+    window.history.replaceState({}, '', `${window.location.pathname}${params.toString() ? `?${params}` : ''}`);
+  };
+
   const fetchEpisodes = useCallback(async (q, show, s, offset, append, creditFilterArg) => {
     setLoading(true);
     setListError(null);
@@ -385,7 +395,7 @@ export default function AdminEpisodes() {
                         className={`flex items-center gap-3 px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors ${
                           isSelected ? 'bg-teal-50 border-l-2 border-teal-500' : ''
                         }`}
-                        onClick={() => setSelectedId(isSelected ? null : ep.episode_id)}>
+                        onClick={() => selectEpisode(isSelected ? null : ep.episode_id)}>
                         {ep.cover_art_url && (
                           <img src={ep.cover_art_url} alt={ep.podcast_title}
                             className="w-8 h-8 rounded object-cover flex-shrink-0" />
@@ -399,7 +409,8 @@ export default function AdminEpisodes() {
                               {ep.podcast_title}
                             </a>
                             {ep.published_date && ` · ${formatDateOnly(ep.published_date)}`}
-                            {' · '}{ep.credit_count} credit{ep.credit_count !== 1 ? 's' : ''}
+                            {' · '}{ep.host_count} host{ep.host_count !== 1 ? 's' : ''}
+                            {', '}{ep.guest_count} guest{ep.guest_count !== 1 ? 's' : ''}
                           </p>
                         </div>
                       </div>

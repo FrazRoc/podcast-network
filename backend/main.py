@@ -3029,7 +3029,9 @@ async def list_episodes(q: str = "", show: str = "", sort: str = "newest", limit
             SELECT
                 e.episode_id, e.title, e.published_date,
                 p.podcast_id, p.title AS podcast_title, p.cover_art_url, p.apple_podcast_id,
-                COUNT(DISTINCT eh.host_id) AS credit_count
+                COUNT(DISTINCT eh.host_id) AS credit_count,
+                COUNT(DISTINCT eh.host_id) FILTER (WHERE NOT eh.is_guest) AS host_count,
+                COUNT(DISTINCT eh.host_id) FILTER (WHERE eh.is_guest) AS guest_count
             FROM episodes e
             JOIN podcasts p ON e.podcast_id = p.podcast_id
             LEFT JOIN episode_host eh ON eh.episode_id = e.episode_id
