@@ -21,6 +21,9 @@ from episode_name_scanner import (
     first_name_belongs_to_other,
     extract_title_name_credit,
     title_credit_shows,
+    extract_title_name_end_credit,
+    title_name_end_shows,
+    TITLE_NAME_END_SHOWS_APPLE_IDS,
 )
 from description_cleaner import coarse_source
 
@@ -802,6 +805,67 @@ class TestTitleCreditShows:
         db_conn.commit()
 
         assert podcast_id not in title_credit_shows(db_conn, min_episodes=10, min_rate=0.85)
+
+
+class TestTitleNameEndCredit:
+    """Real incidents: episodes 139585 ("D2D Millionaire Goes Global -
+    Lenny Gray"), 50067, and 56185 named the guest at the END of the title
+    instead of the start, with no trigger word. Unlike the leading-name
+    shape, this one does NOT get a firing-rate-computed gate — checked by
+    hand, Climate CEOs fires on this shape about as often as The
+    Solarpreneur but is mostly topic-phrase noise where it does, so the
+    gate here is a manually verified show list instead."""
+
+    def test_name_after_dash(self):
+        assert extract_title_name_end_credit("D2D Millionaire Goes Global - Lenny Gray") == "Lenny Gray"
+
+    def test_name_after_pipe(self):
+        assert extract_title_name_end_credit(
+            "When Solar Works But the Savings Don't | Charlotte Meerstadt"
+        ) == "Charlotte Meerstadt"
+
+    def test_name_after_colon(self):
+        assert extract_title_name_end_credit(
+            "The 40-Year VC Lesson: Relationships Beat Transactions | Brad Feld"
+        ) == "Brad Feld"
+
+    def test_topic_phrase_ending_is_a_known_false_positive(self):
+        # The raw pattern alone can't tell a clickbait headline's final
+        # Title-Cased words from a real name — this exact title (Climate
+        # CEOs) is why that show is deliberately left out of
+        # TITLE_NAME_END_SHOWS_APPLE_IDS rather than gated in by firing
+        # rate. Documented, not silently swallowed: the show-level allowlist
+        # is what keeps this out of production, not the function itself.
+        result = extract_title_name_end_credit(
+            "Smarter Agriculture: 30x More Produce, 96% Less Water with AI-Powered Greenhouses"
+        )
+        assert result != "AI-Powered Greenhouses"  # not even the "expected" wrong answer
+        assert result is not None  # ...and it's still not a real name either way
+
+
+class TestTitleNameEndShows:
+    def test_resolves_allowlisted_apple_id_to_podcast_id(self, db_conn):
+        cur = db_conn.cursor()
+        allowlisted_apple_id = next(iter(TITLE_NAME_END_SHOWS_APPLE_IDS))
+        cur.execute(
+            "INSERT INTO podcasts (title, apple_podcast_id) VALUES (%s, %s) RETURNING podcast_id",
+            ("An Allowlisted Show", allowlisted_apple_id)
+        )
+        podcast_id = cur.fetchone()[0]
+        db_conn.commit()
+
+        assert podcast_id in title_name_end_shows(db_conn)
+
+    def test_show_not_in_allowlist_excluded(self, db_conn):
+        cur = db_conn.cursor()
+        cur.execute(
+            "INSERT INTO podcasts (title, apple_podcast_id) VALUES (%s, %s) RETURNING podcast_id",
+            ("Some Other Show", "not-allowlisted-apple-id")
+        )
+        podcast_id = cur.fetchone()[0]
+        db_conn.commit()
+
+        assert podcast_id not in title_name_end_shows(db_conn)
 
 
 class TestSurnameIndex:

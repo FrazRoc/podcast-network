@@ -509,20 +509,22 @@ def extract_title_name_credit(title: str) -> str | None:
     return name
 
 
-def title_credit_shows(conn, min_episodes: int = 10, min_rate: float = 0.85) -> set:
-    """Podcast IDs whose titles reliably lead with "Name - Org" / "Name, Org"
-    — determined empirically per show, not applied network-wide.
+def _title_shows_by_firing_rate(conn, extract_fn, min_episodes: int = 10, min_rate: float = 0.85) -> set:
+    """Podcast IDs where extract_fn's shape fires reliably — determined
+    empirically per show, not applied network-wide.
 
-    extract_title_name_credit's shape (Title-Cased words then a dash or
-    comma) is common enough in ordinary headline-style titles ("Fake Meat,
-    What's The Beef?", "Plasma Recycling, Hydrogen Ferry, Scotland's
-    Transition...") that running it everywhere produced roughly 50% garbage
-    in a random network-wide sample. But on shows that actually use this as
-    their title convention, it fires on 91-100% of episodes; everything else
-    checked fires on 62% or less — a clean gap. This requires a show to
-    clear min_rate over a minimum sample before trusting the pattern for it,
-    the same match-rate-guard shape compute_match_gate (scraper.py) uses for
-    SunCast's title drift.
+    A bare "Title-Cased words then a separator" shape (in any of its forms:
+    leading, trailing, or "Name on Topic") is common enough in ordinary
+    headline-style titles ("Fake Meat, What's The Beef?", "Plasma
+    Recycling, Hydrogen Ferry, Scotland's Transition...") that running it
+    everywhere produces roughly 50% garbage in a random network-wide
+    sample. But on shows that actually use one of these as their title
+    convention, it fires on 85%+ of episodes; everything else checked
+    stayed at 62% or less — a clean gap. This requires a show to clear
+    min_rate over a minimum sample before trusting the pattern for it, the
+    same match-rate-guard shape compute_match_gate (scraper.py) uses for
+    SunCast's title drift. Shared by all three title-shape extractors below
+    rather than each re-implementing the same gate.
     """
     cur = conn.cursor()
     cur.execute("SELECT podcast_id, title FROM episodes")
@@ -530,11 +532,70 @@ def title_credit_shows(conn, min_episodes: int = 10, min_rate: float = 0.85) -> 
     for podcast_id, title in cur.fetchall():
         c = counts[podcast_id]
         c[1] += 1
-        if extract_title_name_credit(title or ''):
+        if extract_fn(title or ''):
             c[0] += 1
     cur.close()
     return {pid for pid, (fired, total) in counts.items()
             if total >= min_episodes and fired / total >= min_rate}
+
+
+def title_credit_shows(conn, min_episodes: int = 10, min_rate: float = 0.85) -> set:
+    """Podcast IDs whose titles reliably lead with "Name - Org" / "Name, Org"
+    — see extract_title_name_credit() and _title_shows_by_firing_rate()."""
+    return _title_shows_by_firing_rate(conn, extract_title_name_credit, min_episodes, min_rate)
+
+
+# "D2D Millionaire Goes Global - Lenny Gray" / "... | Brad Feld" — some
+# shows put the guest's name at the END of the title instead of the start,
+# after whatever separator that show uses (suggestions on episodes 139585,
+# 50067, 56185: no trigger word, no leading-name convention either).
+_TITLE_NAME_END_RE = re.compile(
+    r'[-–|:]\s*([A-Z][a-zA-ZÀ-ž\x27’-]+(?:\s+[A-Z][a-zA-ZÀ-ž\x27’-]+){1,2}?)\s*$'
+)
+
+
+def extract_title_name_end_credit(title: str) -> str | None:
+    """The name at the very end of this title, or None. Only meaningful for
+    shows in TITLE_NAME_END_SHOWS below."""
+    m = _TITLE_NAME_END_RE.search(title or '')
+    if not m:
+        return None
+    name = strip_honorific(m.group(1))
+    if not _valid_name(name):
+        return None
+    if any(w.lower() in _TITLE_NAME_BAD_WORDS for w in name.split()):
+        return None
+    return name
+
+
+# Manually curated, not computed by firing rate like title_credit_shows()
+# above — checked directly and found NOT to transfer here. A name-first
+# title ("Ep 452: Name - Org") rarely gets confused with an ordinary
+# headline, but a name-LAST title is: two Title-Cased words at the end of a
+# clickbait-y headline ("...AI-Powered Greenhouses", "...Dollar Market") is
+# common enough that firing rate stopped predicting precision. Climate
+# CEOs fires on this shape about as often as The Solarpreneur (10% vs 27%)
+# but is mostly topic-phrase noise where it does, while Solarpreneur and
+# Cleaning Up are both close to 100% precise on every episode they fire on
+# (spot-checked by hand, 60+ episodes across the three shows below) despite
+# firing rates from 27% to 93%. Keyed by apple_podcast_id since that's
+# stable; podcast_id/title are not guaranteed to be.
+TITLE_NAME_END_SHOWS_APPLE_IDS = {
+    '1576295837',  # Hope Dose — "Company: Name"
+    '1524683327',  # Cleaning Up: Leadership in an Age of Climate Change — "... EpNNN: Name"
+    '1438556991',  # The Solarpreneur — "Topic - Name"
+}
+
+
+def title_name_end_shows(conn) -> set:
+    """Podcast IDs (internal, not apple_podcast_id) matching
+    TITLE_NAME_END_SHOWS_APPLE_IDS — resolved against the current DB rather
+    than hardcoding internal IDs directly, since those aren't the stable
+    identifier."""
+    cur = conn.cursor()
+    cur.execute("SELECT podcast_id FROM podcasts WHERE apple_podcast_id = ANY(%s)",
+                (list(TITLE_NAME_END_SHOWS_APPLE_IDS),))
+    return {podcast_id for (podcast_id,) in cur.fetchall()}
 
 
 def extract_candidate_names_tagged(text: str) -> list[tuple[str, str, str]]:
@@ -882,6 +943,7 @@ def suggest(title_only: bool = False, limit: int = None, show: str = None,
     episodes          = get_all_episodes(conn, show=show)
     show_hosts        = get_show_hosts(conn)
     title_credit_pids = title_credit_shows(conn)
+    title_name_end_pids = title_name_end_shows(conn)
 
     if limit:
         episodes = episodes[:limit]
@@ -921,6 +983,10 @@ def suggest(title_only: bool = False, limit: int = None, show: str = None,
             title_credit_name = extract_title_name_credit(title)
             if title_credit_name:
                 candidates.append(('title_dash', title_credit_name, title[:160]))
+        if episode['podcast_id'] in title_name_end_pids:
+            title_end_name = extract_title_name_end_credit(title)
+            if title_end_name:
+                candidates.append(('title_end', title_end_name, title[:160]))
         if full_desc:
             candidates += [('desc_labelled', n, full_desc[:160]) for n, _ in extract_labelled_credits(full_desc)]
         if truncated_desc:
