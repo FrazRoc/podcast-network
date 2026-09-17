@@ -41,6 +41,8 @@ function EpisodePanel({ episodeId, onChanged }) {
   const [addingHostId, setAddingHostId] = useState(null);
   const [removingHostId, setRemovingHostId] = useState(null);
   const [savingNoGuest, setSavingNoGuest] = useState(false);
+  const [actioningSuggestionId, setActioningSuggestionId] = useState(null);
+  const [suggestionError, setSuggestionError] = useState(null);
 
   const fetchEpisode = useCallback(async () => {
     if (!episodeId) { setEpisode(null); return; }
@@ -121,6 +123,42 @@ function EpisodePanel({ episodeId, onChanged }) {
       setError(e.message);
     } finally {
       setSavingNoGuest(false);
+    }
+  };
+
+  // Same endpoints the batch Suggestions List page uses — approve/reject
+  // there sweep EVERY pending suggestion sharing this candidate_name
+  // server-side, not just this episode's row, so a re-fetch afterward is
+  // enough to pick up whatever the backend already resolved. A 404 means
+  // "already reviewed" (resolved from that other page in the meantime),
+  // which is the desired outcome, not a failure.
+  const handleApproveSuggestion = async (suggestionId) => {
+    setActioningSuggestionId(suggestionId);
+    setSuggestionError(null);
+    try {
+      const res = await adminFetch(`${API}/suggestions/${suggestionId}/approve`, { method: 'POST' });
+      if (!res.ok && res.status !== 404) throw new Error(`API error ${res.status}`);
+      await fetchEpisode();
+      onChanged?.();
+    } catch (e) {
+      setSuggestionError({ id: suggestionId, message: e.message || 'Failed to approve' });
+    } finally {
+      setActioningSuggestionId(null);
+    }
+  };
+
+  const handleRejectSuggestion = async (suggestionId) => {
+    setActioningSuggestionId(suggestionId);
+    setSuggestionError(null);
+    try {
+      const res = await adminFetch(`${API}/suggestions/${suggestionId}/reject`, { method: 'POST' });
+      if (!res.ok && res.status !== 404) throw new Error(`API error ${res.status}`);
+      await fetchEpisode();
+      onChanged?.();
+    } catch (e) {
+      setSuggestionError({ id: suggestionId, message: e.message || 'Failed to reject' });
+    } finally {
+      setActioningSuggestionId(null);
     }
   };
 
@@ -226,12 +264,38 @@ function EpisodePanel({ episodeId, onChanged }) {
                 </a>
               </div>
               <div className="space-y-1.5">
-                {episode.pending_suggestions.map(s => (
-                  <a key={s.suggestion_id} href={`/admin?suggestion_id=${s.suggestion_id}`}
-                    className="block py-1.5 px-3 bg-amber-50 rounded-lg text-sm text-amber-900 hover:bg-amber-100">
-                    {s.candidate_name}
-                  </a>
-                ))}
+                {episode.pending_suggestions.map(s => {
+                  const isActioning = actioningSuggestionId === s.suggestion_id;
+                  return (
+                    <div key={s.suggestion_id}>
+                      <div className="flex items-center gap-2 py-1.5 px-3 bg-amber-50 rounded-lg text-sm">
+                        <a href={`/admin?suggestion_id=${s.suggestion_id}`}
+                          className="flex-1 min-w-0 truncate text-amber-900 hover:underline">
+                          {s.candidate_name}
+                        </a>
+                        <button
+                          onClick={() => handleApproveSuggestion(s.suggestion_id)}
+                          disabled={isActioning}
+                          title="Approve"
+                          className="flex-shrink-0 px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700 hover:bg-green-200 disabled:opacity-50"
+                        >
+                          ✓
+                        </button>
+                        <button
+                          onClick={() => handleRejectSuggestion(s.suggestion_id)}
+                          disabled={isActioning}
+                          title="Reject"
+                          className="flex-shrink-0 px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      {suggestionError?.id === s.suggestion_id && (
+                        <p className="text-xs text-red-500 mt-1 px-3">{suggestionError.message}</p>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
