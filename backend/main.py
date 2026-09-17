@@ -1594,6 +1594,54 @@ async def reject_suggestion(suggestion_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class RejectNameRequest(BaseModel):
+    candidate_name: str
+
+
+@app.post("/api/admin/rejected-names", dependencies=[Depends(verify_admin)])
+async def add_rejected_name(body: RejectNameRequest):
+    """Pre-emptively blocklist a name with no suggestion yet to reject —
+    e.g. a person who is discussed but never a guest (a head of state named
+    in an episode's description), where a fix elsewhere might otherwise
+    surface them later. Mirrors reject_suggestion's rejected_names insert,
+    minus the parts that only make sense for an existing suggestion row."""
+    try:
+        name = body.candidate_name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="candidate_name is required")
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            UPDATE suggestions
+            SET status = 'rejected', reviewed_at = NOW()
+            WHERE LOWER(candidate_name) = LOWER(%s) AND status = 'pending'
+        """, (name,))
+        also_rejected = cur.rowcount
+
+        cur.execute("""
+            INSERT INTO rejected_names (candidate_name)
+            VALUES (%s)
+            ON CONFLICT (candidate_name) DO NOTHING
+        """, (name,))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return {
+            "success": True,
+            "name": name,
+            "also_rejected": also_rejected,
+            "message": f"Added '{name}' to permanent blocklist",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/admin/suggestions/{suggestion_id}/skip", dependencies=[Depends(verify_admin)])
 async def skip_suggestion(suggestion_id: int):
     """Move a suggestion to the back of the queue."""
@@ -2058,9 +2106,37 @@ async def get_diagnostics():
         """)
         totals = cur.fetchone()
 
+        # Names whose UTF-8 bytes were read as Latin-1 somewhere upstream and
+        # re-encoded, so "Balázs" is stored as "BalÃ¡zs". The scanner can never
+        # match the real spelling against the mangled one, so these people sit
+        # frozen at whatever credits they arrived with. Ã and Â are the
+        # signature of that double-encoding; â€ covers mangled punctuation and
+        # ï¿½ the replacement character.
+        cur.execute("""
+            SELECT host_id,
+                   first_name || ' ' || last_name AS stored,
+                   convert_from(convert_to(first_name, 'LATIN1'), 'UTF8') || ' ' ||
+                   convert_from(convert_to(last_name,  'LATIN1'), 'UTF8') AS repaired,
+                   (SELECT COUNT(*) FROM episode_host eh WHERE eh.host_id = h.host_id) AS credits
+            FROM hosts h
+            WHERE first_name || ' ' || last_name ~ 'Ã|Â|â€|ï¿½'
+              -- convert_to(...,'LATIN1') raises on anything outside that
+              -- range, which would take the whole diagnostics page down with
+              -- it. Mangled text only ever contains Latin-1 characters by
+              -- definition, so requiring that loses nothing and cannot throw.
+              AND first_name || ' ' || last_name ~ ('^[ -' || U&'\00FF' || ']+$')
+            ORDER BY credits DESC, stored
+        """)
+        mangled_names = cur.fetchall()
+
         cur.close()
         conn.close()
-        return {"shows": shows, "credits_per_episode": credits_per_episode, "totals": totals}
+        return {
+            "shows": shows,
+            "credits_per_episode": credits_per_episode,
+            "totals": totals,
+            "mangled_names": mangled_names,
+        }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

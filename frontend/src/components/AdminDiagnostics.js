@@ -96,6 +96,7 @@ export default function AdminDiagnostics() {
   }, [data, sort, minEpisodes, metric]);
 
   const perEpisode = data?.credits_per_episode || [];
+  const mangled = data?.mangled_names || [];
   const maxBucket = Math.max(1, ...perEpisode.map(b => b.episodes));
   const totalEpisodes = perEpisode.reduce((n, b) => n + b.episodes, 0);
 
@@ -123,6 +124,43 @@ export default function AdminDiagnostics() {
 
         {data && (
           <>
+            {mangled.length > 0 && (
+              <div className="bg-white rounded-2xl border border-amber-200 p-4 sm:p-5">
+                <h2 className="text-base font-semibold text-gray-900 mb-1">
+                  {mangled.length} name{mangled.length === 1 ? '' : 's'} with mangled characters
+                </h2>
+                <p className="text-sm text-gray-500 mb-3">
+                  Stored with their UTF-8 bytes read as Latin-1, so "Balázs" becomes
+                  "BalÃ¡zs". The scanner matches the real spelling in an episode
+                  against the stored one, so these people can never gain a credit
+                  and sit frozen at whatever they arrived with.
+                </p>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs uppercase tracking-wide text-gray-400">
+                      <th className="pb-1 font-medium">Stored as</th>
+                      <th className="pb-1 font-medium">Should be</th>
+                      <th className="pb-1 font-medium text-right">Credits</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {mangled.map(m => (
+                      <tr key={m.host_id} className="border-t border-gray-100">
+                        <td className="py-1.5 font-mono text-xs text-red-600">{m.stored}</td>
+                        <td className="py-1.5">
+                          <a href={`/admin/people?host_id=${m.host_id}`}
+                             className="font-medium hover:text-teal-600 hover:underline">
+                            {m.repaired}
+                          </a>
+                        </td>
+                        <td className="py-1.5 text-right text-gray-500">{m.credits}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
             {(uncovered.length > 0 || missingHosts.length > 0) && (
               <div className="bg-white rounded-2xl border border-gray-200 p-4 sm:p-5">
                 <h2 className="text-base font-semibold text-gray-900 mb-3">Worth looking at</h2>
