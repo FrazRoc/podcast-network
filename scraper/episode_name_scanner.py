@@ -265,25 +265,42 @@ _INTRO_RE = re.compile(
         # list above ("reporter", "activist", ...) are meant to be captured
         # as part of this group too and cleaned up by strip_honorific()
         # downstream, which knows a much longer list of them.
-        ([A-Z][a-zA-ZÀ-ž\x27’-]+(?:[^\S\n]+[A-Z][a-zA-ZÀ-ž\x27’-]+){1,2})
+        # Lazy ({1,2}?, not {1,2}): "speaking with Brendan Banfield Co-Founder
+        # and CEO of Gridsight" — greedy always tries the 3-word span first
+        # ("Brendan Banfield Co-Founder"), and since "and" is itself a valid
+        # stop word, it never backs off to the correct 2-word "Brendan
+        # Banfield" that a lazy match finds by trying the shortest span the
+        # stop-word lookahead accepts, first.
+        ([A-Z][a-zA-ZÀ-ž\x27’-]+(?:[^\S\n]+[A-Z][a-zA-ZÀ-ž\x27’-]+){1,2}?)
         # Stop before: " of", " at", " from", ",", possessive, title words,
         # or a dash/closing paren — "(ft. Ben James - Climate Tech
         # specialist)" has no other stop word between the name and the dash.
-        (?=\s+(?:of|at|from|about|for|on|to|and)|,|'s|\s+(?:CEO|CTO|CFO|COO|Director|Founder)|\s*[-–)]|$)
+        # "(?:Co[- ]?)?Founder" catches "Co-Founder"/"Cofounder" too, not
+        # just the bare word — otherwise the lazy match above still has to
+        # fall through to the 3-word span for exactly the case above.
+        # \b after every word here is load-bearing, not decorative: without
+        # it "and" matches as a bare prefix of "Anderson", "COO" of
+        # "Cooper", "to" of "Toronto" — making the lazy match above stop
+        # one word early ("TED's Chris Anderson's ..." → wrongly "TED's
+        # Chris", dropping "Anderson", once lazy tries the short cut first).
+        (?=\s+(?:of|at|from|about|for|on|to|and)\b|,|'s|\s+(?:CEO|CTO|CFO|COO|Director|(?:Co[- ]?)?Founder)\b|\s*[-–)]|$)
     """,
     re.VERBOSE | re.IGNORECASE
 )
 
 # "Name joins me/us"
 _JOINS_RE = re.compile(
-    r'([A-Z][a-zA-Z\x27’-]+(?:[^\S\n]+[A-Z][a-zA-Z\x27’-]+){1,2})\s+joins?\s+(?:me|us|host|the\s+show)',
+    r'([A-Z][a-zA-Z\x27’-]+(?:[^\S\n]+[A-Z][a-zA-Z\x27’-]+){1,2}?)\s+joins?\s+(?:me|us|host|the\s+show)',
     re.IGNORECASE
 )
 
 # Possessive org then name: "Rewiring America's Ari Matusiak"
 _POSSESSIVE_RE = re.compile(
-    r"[A-Z][A-Za-z&\s,.\-]+?'s\s+([A-Z][a-zA-Z\x27’-]+(?:[^\S\n]+[A-Z][a-zA-Z\x27’-]+){1,2})"
-    r"(?=\s+(?:of|at|from|about|for|,|and)|$)",
+    r"[A-Z][A-Za-z&\s,.\-]+?'s\s+([A-Z][a-zA-Z\x27’-]+(?:[^\S\n]+[A-Z][a-zA-Z\x27’-]+){1,2}?)"
+    # \b: same word-boundary bug as _INTRO_RE's lookahead — without it
+    # "and" bare-matches into "Anderson" and the lazy quantifier above
+    # stops one word early.
+    r"(?=\s+(?:of|at|from|about|for|,|and)\b|$)",
 )
 
 # Episode titles are Title Cased, so common words that happen to take an
@@ -316,7 +333,7 @@ _GUEST_LIST_INTRO_RE = re.compile(
 _GUEST_LIST_ITEM_RE = re.compile(
     # strip_html() leaves a space where a tag was, e.g. "Fetting</a>," becomes
     # "Fetting ," — the optional \s* before the comma absorbs that.
-    r'^\s*(?:and\s+)?([A-Z][a-zA-Z\x27’-]+(?:[^\S\n]+[A-Z][a-zA-Z\x27’-]+){1,2})\s*,\s+[a-z]'
+    r'^\s*(?:and\s+)?([A-Z][a-zA-Z\x27’-]+(?:[^\S\n]+[A-Z][a-zA-Z\x27’-]+){1,2}?)\s*,\s+[a-z]'
 )
 
 
@@ -351,7 +368,7 @@ def strip_possessive_prefix(name: str) -> str:
 # a sentence boundary so it doesn't fire mid-sentence ("the CEO of Tesla is
 # Elon Musk" isn't "the CEO of Tesla, is, Elon").
 _BIO_IS_RE = re.compile(
-    r'(?:^|[.!?]\s+)([A-Z][a-zA-ZÀ-ž\x27’-]+(?:[^\S\n]+[A-Z][a-zA-ZÀ-ž\x27’-]+){1,2})'
+    r'(?:^|[.!?]\s+)([A-Z][a-zA-ZÀ-ž\x27’-]+(?:[^\S\n]+[A-Z][a-zA-ZÀ-ž\x27’-]+){1,2}?)'
     r'\s+is\s+(?:the|a|an)\s+'
 )
 
@@ -417,7 +434,7 @@ def find_bio_sentence_names(text):
 # used, since a later "Name, Role, Org" segment would otherwise itself look
 # like a second person ("... - Independent Researcher, University of...").
 _TITLE_NAME_SEP_RE = re.compile(
-    r'([A-Z][a-zA-ZÀ-ž\x27’-]+(?:\s+[A-Z][a-zA-ZÀ-ž\x27’-]+){1,2})'
+    r'([A-Z][a-zA-ZÀ-ž\x27’-]+(?:\s+[A-Z][a-zA-ZÀ-ž\x27’-]+){1,2}?)'
     r'\s*[-–,]\s*(?=\S)'
 )
 

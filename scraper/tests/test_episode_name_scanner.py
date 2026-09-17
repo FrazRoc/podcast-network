@@ -390,6 +390,33 @@ class TestExtractCandidateNames:
         assert "Ben Chehebar" in names
         assert "Jason Gates" in names
 
+    def test_job_title_word_not_swept_into_name(self):
+        # Real incident (suggestion 9391, reported after this shape had been
+        # fixed "half a dozen times" one suggestion at a time): the greedy
+        # 3-word capture always tried "Brendan Banfield Co-Founder" first,
+        # and since "and" is itself a valid stop word right after it, never
+        # backed off to the correct 2-word "Brendan Banfield" a lazy match
+        # finds instead. Suggestion 9387 was the identical shape with "CEO".
+        cases = [
+            ("we are speaking with Brendan Banfield Co-Founder and CEO of Gridsight.", "Brendan Banfield"),
+            ("discussing EV charging with Zak Lefevre CEO and Founder of ChargeLab.", "Zak Lefevre"),
+        ]
+        for text, expected in cases:
+            names = [n for n, _ in extract_candidate_names(text)]
+            assert expected in names, text
+            assert not any(n.startswith(expected + " ") for n in names), names
+
+    def test_stop_word_requires_boundary_not_bare_prefix(self):
+        # The lazy fix above only works because the stop-word lookahead
+        # requires a real word boundary — without it, "and" bare-matches as
+        # a prefix of "Anderson" and the lazy match stops one word early,
+        # dropping the surname ("TED's Chris Anderson's ..." -> wrongly
+        # "TED's Chris" instead of "Chris Anderson"). Same bug class as
+        # "COO" prefix-matching "Cooper", "to" prefix-matching "Toronto".
+        title = "Filling the Climate Finance Gap with TED's Chris Anderson's All Aboard Fund"
+        names = [n for n, _ in extract_candidate_names(title)]
+        assert "Chris Anderson" in names
+
 
 class TestExtractCandidateNamesTagged:
     """extract_candidate_names_tagged() backs the bulk-suggestion-review
