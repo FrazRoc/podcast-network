@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { API_BASE_URL } from '../config';
 import { adminFetch } from '../adminAuth';
 import AdminHeader from './AdminHeader';
@@ -31,6 +31,13 @@ export default function AdminSuggestionsList() {
   // and so Approve All can pick it up too, not just the single-row button.
   const [editedNames, setEditedNames] = useState({});
   const [editingId, setEditingId] = useState(null);
+  // approve/reject both sweep EVERY pending suggestion sharing the same
+  // candidate_name (case-insensitive) on the backend — one name showing up
+  // on several episodes is common, and resolving one row there resolves
+  // all of them at once, server-side, regardless of which is visible here.
+  // Tracked in a ref (not state) so the async Approve All loop always reads
+  // the latest set without waiting on a re-render.
+  const resolvedNamesRef = useRef(new Set());
   const [searchQ, setSearchQ] = useState('');
   const [showFilter, setShowFilter] = useState(
     () => new URLSearchParams(window.location.search).get('apple_podcast_id') || ''
@@ -151,12 +158,29 @@ export default function AdminSuggestionsList() {
     setEditingId(item.suggestion_id);
   };
 
+  const isAlreadyResolved = (item) => resolvedNamesRef.current.has(item.candidate_name.toLowerCase());
+
+  // Records both spellings — the row's original name and any override typed
+  // in for it — so a later row for either spelling is recognized as already
+  // handled instead of round-tripping to a 404.
+  const markResolved = (item) => {
+    resolvedNamesRef.current.add(item.candidate_name.toLowerCase());
+    const edited = editedNames[item.suggestion_id]?.trim();
+    if (edited) resolvedNamesRef.current.add(edited.toLowerCase());
+  };
+
   const handleReject = async (item) => {
+    if (isAlreadyResolved(item)) { removeItem(item); return; }
     setActioningId(item.suggestion_id);
     setActionError(null);
     try {
       const res = await adminFetch(`${API}/suggestions/${item.suggestion_id}/reject`, { method: 'POST' });
+      // 404 here means "already reviewed" — another row for the same name
+      // was resolved first and the backend's own name-based sweep already
+      // caught this one. That's the desired outcome, not a failure.
+      if (res.status === 404) { markResolved(item); removeItem(item); return; }
       if (!res.ok) throw new Error(`API error ${res.status}`);
+      markResolved(item);
       removeItem(item);
     } catch (e) {
       setActionError({ id: item.suggestion_id, message: e.message || 'Failed to reject' });
@@ -166,11 +190,14 @@ export default function AdminSuggestionsList() {
   };
 
   const handleApprove = async (item) => {
+    if (isAlreadyResolved(item)) { removeItem(item); return; }
     setActioningId(item.suggestion_id);
     setActionError(null);
     try {
       const res = await adminFetch(`${API}/suggestions/${item.suggestion_id}/approve`, approveOptions(item));
+      if (res.status === 404) { markResolved(item); removeItem(item); return; }
       if (!res.ok) throw new Error(`API error ${res.status}`);
+      markResolved(item);
       removeItem(item);
     } catch (e) {
       setActionError({ id: item.suggestion_id, message: e.message || 'Failed to approve' });
@@ -198,9 +225,21 @@ export default function AdminSuggestionsList() {
 
     for (const item of targets) {
       if (bulkStopRef.current) break;
+      if (isAlreadyResolved(item)) {
+        removeItem(item);
+        setBulk(prev => prev && { ...prev, done: prev.done + 1 });
+        continue;
+      }
       try {
         const res = await adminFetch(`${API}/suggestions/${item.suggestion_id}/approve`, approveOptions(item));
+        if (res.status === 404) {
+          markResolved(item);
+          removeItem(item);
+          setBulk(prev => prev && { ...prev, done: prev.done + 1 });
+          continue;
+        }
         if (!res.ok) throw new Error(`API error ${res.status}`);
+        markResolved(item);
         removeItem(item);
         setBulk(prev => prev && { ...prev, done: prev.done + 1 });
       } catch (e) {
@@ -212,6 +251,18 @@ export default function AdminSuggestionsList() {
   };
 
   const handleStopBulk = () => { bulkStopRef.current = true; };
+
+  // How many *other* visible rows share this exact name — shown as a badge
+  // so it's clear why resolving one row can make several others vanish at
+  // once (they're the same person, same backend name-based sweep).
+  const nameCounts = useMemo(() => {
+    const counts = {};
+    for (const item of items) {
+      const key = item.candidate_name.toLowerCase();
+      counts[key] = (counts[key] || 0) + 1;
+    }
+    return counts;
+  }, [items]);
 
   return (
     <div className="min-h-screen bg-gray-100 font-sans">
@@ -337,6 +388,7 @@ export default function AdminSuggestionsList() {
                   const isEditing = editingId === item.suggestion_id;
                   const hasEdit = item.suggestion_id in editedNames && editedNames[item.suggestion_id].trim() !== item.candidate_name;
                   const displayName = editedNames[item.suggestion_id] ?? item.candidate_name;
+                  const dupCount = nameCounts[item.candidate_name.toLowerCase()];
                   return (
                     <div key={item.suggestion_id} className="px-4 py-3 hover:bg-gray-50 transition-colors">
                       <div className="flex items-start justify-between gap-3">
@@ -372,6 +424,14 @@ export default function AdminSuggestionsList() {
                             >
                               {displayName}{hasEdit && <span className="text-xs text-teal-500 font-normal"> (edited)</span>}
                             </button>
+                          )}
+                          {!isEditing && dupCount > 1 && (
+                            <span
+                              title={`${dupCount} visible rows share this name — resolving one resolves all of them`}
+                              className="ml-1.5 inline-block px-1.5 py-0 rounded-full text-[10px] font-medium bg-amber-100 text-amber-700 align-middle"
+                            >
+                              ×{dupCount}
+                            </span>
                           )}
                           <a href={`/admin?suggestion_id=${item.suggestion_id}`} className="block">
                             <p className="text-xs text-gray-400 truncate mt-0.5">
