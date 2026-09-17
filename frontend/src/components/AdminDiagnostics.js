@@ -20,6 +20,15 @@ function Bar({ value, max, color, title }) {
   );
 }
 
+function ShowLink({ show, children }) {
+  return (
+    <a href={`/admin/shows?apple_podcast_id=${show.apple_podcast_id}`}
+       className="hover:text-teal-600 hover:underline">
+      {children}
+    </a>
+  );
+}
+
 function SortHeader({ label, field, sort, setSort, align = 'right' }) {
   const active = sort.field === field;
   return (
@@ -120,7 +129,7 @@ export default function AdminDiagnostics() {
                     <ul className="text-gray-800 space-y-0.5">
                       {uncovered.slice(0, 6).map(s => (
                         <li key={s.podcast_id}>
-                          {s.title} <span className="text-gray-400">— {s.coverage}% of {s.episodes.toLocaleString()}</span>
+                          <ShowLink show={s}>{s.title}</ShowLink> <span className="text-gray-400">— {s.coverage}% of {s.episodes.toLocaleString()}</span>
                         </li>
                       ))}
                     </ul>
@@ -132,7 +141,7 @@ export default function AdminDiagnostics() {
                     <ul className="text-gray-800 space-y-0.5">
                       {missingHosts.slice(0, 6).map(s => (
                         <li key={s.podcast_id}>
-                          {s.title} <span className="text-gray-400">— {s.pctGuest}% guest</span>
+                          <ShowLink show={s}>{s.title}</ShowLink> <span className="text-gray-400">— {s.pctGuest}% guest</span>
                         </li>
                       ))}
                     </ul>
@@ -194,7 +203,7 @@ export default function AdminDiagnostics() {
                     {shows.map(s => (
                       <tr key={s.podcast_id} className="border-b border-gray-100 hover:bg-gray-50">
                         <td className="px-2 py-1.5 text-gray-900">
-                          {s.title}
+                          <ShowLink show={s}>{s.title}</ShowLink>
                           {s.scan_descriptions === false && (
                             <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 align-middle"
                                   title="Descriptions are deliberately not scanned for this show, so low coverage is expected">
@@ -244,7 +253,7 @@ export default function AdminDiagnostics() {
                   <tbody>
                     {shows.filter(s => s.credits > 0).map(s => (
                       <tr key={s.podcast_id} className="border-b border-gray-100 hover:bg-gray-50">
-                        <td className="px-2 py-1.5 text-gray-900">{s.title}</td>
+                        <td className="px-2 py-1.5 text-gray-900"><ShowLink show={s}>{s.title}</ShowLink></td>
                         <td className="px-2 py-1.5 text-right text-gray-500 tabular-nums">{s.credits.toLocaleString()}</td>
                         <td className="px-2 py-1.5">
                           {/* Two hues here because the split is a comparison of

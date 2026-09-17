@@ -2003,6 +2003,7 @@ async def get_diagnostics():
         cur.execute("""
             SELECT p.podcast_id,
                    p.title,
+                   p.apple_podcast_id,
                    COUNT(DISTINCT e.episode_id)                                   AS episodes,
                    COUNT(DISTINCT e.episode_id) FILTER (WHERE c.n > 0)            AS episodes_with_credit,
                    COUNT(DISTINCT e.episode_id) FILTER (WHERE c.h > 0)            AS episodes_with_host,
@@ -2024,7 +2025,7 @@ async def get_diagnostics():
                        COUNT(*) FILTER (WHERE data_source LIKE 'parsed%')     AS inferred
                 FROM episode_host GROUP BY episode_id
             ) c ON c.episode_id = e.episode_id
-            GROUP BY p.podcast_id, p.title, p.scan_descriptions
+            GROUP BY p.podcast_id, p.title, p.apple_podcast_id, p.scan_descriptions
             ORDER BY p.title
         """)
         shows = cur.fetchall()
