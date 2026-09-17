@@ -387,6 +387,10 @@ _BIO_SENTENCE_LEAD_BAD = {
     'additionally', 'similarly', 'conversely', 'therefore', 'thus', 'hence',
     'nonetheless', 'nevertheless', 'before', 'after', 'when', 'while',
     'since', 'because', 'also', 'and', 'but', 'so', 'if', 'then',
+    # Common line/sentence-initial prepositions — "In Mississippi, ...",
+    # "At Hyperion Search, ..." satisfy the guest-bio-line shape below
+    # (Capitalized Words, comma, more text) just as well as a real name.
+    'in', 'at', 'on', 'for', 'with', 'from', 'by',
 }
 
 # A company is essentially never described as "is a/the founder/reporter/
@@ -422,6 +426,39 @@ def find_bio_sentence_names(text):
         if not _BIO_ROLE_WORDS_RE.search(window):
             continue
         yield name, m.start()
+
+
+# A show note "guest bio block" states each guest as its own line/paragraph:
+# "Sebastian Manhart, Senior Policy Advisor at Carbonfuture", one per line,
+# with no semicolons (so find_guest_list_names' colon-then-semicolon-list
+# shape never fires), no "Guest:" label, and no trigger word before the
+# name (suggestion 13440 — 4 of 6 guests listed exactly this way went
+# uncredited; the other 2 were separately caught by other patterns).
+# Role text here is often Title Cased ("Senior Policy Advisor"), unlike
+# _GUEST_LIST_ITEM_RE's lowercase-starting descriptor, so this needs its
+# own item pattern rather than reusing that one.
+_GUEST_BIO_LINE_RE = re.compile(
+    r'^\s*(?:and\s+)?([A-Z][a-zA-ZÀ-ž\x27’-]+(?:[^\S\n]+[A-Z][a-zA-ZÀ-ž\x27’-]+){1,2}?)\s*,\s+[A-Za-z]',
+    re.MULTILINE | re.IGNORECASE
+)
+
+
+def find_guest_bio_lines(text):
+    """Names from a one-guest-per-line bio block (see _GUEST_BIO_LINE_RE
+    above). Requires 2+ matching lines before yielding any, the same
+    confidence bar find_guest_list_names uses, so an isolated "Name,
+    something" line elsewhere in a description doesn't fire alone."""
+    candidates = []
+    for m in _GUEST_BIO_LINE_RE.finditer(text):
+        name = strip_honorific(m.group(1))
+        if not _valid_name(name):
+            continue
+        if name.split()[0].lower() in _BIO_SENTENCE_LEAD_BAD:
+            continue
+        candidates.append((name, m.start(1)))
+    if len(candidates) < 2:
+        return
+    yield from candidates
 
 
 # Interview-format shows (Titans Of Nuclear, Leaders in Cleantech, ...) put
@@ -558,6 +595,9 @@ def extract_candidate_names_tagged(text: str) -> list[tuple[str, str, str]]:
 
     for name, pos in find_bio_sentence_names(text):
         add(name, pos, 'bio_sentence')
+
+    for name, pos in find_guest_bio_lines(text):
+        add(name, pos, 'guest_bio_line')
 
     return found
 

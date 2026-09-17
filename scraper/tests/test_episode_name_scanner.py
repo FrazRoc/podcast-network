@@ -591,6 +591,64 @@ class TestBioSentencePattern:
         assert "The CEO" not in names
 
 
+class TestGuestBioLinePattern:
+    """Real incident: The Carbon Removal Show's description for suggestion
+    13440 listed 6 guests, one per line/paragraph — "Sebastian Manhart,
+    Senior Policy Advisor at Carbonfuture" — with no semicolons (so
+    find_guest_list_names' colon-then-list shape never fires), no "Guest:"
+    label, and no trigger word before the name. 4 of the 6 went uncredited;
+    the other 2 were separately caught by other patterns."""
+
+    def test_one_guest_per_line_block(self):
+        text = (
+            "Huge thanks to all our guests in this episode:\n\n"
+            "Sebastian Manhart, Senior Policy Advisor at Carbonfuture\n\n"
+            "Oliver Katz, Founder and CEO of Unbound Summits\n\n"
+            "Michelle Li, Founder and Executive Director of Women and Climate\n\n"
+            "Gabrielle Walker, Co-Founder of CUR8 and Founder of Rethinking Removals\n\n"
+            "Bilha Ndirangu, CEO at Great Carbon Valley\n\n"
+            "Ted Christie-Miller, Director of Carbon Removal at BeZero Carbon\n\n"
+            "And our very own Producer Ben, making his on-mic debut for The Carbon Removal Show!"
+        )
+        names = [n for n, _ in extract_candidate_names(text)]
+        for expected in ["Sebastian Manhart", "Oliver Katz", "Michelle Li",
+                          "Gabrielle Walker", "Bilha Ndirangu", "Ted Christie-Miller"]:
+            assert expected in names, (expected, names)
+        assert not any("Producer" in n or "Our" in n for n in names)
+
+    def test_title_cased_role_text_still_matches(self):
+        # Unlike find_guest_list_names' item pattern, the role text here is
+        # often Title Cased ("Senior Policy Advisor"), not lowercase-leading
+        # — this pattern must not require a lowercase letter after the comma.
+        text = (
+            "Name One, Senior Policy Advisor at Org One\n\n"
+            "Name Two, Founder and CEO of Org Two"
+        )
+        names = [n for n, _ in extract_candidate_names(text)]
+        assert "Name One" in names
+        assert "Name Two" in names
+
+    def test_single_line_does_not_fire(self):
+        # Needs 2+ matching lines to be confident this is a real bio block
+        # rather than one arbitrary "Name, clause" line elsewhere.
+        text = "Just one line here: Jane Smith, a climate reporter."
+        names = [n for n, _ in extract_candidate_names(text)]
+        assert "Jane Smith" not in names
+
+    def test_line_initial_preposition_not_swallowed_into_name(self):
+        # "In Mississippi, ..." / "At Hyperion Search, ..." satisfy the
+        # Capitalized-words-then-comma shape as readily as a real name.
+        text = (
+            "Name One, Senior Policy Advisor at Org One\n\n"
+            "Name Two, Founder and CEO of Org Two\n\n"
+            "In Mississippi, the picture looks different.\n\n"
+            "At Hyperion Search, recruiting trends are shifting."
+        )
+        names = [n for n, _ in extract_candidate_names(text)]
+        assert "In Mississippi" not in names
+        assert "At Hyperion" not in names
+
+
 class TestExtractTitleNameCredit:
     """Real incident: Titans Of Nuclear had 194 of 200 episodes with zero
     credits (suggestion 3570 — "Juliann Edwards - Chair, United States Women
