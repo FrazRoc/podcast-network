@@ -591,6 +591,37 @@ class TestBioSentencePattern:
         assert "The CEO" not in names
 
 
+class TestPipeAndPossessiveStopWords:
+    """Real incidents, all from titles the "no_guest" episode filter
+    surfaced: "with"/possessive triggers that already existed but failed
+    on real title shapes because their stop-word lookaheads were too
+    narrow or too literal."""
+
+    def test_pipe_stops_a_with_trigger_name(self):
+        # "... with Todd Denton | Lithic Industries | Ep 244" — the show's
+        # own "Title | Org | Ep NNN" convention gave the name capture
+        # nothing to stop at; a literal "|" wasn't a recognized stop word.
+        text = "Stabilize Soil, Save Water with Todd Denton | Lithic Industries | Ep 244"
+        names = [n for n, _ in extract_candidate_names(text)]
+        assert "Todd Denton" in names
+
+    def test_possessive_accepts_curly_apostrophe(self):
+        # Apple's own feed titles routinely use the curly apostrophe
+        # ("DOE’s Audrey Robertson ...") — the possessive pattern's prefix
+        # marker was a literal straight "'", which never matches it.
+        text = "DOE’s Audrey Robertson on Growing US Critical Mineral Supply"
+        names = [n for n, _ in extract_candidate_names(text)]
+        assert "Audrey Robertson" in names
+
+    def test_possessive_stop_words_match_intro_re(self):
+        # _POSSESSIVE_RE's stop-word list was missing "on"/"to", present in
+        # _INTRO_RE's — no reason for the two to disagree on what a name is
+        # allowed to be followed by.
+        text = "Rewiring America's Ari Matusiak on the state of the grid."
+        names = [n for n, _ in extract_candidate_names(text)]
+        assert "Ari Matusiak" in names
+
+
 class TestGuestBioLinePattern:
     """Real incident: The Carbon Removal Show's description for suggestion
     13440 listed 6 guests, one per line/paragraph — "Sebastian Manhart,

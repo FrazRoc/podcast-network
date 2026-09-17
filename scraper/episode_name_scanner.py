@@ -283,7 +283,10 @@ _INTRO_RE = re.compile(
         # "Cooper", "to" of "Toronto" — making the lazy match above stop
         # one word early ("TED's Chris Anderson's ..." → wrongly "TED's
         # Chris", dropping "Anderson", once lazy tries the short cut first).
-        (?=\s+(?:of|at|from|about|for|on|to|and)\b|,|'s|\s+(?:CEO|CTO|CFO|COO|Director|(?:Co[- ]?)?Founder)\b|\s*[-–)]|$)
+        # "|" (a literal pipe) is its own stop signal: "... with Todd
+        # Denton | Lithic Industries | Ep 244" has no other stop word
+        # between the name and the show's "Title | Org | Ep NNN" convention.
+        (?=\s+(?:of|at|from|about|for|on|to|and)\b|,|'s|\s+(?:CEO|CTO|CFO|COO|Director|(?:Co[- ]?)?Founder)\b|\s*[-–)|]|$)
     """,
     re.VERBOSE | re.IGNORECASE
 )
@@ -296,11 +299,16 @@ _JOINS_RE = re.compile(
 
 # Possessive org then name: "Rewiring America's Ari Matusiak"
 _POSSESSIVE_RE = re.compile(
-    r"[A-Z][A-Za-z&\s,.\-]+?'s\s+([A-Z][a-zA-Z\x27’-]+(?:[^\S\n]+[A-Z][a-zA-Z\x27’-]+){1,2}?)"
+    # [\x27’] not a bare "'": Apple's own feed titles routinely use the
+    # curly apostrophe ("DOE’s Audrey Robertson ..."), which a literal
+    # straight quote silently never matches.
+    r"[A-Z][A-Za-z&\s,.\-]+?[\x27’]s\s+([A-Z][a-zA-Z\x27’-]+(?:[^\S\n]+[A-Z][a-zA-Z\x27’-]+){1,2}?)"
     # \b: same word-boundary bug as _INTRO_RE's lookahead — without it
     # "and" bare-matches into "Anderson" and the lazy quantifier above
-    # stops one word early.
-    r"(?=\s+(?:of|at|from|about|for|,|and)\b|$)",
+    # stops one word early. "on"/"to" added to match _INTRO_RE's list —
+    # "DOE’s Audrey Robertson on Growing ..." has no reason to stop short
+    # of what that pattern already recognizes.
+    r"(?=\s+(?:of|at|from|about|for|on|to|and)\b|,|'s|\s*[-–)|]|$)",
 )
 
 # Episode titles are Title Cased, so common words that happen to take an
@@ -582,7 +590,9 @@ def extract_candidate_names_tagged(text: str) -> list[tuple[str, str, str]]:
             add(name, pos, 'and')
 
     for m in _POSSESSIVE_RE.finditer(text):
-        prefix = m.group(0)[:m.group(0).index("'")].strip()
+        # Whichever apostrophe style matched — see _POSSESSIVE_RE's [\x27’]s.
+        apos_pos = min((i for i in (m.group(0).find("'"), m.group(0).find("’")) if i != -1), default=-1)
+        prefix = m.group(0)[:apos_pos].strip() if apos_pos != -1 else ''
         prefix_last_word = prefix.split()[-1].lower() if prefix else ''
         if prefix_last_word in _POSSESSIVE_NON_ORG_WORDS:
             continue
