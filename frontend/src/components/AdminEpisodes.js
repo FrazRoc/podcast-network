@@ -176,6 +176,29 @@ function EpisodePanel({ episodeId, onChanged }) {
             )}
           </div>
 
+          {/* Pending suggestions */}
+          {episode.pending_suggestions?.length > 0 && (
+            <div className="mb-5">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-semibold text-amber-600 uppercase tracking-wide">
+                  Pending Suggestions ({episode.pending_suggestions.length})
+                </p>
+                <a href={`/admin/suggestions/list?episode_id=${episodeId}`}
+                  className="text-xs text-teal-600 hover:text-teal-800 hover:underline">
+                  Review all →
+                </a>
+              </div>
+              <div className="space-y-1.5">
+                {episode.pending_suggestions.map(s => (
+                  <a key={s.suggestion_id} href={`/admin?suggestion_id=${s.suggestion_id}`}
+                    className="block py-1.5 px-3 bg-amber-50 rounded-lg text-sm text-amber-900 hover:bg-amber-100">
+                    {s.candidate_name}
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Add a host/guest */}
           <div className="mb-5">
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Add Host or Guest</p>
@@ -411,6 +434,16 @@ export default function AdminEpisodes() {
                             {ep.published_date && ` · ${formatDateOnly(ep.published_date)}`}
                             {' · '}{ep.host_count} host{ep.host_count !== 1 ? 's' : ''}
                             {', '}{ep.guest_count} guest{ep.guest_count !== 1 ? 's' : ''}
+                            {ep.pending_suggestions > 0 && (
+                              <>
+                                {' · '}
+                                <a href={`/admin/suggestions/list?episode_id=${ep.episode_id}`}
+                                  onClick={e => e.stopPropagation()}
+                                  className="text-amber-600 hover:text-amber-800 hover:underline">
+                                  {ep.pending_suggestions} pending
+                                </a>
+                              </>
+                            )}
                           </p>
                         </div>
                       </div>

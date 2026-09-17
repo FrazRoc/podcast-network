@@ -46,6 +46,13 @@ export default function AdminSuggestionsList() {
   const [source, setSource] = useState('');
   const [sourceOptions, setSourceOptions] = useState([]);
   const [sort, setSort] = useState('newest');
+  // Deep-link support: /admin/suggestions/list?episode_id=X scopes the view
+  // to one episode's own pending suggestions — how the Episodes page links
+  // here. Not a UI control like the other filters; cleared via its own
+  // banner below since it's meant to be a one-off, not a persistent filter.
+  const [episodeIdFilter, setEpisodeIdFilter] = useState(
+    () => new URLSearchParams(window.location.search).get('episode_id') || ''
+  );
   const searchRef = useRef(null);
 
   const fetchSources = useCallback((show) => {
@@ -57,13 +64,14 @@ export default function AdminSuggestionsList() {
       .catch(() => {});
   }, []);
 
-  const fetchItems = useCallback(async (q, show, src, s, offset, append) => {
+  const fetchItems = useCallback(async (q, show, src, s, offset, append, episodeId) => {
     setLoading(true);
     setListError(null);
     try {
       const params = new URLSearchParams({ search: q, sort: s, limit: PAGE_SIZE, offset });
       if (show) params.set('apple_podcast_id', show);
       if (src) params.set('source', src);
+      if (episodeId) params.set('episode_id', episodeId);
       const res = await adminFetch(`${API}/suggestions/list?${params}`);
       if (!res.ok) throw new Error(`API error ${res.status}`);
       const data = await res.json();
@@ -79,7 +87,7 @@ export default function AdminSuggestionsList() {
   // Runs once: filters are applied by the controls themselves, so depending
   // on them here would refetch per keystroke.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { fetchItems(searchQ, showFilter, source, sort, 0, false); }, [fetchItems]);
+  useEffect(() => { fetchItems(searchQ, showFilter, source, sort, 0, false, episodeIdFilter); }, [fetchItems]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchSources(showFilter); }, [fetchSources]);
 
@@ -93,14 +101,14 @@ export default function AdminSuggestionsList() {
   const handleSearch = (e) => {
     const q = e.target.value;
     setSearchQ(q);
-    fetchItems(q, showFilter, source, sort, 0, false);
+    fetchItems(q, showFilter, source, sort, 0, false, episodeIdFilter);
   };
 
   const handleShowFilter = (show) => {
     setShowFilter(show);
     setSource('');
     fetchSources(show);
-    fetchItems(searchQ, show, '', sort, 0, false);
+    fetchItems(searchQ, show, '', sort, 0, false, episodeIdFilter);
     const params = new URLSearchParams(window.location.search);
     if (show) params.set('apple_podcast_id', show); else params.delete('apple_podcast_id');
     window.history.replaceState({}, '', `${window.location.pathname}${params.toString() ? `?${params}` : ''}`);
@@ -108,16 +116,24 @@ export default function AdminSuggestionsList() {
 
   const handleSourceFilter = (src) => {
     setSource(src);
-    fetchItems(searchQ, showFilter, src, sort, 0, false);
+    fetchItems(searchQ, showFilter, src, sort, 0, false, episodeIdFilter);
   };
 
   const handleSort = (s) => {
     setSort(s);
-    fetchItems(searchQ, showFilter, source, s, 0, false);
+    fetchItems(searchQ, showFilter, source, s, 0, false, episodeIdFilter);
   };
 
   const handleLoadMore = () => {
-    fetchItems(searchQ, showFilter, source, sort, items.length, true);
+    fetchItems(searchQ, showFilter, source, sort, items.length, true, episodeIdFilter);
+  };
+
+  const handleClearEpisodeFilter = () => {
+    setEpisodeIdFilter('');
+    fetchItems(searchQ, showFilter, source, sort, 0, false, '');
+    const params = new URLSearchParams(window.location.search);
+    params.delete('episode_id');
+    window.history.replaceState({}, '', `${window.location.pathname}${params.toString() ? `?${params}` : ''}`);
   };
 
   // Removes the row locally on success rather than refetching the whole
@@ -275,6 +291,12 @@ export default function AdminSuggestionsList() {
         <a href="/admin" className="text-sm text-teal-700 hover:text-teal-900 hover:underline">
           ← Back to review queue
         </a>
+        {episodeIdFilter && (
+          <span className="ml-auto flex items-center gap-2 text-xs bg-amber-50 text-amber-800 border border-amber-200 rounded-full px-3 py-1">
+            Showing only episode #{episodeIdFilter}
+            <button onClick={handleClearEpisodeFilter} className="hover:underline">Clear ×</button>
+          </span>
+        )}
       </div>
 
       <div className="p-4 md:p-6 max-w-6xl mx-auto">
@@ -287,7 +309,7 @@ export default function AdminSuggestionsList() {
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none pr-7 disabled:bg-gray-50" />
             {searchQ && (
               <button
-                onClick={() => { setSearchQ(''); fetchItems('', showFilter, source, sort, 0, false); }}
+                onClick={() => { setSearchQ(''); fetchItems('', showFilter, source, sort, 0, false, episodeIdFilter); }}
                 disabled={!!bulk}
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-lg leading-none"
               >×</button>
@@ -371,7 +393,7 @@ export default function AdminSuggestionsList() {
               <p className="text-xs text-gray-500">{listError}</p>
               <button
                 className="px-3 py-1.5 bg-teal-600 text-white text-sm rounded hover:bg-teal-700"
-                onClick={() => fetchItems(searchQ, showFilter, source, sort, 0, false)}
+                onClick={() => fetchItems(searchQ, showFilter, source, sort, 0, false, episodeIdFilter)}
               >
                 Retry
               </button>
@@ -380,7 +402,7 @@ export default function AdminSuggestionsList() {
             <div className="py-12 flex flex-col items-center gap-3">
               <p className="text-sm text-gray-400">No pending suggestions match these filters</p>
               <button
-                onClick={() => fetchItems(searchQ, showFilter, source, sort, 0, false)}
+                onClick={() => fetchItems(searchQ, showFilter, source, sort, 0, false, episodeIdFilter)}
                 disabled={loading}
                 className="px-3 py-1.5 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700 disabled:opacity-50"
               >

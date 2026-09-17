@@ -1264,7 +1264,8 @@ async def get_suggestion_sources(apple_podcast_id: str = None, status: str = "pe
 @app.get("/api/admin/suggestions/list", dependencies=[Depends(verify_admin)])
 async def list_suggestions(apple_podcast_id: str = None, source: str = None,
                             search: str = "", status: str = "pending",
-                            sort: str = "newest", limit: int = 50, offset: int = 0):
+                            sort: str = "newest", limit: int = 50, offset: int = 0,
+                            episode_id: int = None):
     """Paginated, filterable suggestions — the table view behind bulk
     review, as opposed to /suggestions/next's one-row-at-a-time queue.
     Filtering by source (the specific pattern tag) is what lets an admin
@@ -1288,12 +1289,14 @@ async def list_suggestions(apple_podcast_id: str = None, source: str = None,
             "status": status,
             "limit": limit,
             "offset": offset,
+            "episode_id": episode_id,
         }
         where = """
             s.status = %(status)s
             AND (%(apple_podcast_id)s IS NULL OR p.apple_podcast_id = %(apple_podcast_id)s)
             AND (%(source)s IS NULL OR s.source = %(source)s)
             AND (%(search)s = '' OR s.candidate_name ILIKE '%%' || %(search)s || '%%')
+            AND (%(episode_id)s IS NULL OR s.episode_id = %(episode_id)s)
         """
 
         cur.execute(f"""
@@ -3031,7 +3034,9 @@ async def list_episodes(q: str = "", show: str = "", sort: str = "newest", limit
                 p.podcast_id, p.title AS podcast_title, p.cover_art_url, p.apple_podcast_id,
                 COUNT(DISTINCT eh.host_id) AS credit_count,
                 COUNT(DISTINCT eh.host_id) FILTER (WHERE NOT eh.is_guest) AS host_count,
-                COUNT(DISTINCT eh.host_id) FILTER (WHERE eh.is_guest) AS guest_count
+                COUNT(DISTINCT eh.host_id) FILTER (WHERE eh.is_guest) AS guest_count,
+                (SELECT COUNT(*) FROM suggestions s
+                 WHERE s.episode_id = e.episode_id AND s.status = 'pending') AS pending_suggestions
             FROM episodes e
             JOIN podcasts p ON e.podcast_id = p.podcast_id
             LEFT JOIN episode_host eh ON eh.episode_id = e.episode_id
@@ -3089,9 +3094,17 @@ async def get_episode(episode_id: int):
         """, (episode_id,))
         credits = cur.fetchall()
 
+        cur.execute("""
+            SELECT suggestion_id, candidate_name, source
+            FROM suggestions
+            WHERE episode_id = %s AND status = 'pending'
+            ORDER BY created_at
+        """, (episode_id,))
+        pending_suggestions = cur.fetchall()
+
         cur.close()
         conn.close()
-        return {**episode, "credits": credits}
+        return {**episode, "credits": credits, "pending_suggestions": pending_suggestions}
     except HTTPException:
         raise
     except Exception as e:
