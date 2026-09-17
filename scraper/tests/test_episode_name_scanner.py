@@ -24,6 +24,9 @@ from episode_name_scanner import (
     extract_title_name_end_credit,
     title_name_end_shows,
     TITLE_NAME_END_SHOWS_APPLE_IDS,
+    find_role_led_names,
+    find_lead_appositive_name,
+    find_mid_appositive_names,
 )
 from description_cleaner import coarse_source
 
@@ -903,3 +906,126 @@ class TestFirstNameBelongsToOther:
         # "Gerard and Laurent welcome ..." — no surname follows at all.
         text = "Gerard and Laurent welcome a guest to discuss the grid."
         assert not first_name_belongs_to_other("Gerard", "Reid", text)
+
+
+class TestExpandedIntroTriggers:
+    """Real incidents from the second "no_guest" episode batch — the intro
+    trigger list already existed but was missing verb forms these specific
+    shows actually used."""
+
+    def test_welcoming_form_not_just_welcomes(self):
+        # Episode 54545: "had the pleasure of welcoming Ed Porter Director
+        # Europe at Modo Energy ..." — "welcomes?" doesn't match "welcoming"
+        # as a substring (the 'e' before 'ing' isn't there).
+        text = "Gerard and Laurent had the pleasure of welcoming Ed Porter Director Europe at Modo Energy for a discussion."
+        names = [n for n, _ in extract_candidate_names(text)]
+        assert "Ed Porter" in names
+
+    def test_receiving_trigger(self):
+        # Episode 96703: "have the privilege of receiving Carolyn Addy, Head
+        # of Commercial at Renewabl, to talk about ..."
+        text = "Laurent and Gerard have the privilege of receiving Carolyn Addy, Head of Commercial at Renewabl, to talk about trends."
+        names = [n for n, _ in extract_candidate_names(text)]
+        assert "Carolyn Addy" in names
+
+    def test_meet_trigger_with_ambassador_prefix(self):
+        # Episode 54795: "We meet Ambassador Manjeev Singh Puri, who was at
+        # Copenhagen in 2009 ..." — needed both a "meet" trigger and
+        # "Ambassador" added to the optional title-prefix list, since
+        # without the latter the capture group would swallow "Ambassador"
+        # too and blow past its 3-word cap.
+        text = "We meet Ambassador Manjeev Singh Puri, who was at Copenhagen in 2009."
+        names = [n for n, _ in extract_candidate_names(text)]
+        assert "Manjeev Singh Puri" in names
+
+
+class TestBioIsRoleWithoutArticle:
+    """Episode 56587: "Alan Cooper is co-founder and CEO of ON.energy" has
+    no article ("the"/"a"/"an") between "is" and the role at all, which
+    _BIO_IS_RE originally required unconditionally."""
+
+    def test_is_role_with_no_article(self):
+        text = "Alan Cooper is co-founder and CEO of ON.energy, a Miami-based company."
+        names = [n for n, _ in extract_candidate_names(text)]
+        assert "Alan Cooper" in names
+
+    def test_is_the_role_still_works(self):
+        text = "Adam Greenberg is the CEO and co-founder. He previously worked at a Fortune 100 company."
+        names = [n for n, _ in extract_candidate_names(text)]
+        assert "Adam Greenberg" in names
+
+    def test_is_joined_by_does_not_borrow_a_later_role_word(self):
+        # Real regression caught while building the fix above: loosening
+        # the article requirement made "Host Ed Crooks is joined by Melissa
+        # Lott, a professor at Columbia ..." match "Host Ed Crooks" as the
+        # bio subject, because find_bio_sentence_names' 120-char window
+        # found "professor" downstream — describing Melissa, not him. The
+        # no-article branch only fires when a role word sits immediately
+        # after "is", with nothing in between.
+        text = "Host Ed Crooks is joined by Melissa Lott, a professor at Columbia University."
+        names = [n for n, _ in extract_candidate_names(text)]
+        assert "Host Ed Crooks" not in names
+
+
+class TestRoleLedNamePattern:
+    """Episodes 56035 and 54945: the role word comes BEFORE the name with
+    no trigger phrase and no comma at all ("book editor Peter Asmus takes
+    us...", "They are glaciologist Tenzing Chogyal Sherpa, and Pasang
+    Yangjee Sherpa..."), so neither _INTRO_RE nor _BIO_IS_RE can fire."""
+
+    def test_role_word_then_name_then_verb(self):
+        text = "In this episode, book editor Peter Asmus takes us inside Cordova, Alaska."
+        names = [n for n, _ in find_role_led_names(text)]
+        assert "Peter Asmus" in names
+
+    def test_role_word_then_name_then_comma(self):
+        text = "They are glaciologist Tenzing Chogyal Sherpa, and Pasang Yangjee Sherpa, who researches indigenous groups."
+        names = [n for n, _ in find_role_led_names(text)]
+        assert "Tenzing Chogyal Sherpa" in names
+
+    def test_and_continuation_captures_full_three_word_name(self):
+        # Real bug: _AND_RE's fixed 2-word capture truncated this to
+        # "Pasang Yangjee", dropping the surname, since a bare lazy
+        # quantifier with no lookahead always takes the shortest match.
+        text = "They are glaciologist Tenzing Chogyal Sherpa, and Pasang Yangjee Sherpa, who researches indigenous groups."
+        names = [n for n, _ in extract_candidate_names(text)]
+        assert "Pasang Yangjee Sherpa" in names
+        assert "Pasang Yangjee" not in names
+
+
+class TestLeadAndMidAppositivePatterns:
+    """Episodes 56487/56488 (name leads: "Name, role clause, verb...") and
+    56036 (name trails: "role/org text, Name, verb...") — single-guest
+    shows that open their description with the guest's own bio sentence
+    and no trigger word at all."""
+
+    def test_lead_appositive_name_role_verb(self):
+        text = "Iñigo Rengifo, CEO of Concentro, discusses how tax credit transfers are being executed."
+        names = [n for n, _ in find_lead_appositive_name(text)]
+        assert names == ["Iñigo Rengifo"]
+
+    def test_lead_appositive_requires_role_word(self):
+        # "In this episode, we explore..." must not match: the clause
+        # before the second comma has no role word in it.
+        text = "In this episode, we explore how batteries are changing the grid."
+        assert list(find_lead_appositive_name(text)) == []
+
+    def test_mid_appositive_name_after_role_clause(self):
+        text = "Google's Global Head of Power and Energy for Cloud, Raiford Smith, joins us to explain why."
+        names = [n for n, _ in find_mid_appositive_names(text)]
+        assert "Raiford Smith" in names
+
+    def test_mid_appositive_excludes_organisation(self):
+        # Real false positive: the guest's own name was omitted from this
+        # fragment, leaving only their title and employer — "Duke Energy"
+        # satisfies the bare ", Name, verb" shape just as well as a person.
+        text = "Senior Vice President Sales & Relationship Management, Duke Energy, discusses energy solutions."
+        names = [n for n, _ in find_mid_appositive_names(text)]
+        assert "Duke Energy" not in names
+
+    def test_mid_appositive_excludes_second_role_phrase(self):
+        # Real false positive: "Senior Research Analyst" is itself
+        # Title-Cased and comma-bounded, mistaken for a second person.
+        text = "Colin Smith, Senior Research Analyst, join Todd Alexander to discuss markets."
+        names = [n for n, _ in find_mid_appositive_names(text)]
+        assert "Research Analyst" not in names

@@ -254,12 +254,20 @@ _INTRO_RE = re.compile(
         (?:chat|chats|chatted)\s+(?:to|with)|
         (?:catch|catches|caught)\s+up\s+with|
         (?:hear|hears|heard)\s+from|
-        interviews?|welcomes?|
+        interviews?|welcomes?|welcoming|
+        # "have the privilege of receiving Carolyn Addy, ..." — Redefining
+        # Energy's own phrasing for introducing a guest (suggestion on
+        # episode 96703): no other trigger word in the sentence at all.
+        receiv(?:e|es|ed|ing)|
+        # "We meet Ambassador Manjeev Singh Puri" (episode 54795) — needs
+        # "Ambassador" in the title-prefix list below too, or the capture
+        # group swallows it and blows past the 3-word cap.
+        meets?|
         I\s+(?:talk|chat|speak)s?\s+(?:to|with))
         \s+
         # Optional title prefix
         (?:(?:Dr|Prof|Mr|Ms|Mrs|Senator|Sen|Rep|CEO|CTO|CFO|COO|Governor|Gov|
-           Secretary|Director|Mayor|President)\.?\s+)*
+           Secretary|Director|Mayor|President|Ambassador|Amb)\.?\s+)*
         # The actual name: exactly 2 capitalized words (first + last only).
         # IGNORECASE is intentional here — job words not in the title-prefix
         # list above ("reporter", "activist", ...) are meant to be captured
@@ -369,17 +377,6 @@ def strip_possessive_prefix(name: str) -> str:
     return _POSSESSIVE_PREFIX_RE.sub('', name).strip()
 
 
-# "Adam Greenberg is the CEO and co-founder." — a plain declarative bio
-# sentence with no trigger word at all (suggestion 9340: Climate CEOs'
-# description named the guest this way; the title only said "... with
-# AI-Powered Greenhouses", which is what got suggested instead). Anchored to
-# a sentence boundary so it doesn't fire mid-sentence ("the CEO of Tesla is
-# Elon Musk" isn't "the CEO of Tesla, is, Elon").
-_BIO_IS_RE = re.compile(
-    r'(?:^|[.!?]\s+)([A-Z][a-zA-ZÀ-ž\x27’-]+(?:[^\S\n]+[A-Z][a-zA-ZÀ-ž\x27’-]+){1,2}?)'
-    r'\s+is\s+(?:the|a|an)\s+'
-)
-
 # Sentence-initial words that satisfy the capitalized-words shape as often
 # as a real name — "Today Christopher ..." and "Although Khosla ..." pulled
 # the adverb/conjunction in as part of the "name" because it's the first
@@ -407,18 +404,147 @@ _BIO_SENTENCE_LEAD_BAD = {
 # co-founder" from "Reneu Energy is a premier international solar energy
 # consulting firm" or "Raptor Maps is a solar management platform", neither
 # of which _ORG_WORDS catches (no recognizable org-suffix word in either).
-_BIO_ROLE_WORDS_RE = re.compile(
-    r'(?<![a-zA-Z])(?:founders?|co-?founders?|ceo|cto|cfo|coo|cmo|directors?|'
+# Shared with _ROLE_LED_NAME_RE below — pulled out to a string so both
+# regexes stay in sync instead of drifting apart as the list grows.
+_ROLE_WORDS = (
+    r'founders?|co-?founders?|ceo|cto|cfo|coo|cmo|directors?|'
     r'presidents?|professors?|reporters?|journalists?|analysts?|attorneys?|'
     r'partners?|executives?|engineers?|scientists?|hosts?|authors?|'
     r'columnists?|correspondents?|editors?|coach(?:es)?|investors?|'
     r'consultants?|advisors?|advisers?|chair(?:man|woman)?|managers?|'
     r'specialists?|experts?|leads?|principals?|fellows?|researchers?|'
     r'entrepreneurs?|activists?|strategists?|physicians?|doctors?|lawyers?|'
-    r'economists?|geologists?|ecologists?|pioneers?|advocates?|'
-    r'philanthropists?|educators?|historians?)(?![a-zA-Z])',
+    r'economists?|geologists?|glaciologists?|ecologists?|pioneers?|advocates?|'
+    r'philanthropists?|educators?|historians?|ambassadors?'
+)
+
+_BIO_ROLE_WORDS_RE = re.compile(
+    r'(?<![a-zA-Z])(?:' + _ROLE_WORDS + r')(?![a-zA-Z])',
     re.IGNORECASE
 )
+
+# "Adam Greenberg is the CEO and co-founder." — a plain declarative bio
+# sentence with no trigger word at all (suggestion 9340: Climate CEOs'
+# description named the guest this way; the title only said "... with
+# AI-Powered Greenhouses", which is what got suggested instead). Anchored to
+# a sentence boundary so it doesn't fire mid-sentence ("the CEO of Tesla is
+# Elon Musk" isn't "the CEO of Tesla, is, Elon").
+_BIO_IS_RE = re.compile(
+    r'(?:^|[.!?]\s+)([A-Z][a-zA-ZÀ-ž\x27’-]+(?:[^\S\n]+[A-Z][a-zA-ZÀ-ž\x27’-]+){1,2}?)'
+    # Article is optional only when a role word sits immediately after "is"
+    # with nothing between — "Alan Cooper is co-founder and CEO of
+    # ON.energy" (episode 56587). Without that immediacy requirement, "Host
+    # Ed Crooks is joined by Melissa Lott, a professor at ..." matched too:
+    # the later find_bio_sentence_names() window check (120 chars) found
+    # "professor" and credited it to "Host Ed Crooks" instead of Melissa —
+    # a role word anywhere downstream isn't enough evidence on its own,
+    # only one describing THIS clause is.
+    r'\s+is\s+(?:(?:the|a|an)\s+|(?=(?:' + _ROLE_WORDS + r')\b))'
+)
+
+# "book editor Peter Asmus takes us inside Cordova" (episode 56035) / "They
+# are glaciologist Tenzing Chogyal Sherpa, and Pasang Yangjee Sherpa..."
+# (episode 54945) — the role word comes BEFORE the name here, with no comma
+# and no trigger phrase at all, so neither _INTRO_RE nor _BIO_IS_RE fires.
+# Terminated the same two ways a bio clause naturally ends: a comma (often
+# introducing "who ..." or a second, "and"-joined name — find_and_names
+# picks that up same as it does after intro/joins/possessive) or a reporting
+# verb straight after the name.
+_ROLE_LED_NAME_VERBS = (
+    r'takes?|explains?|discusses?|shares?|joins?|tells?|breaks?\s+down|'
+    r'walks?|says?|talks?|argues?|describes?|reveals?|outlines?'
+)
+
+_ROLE_LED_NAME_RE = re.compile(
+    r'(?<![a-zA-Z])(?:' + _ROLE_WORDS + r')\s+'
+    r'([A-Z][a-zA-ZÀ-ž\x27’-]+(?:\s+[A-Z][a-zA-ZÀ-ž\x27’-]+){1,2}?)'
+    r'(?=\s*,|\s+(?:' + _ROLE_LED_NAME_VERBS + r')\b)',
+    re.IGNORECASE
+)
+
+
+def find_role_led_names(text):
+    """Names from the "role-word Name" shape (see _ROLE_LED_NAME_RE above).
+    Yields (name, absolute_pos) pairs."""
+    for m in _ROLE_LED_NAME_RE.finditer(text):
+        name = strip_honorific(m.group(1))
+        if not _valid_name(name):
+            continue
+        if name.split()[0].lower() in _BIO_SENTENCE_LEAD_BAD:
+            continue
+        yield name, m.start(1)
+
+
+# "Iñigo Rengifo, CEO of Concentro, discusses how tax credit transfers..."
+# (episode 56487) / "Stefan Riesinger, partner at Norton Rose Fulbright,
+# discusses..." (episode 56488) — many single-guest shows open their
+# description with exactly this shape: Name, then an appositive role
+# clause, then the sentence's verb. No trigger word exists to key off of;
+# what makes it safe is that it's anchored to the very start of the text
+# AND the appositive clause must contain a real role word, so an ordinary
+# opening line like "In this episode, we explore..." can't match (its
+# first "word" span isn't two contiguous Title-Case words).
+_LEAD_APPOSITIVE_RE = re.compile(
+    r'^\s*([A-Z][a-zA-ZÀ-ž\x27’-]+(?:\s+[A-Z][a-zA-ZÀ-ž\x27’-]+){1,2}?)'
+    r',\s+([^,]{3,90}),\s+'
+)
+
+
+def find_lead_appositive_name(text):
+    """The name leading this text's opening "Name, role clause, verb..."
+    sentence (see _LEAD_APPOSITIVE_RE above), or None. Yields at most one
+    (name, absolute_pos) pair since it only ever looks at the very start."""
+    m = _LEAD_APPOSITIVE_RE.match(text)
+    if not m:
+        return
+    if not _BIO_ROLE_WORDS_RE.search(m.group(2)):
+        return
+    name = strip_honorific(m.group(1))
+    if not _valid_name(name):
+        return
+    if name.split()[0].lower() in _BIO_SENTENCE_LEAD_BAD:
+        return
+    yield name, m.start(1)
+
+
+# "...for Cloud, Raiford Smith, joins us to explain..." (episode 56036) —
+# the mirror image of _LEAD_APPOSITIVE_RE: role/org text, THEN the name as
+# a mid-sentence appositive, then the verb. Not anchored to text start
+# (the role clause before it can be arbitrarily long, e.g. "Google's Global
+# Head of Power and Energy for Cloud,"), so this instead keys entirely off
+# the ", Name, verb" shape — specific enough on its own that it doesn't need
+# a role-word check the way the lead version does.
+_MID_APPOSITIVE_RE = re.compile(
+    r',\s+([A-Z][a-zA-ZÀ-ž\x27’-]+(?:\s+[A-Z][a-zA-ZÀ-ž\x27’-]+){1,2}?),\s+'
+    r'(?:' + _ROLE_LED_NAME_VERBS + r')\b',
+    re.IGNORECASE
+)
+
+
+def find_mid_appositive_names(text):
+    """Names from the "..., Name, verb" mid-sentence appositive shape (see
+    _MID_APPOSITIVE_RE above). Yields (name, absolute_pos) pairs.
+
+    Unlike _LEAD_APPOSITIVE_RE, there's no role-word check on the clause
+    BEFORE the name here (it can be arbitrarily long org/title text), so two
+    false-positive shapes get through the base pattern alone: an org name
+    standing where the person's name should be ("...Sales & Relationship
+    Management, Duke Energy, discusses...", the guest's own name omitted
+    from that fragment) and a second role phrase mistaken for a second
+    person ("Colin Smith, Senior Research Analyst, join Todd Alexander" —
+    "Senior Research Analyst" is itself Title-Cased and comma-bounded).
+    """
+    for m in _MID_APPOSITIVE_RE.finditer(text):
+        name = strip_honorific(m.group(1))
+        if not _valid_name(name):
+            continue
+        if name.split()[0].lower() in _BIO_SENTENCE_LEAD_BAD:
+            continue
+        if looks_like_organisation(name):
+            continue
+        if _BIO_ROLE_WORDS_RE.fullmatch(name.split()[-1]):
+            continue
+        yield name, m.start(1)
 
 
 def find_bio_sentence_names(text):
@@ -626,7 +752,13 @@ def extract_candidate_names_tagged(text: str) -> list[tuple[str, str, str]]:
         r'\s+and\s+'
         r'(?:(?:Dr|Prof|Mr|Ms|Mrs|Senator|Sen|Rep|CEO|CTO|CFO|COO|Governor|'
         r'Director|Mayor|President)\.?\s+)*'
-        r'([A-Z][A-Za-z\u00C0-\u017E-]+\s+[A-Z][A-Za-z\u00C0-\u017E-]+)',
+        # Lazy + a stop-word lookahead, same shape as _INTRO_RE/_POSSESSIVE_RE
+        # \u2014 without it a fixed 2-word capture truncated "Pasang Yangjee
+        # Sherpa" (episode 54945) to "Pasang Yangjee", since a bare lazy
+        # quantifier with nothing after it always takes the shortest match.
+        r'([A-Z][A-Za-z\u00C0-\u017E-]+(?:\s+[A-Z][A-Za-z\u00C0-\u017E-]+){1,2}?)'
+        r'(?=\s+(?:of|at|from|about|for|on|to|and)\b|,|\'s|'
+        r'\s+(?:CEO|CTO|CFO|COO|Director|(?:Co[- ]?)?Founder)\b|\s*[-\u2013)|]|$)',
         re.IGNORECASE
     )
 
@@ -669,6 +801,17 @@ def extract_candidate_names_tagged(text: str) -> list[tuple[str, str, str]]:
 
     for name, pos in find_guest_bio_lines(text):
         add(name, pos, 'guest_bio_line')
+
+    for name, pos in find_role_led_names(text):
+        add(name, pos, 'role_led')
+        for and_name, and_pos in find_and_names(text, pos):
+            add(and_name, and_pos, 'and')
+
+    for name, pos in find_lead_appositive_name(text):
+        add(name, pos, 'lead_appositive')
+
+    for name, pos in find_mid_appositive_names(text):
+        add(name, pos, 'mid_appositive')
 
     return found
 

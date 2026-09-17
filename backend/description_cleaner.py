@@ -268,6 +268,12 @@ _ORG_WORDS = {
     'division', 'divisions',
     'minerals', 'mining', 'pharma', 'airlines', 'aviation', 'shipping',
     'utilities', 'computing', 'management', 'advisory', 'enterprises',
+    # "Duke Energy" satisfies the mid-sentence appositive pattern's bare
+    # "..., Name, verb" shape just as well as a real person's name does,
+    # when a fragment names the guest's title and employer but not the
+    # guest — very common in a network built entirely around energy
+    # companies (episode_name_scanner.py's find_mid_appositive_names).
+    'energy',
     # Job-function words. "Director of Digital Transformation and Enterprise
     # Architecture at ..." makes "Enterprise Architecture" look exactly like a
     # second guest to the "X and Y" pattern. Checked against every known
