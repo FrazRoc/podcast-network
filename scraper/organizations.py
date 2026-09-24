@@ -5,7 +5,8 @@ Keeps organizations / organization_aliases in step with the company names in
 host_affiliations (see migrate_add_organizations.sql).
 
     python3 organizations.py sync --dry-run   # counts only, no writes
-    python3 organizations.py sync
+    python3 organizations.py sync             # then rebuilds the merge-suggestion queue
+    python3 organizations.py suggestions      # rebuild the queue only
 
 sync does two things, both idempotent:
   1. Stamps host_affiliations.company_key (normalize_org_name(company)) on
@@ -14,7 +15,9 @@ sync does two things, both idempotent:
      alias covers yet. Its name is the most common spelling of that key.
 
 It never merges: which spellings are the same organisation beyond the
-normalised key is decided by a person in Company Admin.
+normalised key is decided by a person in Company Admin, from the queue that
+sync rebuilds afterwards (company_merge_suggestions — see
+backend/org_suggestions.py).
 """
 
 import argparse
@@ -28,6 +31,7 @@ from psycopg2.extras import execute_values
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'backend'))
 from org_names import normalize_org_name, _LEGAL_SUFFIXES  # noqa: E402
+from org_suggestions import refresh_suggestions  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
@@ -102,7 +106,8 @@ def sync(dry_run: bool = False) -> dict:
     else:
         apply_sync(cur, plan)
         conn.commit()
-        logger.info("Done.")
+        logger.info("Done. Rebuilding merge suggestions…")
+        logger.info(f"Merge suggestions: {refresh_suggestions(conn)}")
     cur.close()
     conn.close()
     return plan
@@ -113,9 +118,14 @@ def main():
     sub = parser.add_subparsers(dest='command', required=True)
     p = sub.add_parser('sync')
     p.add_argument('--dry-run', action='store_true')
+    sub.add_parser('suggestions', help='Rebuild the merge-suggestion queue only')
     args = parser.parse_args()
     if args.command == 'sync':
         sync(args.dry_run)
+    elif args.command == 'suggestions':
+        conn = psycopg2.connect(DB)
+        logger.info(f"Merge suggestions: {refresh_suggestions(conn)}")
+        conn.close()
 
 
 if __name__ == '__main__':

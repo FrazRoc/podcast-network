@@ -334,51 +334,89 @@ function SuggestionCard({ s, onAction, onSkip }) {
   );
 }
 
+const PAGE = 40;
+
+function timeAgo(iso) {
+  if (!iso) return 'never';
+  const mins = Math.round((Date.now() - new Date(iso + (iso.endsWith('Z') ? '' : 'Z')).getTime()) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.round(mins / 60);
+  return hrs < 48 ? `${hrs} h ago` : `${Math.round(hrs / 24)} days ago`;
+}
+
+// The queue is stored server-side (company_merge_suggestions) and rebuilt
+// after each extraction run or by Recompute, so this only reads a page of it.
 function Suggestions({ onChanged }) {
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
+  const [computedAt, setComputedAt] = useState(null);
+  const [shown, setShown] = useState(PAGE);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [hidden, setHidden] = useState(new Set());
   const [gone, setGone] = useState(new Set());   // companies merged away this session
   const [skipped, setSkipped] = useState(new Set());   // survives reloads until Refresh
 
   // quiet: refresh in the background without replacing the list by "Loading…".
-  const load = useCallback((quiet = false) => {
+  const load = useCallback((quiet = false, count = PAGE) => {
     if (!quiet) setLoading(true);
-    call(`${API}/companies-suggestions?limit=40`)
-      .then(d => { setItems(d.items || []); setTotal(d.total || 0); setError(''); setHidden(new Set()); })
+    call(`${API}/companies-suggestions?limit=${count}`)
+      .then(d => {
+        setItems(d.items || []); setTotal(d.total || 0); setComputedAt(d.computed_at);
+        setError(''); setHidden(new Set());
+      })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(false, shown); }, [load]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const recompute = async () => {
+    setNotice('');
+    try {
+      await call(`${API}/companies-suggestions/refresh`, { method: 'POST' });
+      setNotice('Recomputing — this takes a minute or two. Refresh after that to see the new queue.');
+    } catch (e) { setError(e.message); }
+  };
 
   const key = (s) => `${s.org_a}-${s.org_b}`;
   const done = (s, droppedId, stale = false) => {
     // Hide this card, and every card naming a company that was just merged
-    // away — those would only fail with "not found". Then fetch a fresh
-    // queue, which also re-pairs the survivor with anything still similar.
+    // away — those would only fail with "not found". Then re-read the
+    // stored queue (a decision removes its own row server-side).
     setHidden(prev => new Set(prev).add(key(s)));
     if (droppedId) setGone(prev => new Set(prev).add(droppedId));
     if (!stale) onChanged?.();
-    load(true);
+    load(true, shown);
   };
   const skip = (s) => setSkipped(prev => new Set(prev).add(key(s)));
+  const more = () => { const n = shown + PAGE; setShown(n); load(true, n); };
   const visible = items.filter(s => !hidden.has(key(s)) && !skipped.has(key(s))
                                  && !gone.has(s.org_a) && !gone.has(s.org_b));
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <p className="text-sm text-gray-500">
-          {total} possible duplicate{total !== 1 ? 's' : ''}, biggest first. Merged spellings re-link every role at once.
+          {total} possible duplicate{total !== 1 ? 's' : ''}, biggest first · computed {timeAgo(computedAt)}.
         </p>
-        <button onClick={() => { setSkipped(new Set()); load(); }} className="text-xs text-blue-600 hover:underline">Refresh</button>
+        <div className="flex gap-3">
+          <button onClick={recompute} className="text-xs text-gray-500 hover:underline">Recompute</button>
+          <button onClick={() => { setSkipped(new Set()); load(false, shown); }}
+            className="text-xs text-blue-600 hover:underline">Refresh</button>
+        </div>
       </div>
+      {notice && <p className="text-xs text-green-700 bg-green-50 rounded-lg px-3 py-2">{notice}</p>}
       {loading ? <p className="text-sm text-gray-400">Loading…</p>
         : error ? <p className="text-sm text-red-500">{error}</p>
-        : visible.length === 0 ? <p className="text-sm text-gray-400">Nothing left in this page of suggestions — Refresh for more.</p>
+        : visible.length === 0 ? <p className="text-sm text-gray-400">Nothing left here — Refresh or Load more.</p>
         : visible.map(s => <SuggestionCard key={key(s)} s={s} onAction={done} onSkip={skip} />)}
+      {!loading && !error && items.length < total && (
+        <button onClick={more} className="w-full py-2 text-sm text-blue-600 hover:bg-white rounded-lg">
+          Load more ({Math.min(PAGE, total - items.length)} of {total - items.length} remaining)
+        </button>
+      )}
     </div>
   );
 }

@@ -311,6 +311,17 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
 - Endpoints: `GET /api/admin/companies`, `GET/PUT /api/admin/companies/{id}`,
   `POST .../{keep}/merge/{drop}`, `POST /api/admin/companies/not-same`,
   `GET /api/admin/companies-suggestions`.
+- **The suggestion queue is stored**, not computed per request
+  (`company_merge_suggestions`, `migrate_add_company_merge_suggestions.sql`;
+  logic in `backend/org_suggestions.py`). The full pass took ~95 s per page
+  load at 7,500 organisations; reading the stored queue takes <1 s. Rebuilt
+  by `organizations.py sync` (so after every scheduled extraction),
+  `organizations.py suggestions`, and the tab's Recompute button (a
+  background task, ~1 min). "Not the same" deletes its row, a merge cascades
+  the dropped company's rows away, and parent/child pairs are filtered at
+  read time; pairs a merge newly creates appear at the next rebuild.
+  Sep 24 2026 after stage 2: 7,516 companies, 6,543 suggestions (5,013
+  similar, 1,382 contains, 148 acronym); 6,308 companies have one person.
 - The merge-suggestions tab hides every card naming a company that was just
   merged away and reloads the queue; skipped cards stay hidden until
   Refresh. (First version left those cards in place, and acting on them

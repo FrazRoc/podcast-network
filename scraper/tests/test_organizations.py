@@ -94,9 +94,8 @@ class TestSuggestionPairs:
                 for i, n in named.items()}
 
     def _pairs(self, orgs, similar=(), not_same=()):
-        pytest.importorskip("fastapi")
-        from main import _suggestion_pairs
-        return _suggestion_pairs(orgs, list(similar), set(not_same))
+        from org_suggestions import suggestion_pairs
+        return suggestion_pairs(orgs, list(similar), set(not_same))
 
     def test_acronym_similar_and_contains(self):
         orgs = {1: {'org_id': 1, 'name': 'BNEF', 'parent_org_id': None, 'not_an_org': False, 'people': 4},
@@ -285,20 +284,77 @@ class TestCompanyEndpoints:
         cur.execute("SELECT website_domain FROM organizations WHERE org_id = %s", (acme,))
         assert cur.fetchone()[0] == 'acme.com'
 
-    def test_suggestions_and_not_same(self, org_db, monkeypatch):
+    def _refresh(self, org_db):
+        from org_suggestions import refresh_suggestions
+        conn = psycopg2.connect(org_db.dsn)
+        try:
+            return refresh_suggestions(conn)
+        finally:
+            conn.close()
+
+    def _queue(self, org_db, monkeypatch):
+        r = _run(org_db, monkeypatch, 'company_merge_suggestions')
+        return r, {frozenset((p['a']['name'], p['b']['name'])): p for p in r['items']}
+
+    def test_page_reads_the_stored_queue(self, org_db, monkeypatch):
         cur = self._setup(org_db)
         cur.execute("INSERT INTO organizations (name) VALUES ('Bloomberg New Energy Finance')")
         org_db.commit()
-        pairs = _run(org_db, monkeypatch, 'company_merge_suggestions')['items']
-        by_names = {frozenset((p['a']['name'], p['b']['name'])): p for p in pairs}
-        acronym = by_names[frozenset(('BNEF', 'Bloomberg New Energy Finance'))]
-        assert acronym['reason'] == 'acronym'
+        # Nothing stored yet: the page does not compute on request.
+        assert self._queue(org_db, monkeypatch)[0]['items'] == []
+        assert self._refresh(org_db) > 0
+        r, pairs = self._queue(org_db, monkeypatch)
+        assert pairs[frozenset(('BNEF', 'Bloomberg New Energy Finance'))]['reason'] == 'acronym'
+        assert r['total'] == len(r['items']) and r['computed_at'] is not None
 
+    def test_not_same_removes_the_row_and_survives_a_rebuild(self, org_db, monkeypatch):
+        cur = self._setup(org_db)
+        cur.execute("INSERT INTO organizations (name) VALUES ('Bloomberg New Energy Finance')")
+        org_db.commit()
+        self._refresh(org_db)
+        key = frozenset(('BNEF', 'Bloomberg New Energy Finance'))
+        pair = self._queue(org_db, monkeypatch)[1][key]
         _run(org_db, monkeypatch, 'mark_companies_not_same',
-             main_body_cls('NotSameOrgRequest', org_a=acronym['org_a'], org_b=acronym['org_b']))
-        pairs = _run(org_db, monkeypatch, 'company_merge_suggestions')['items']
-        assert frozenset(('BNEF', 'Bloomberg New Energy Finance')) not in {
-            frozenset((p['a']['name'], p['b']['name'])) for p in pairs}
+             main_body_cls('NotSameOrgRequest', org_a=pair['org_a'], org_b=pair['org_b']))
+        assert key not in self._queue(org_db, monkeypatch)[1]
+        self._refresh(org_db)
+        assert key not in self._queue(org_db, monkeypatch)[1]
+
+    def test_merge_drops_every_row_naming_the_merged_company(self, org_db, monkeypatch):
+        cur = self._setup(org_db)
+        cur.execute("INSERT INTO organizations (name) VALUES ('Bloomberg New Energy Finance')")
+        org_db.commit()
+        self._refresh(org_db)
+        bnef = _org_id(cur, 'BNEF')
+        cur.execute("SELECT COUNT(*) FROM company_merge_suggestions WHERE %s IN (org_a, org_b)", (bnef,))
+        assert cur.fetchone()[0] > 0
+        org_db.commit()
+        _run(org_db, monkeypatch, 'merge_companies', _org_id(cur, 'BloombergNEF'), bnef)
+        cur.execute("SELECT COUNT(*) FROM company_merge_suggestions WHERE %s IN (org_a, org_b)", (bnef,))
+        assert cur.fetchone()[0] == 0
+
+    def test_parent_and_child_are_not_shown_as_duplicates(self, org_db, monkeypatch):
+        cur = self._setup(org_db)
+        cur.execute("INSERT INTO organizations (name) VALUES ('Bloomberg') RETURNING org_id")
+        bloomberg = cur.fetchone()[0]
+        org_db.commit()
+        self._refresh(org_db)
+        key = frozenset(('Bloomberg', 'Bloomberg Green'))
+        assert key in self._queue(org_db, monkeypatch)[1]
+        _run(org_db, monkeypatch, 'update_company', _org_id(cur, 'Bloomberg Green'),
+             main_body(parent_org_id=bloomberg))
+        assert key not in self._queue(org_db, monkeypatch)[1]
+
+    def test_sync_rebuilds_the_queue(self, org_db, monkeypatch):
+        import organizations
+        cur = org_db.cursor()
+        _role(cur, 'Ann', 'BNEF')
+        _role(cur, 'Bob', 'Bloomberg New Energy Finance')
+        org_db.commit()
+        monkeypatch.setattr(organizations, 'DB', org_db.dsn)
+        organizations.sync()
+        cur.execute("SELECT reason FROM company_merge_suggestions")
+        assert [r[0] for r in cur.fetchall()] == ['acronym']
 
 
 def main_body(**kw):

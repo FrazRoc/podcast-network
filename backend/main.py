@@ -6,7 +6,7 @@
 import re
 import secrets
 
-from fastapi import FastAPI, HTTPException, Header, Depends
+from fastapi import FastAPI, HTTPException, Header, Depends, BackgroundTasks
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 import psycopg2
@@ -21,7 +21,8 @@ from description_cleaner import (
     coarse_source, strip_html,
 )
 from role_selection import pick_current_role, format_for_display
-from org_names import normalize_org_name, looks_like_acronym_of, initials
+from org_names import normalize_org_name
+from org_suggestions import refresh_suggestions
 
 load_dotenv()
 
@@ -3240,6 +3241,7 @@ async def mark_companies_not_same(body: NotSameOrgRequest):
     cur = conn.cursor()
     try:
         cur.execute("INSERT INTO not_same_org_pairs (org_a, org_b) VALUES (%s, %s) ON CONFLICT DO NOTHING", (a, b))
+        cur.execute("DELETE FROM company_merge_suggestions WHERE org_a = %s AND org_b = %s", (a, b))
         conn.commit()
         return {"success": True}
     finally:
@@ -3247,95 +3249,73 @@ async def mark_companies_not_same(body: NotSameOrgRequest):
         conn.close()
 
 
-def _suggestion_pairs(orgs: dict, similar: list, not_same: set) -> list:
-    """Merge candidates from three signals, strongest reason kept per pair:
-    'acronym' (BNEF / Bloomberg New Energy Finance), 'similar' (trigram
-    similarity of names: Bloomberg NEF / BloombergNEF), 'contains' (one
-    name is the other plus more words: Bloomberg / Bloomberg Green — often
-    a parent rather than a duplicate). Pairs already related as parent and
-    child, marked not-the-same, or involving a not-an-organisation are
-    skipped. Ranked by the people affected, then by signal strength."""
-    strength = {'acronym': 3, 'similar': 2, 'contains': 1}
-    found = {}
-
-    def add(a, b, reason, score):
-        if a == b:
-            return
-        a, b = sorted((a, b))
-        oa, ob = orgs.get(a), orgs.get(b)
-        if not oa or not ob or oa['not_an_org'] or ob['not_an_org'] or (a, b) in not_same:
-            return
-        if oa['parent_org_id'] == b or ob['parent_org_id'] == a:
-            return
-        prev = found.get((a, b))
-        if prev is None or strength[reason] > strength[prev['reason']]:
-            found[(a, b)] = {'org_a': a, 'org_b': b, 'reason': reason, 'score': round(score, 2)}
-
-    for a, b, sim in similar:
-        add(a, b, 'similar', sim)
-
-    keys = {oid: normalize_org_name(o['name']) or '' for oid, o in orgs.items()}
-    single = {}
-    for oid, key in keys.items():
-        if key and ' ' not in key:
-            single.setdefault(key, []).append(oid)
-    for oid, o in orgs.items():
-        for short_id in single.get(initials(o['name']) or '', []):
-            if looks_like_acronym_of(orgs[short_id]['name'], o['name']):
-                add(short_id, oid, 'acronym', 1.0)
-    by_first_words = {}
-    for oid, key in keys.items():
-        if key:
-            by_first_words.setdefault(key, []).append(oid)
-    for oid, key in keys.items():
-        words = key.split()
-        for n in range(1, len(words)):
-            for shorter in by_first_words.get(' '.join(words[:n]), []):
-                add(shorter, oid, 'contains', n / len(words))
-
-    pairs = list(found.values())
-    for p in pairs:
-        p['people'] = orgs[p['org_a']]['people'] + orgs[p['org_b']]['people']
-    pairs.sort(key=lambda p: (-p['people'], -strength[p['reason']], -p['score']))
-    return pairs
-
-
 @app.get("/api/admin/companies-suggestions", dependencies=[Depends(verify_admin)])
-async def company_merge_suggestions(limit: int = 50, min_similarity: float = 0.5):
-    """Likely duplicates to review, biggest first. Computed on request."""
+async def company_merge_suggestions(limit: int = 40, offset: int = 0):
+    """The stored merge-suggestion queue (see org_suggestions.py), biggest
+    first. Rows whose pair has since been decided are skipped: either side
+    marked not an organisation, or the two now parent and child."""
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("""
-            SELECT o.org_id, o.name, o.org_type, o.parent_org_id, o.not_an_org,
-                   COUNT(DISTINCT ha.host_id) AS people,
-                   ARRAY_REMOVE(ARRAY_AGG(DISTINCT a.alias_name), NULL) AS alias_names
-            FROM organizations o
-            LEFT JOIN organization_aliases a ON a.org_id = o.org_id
-            LEFT JOIN host_affiliations ha ON ha.company_key = a.normalized_name
-            GROUP BY o.org_id
-        """)
-        orgs = {r['org_id']: r for r in cur.fetchall()}
-        cur.execute("SELECT set_limit(%s)", (min_similarity,))
-        cur.execute("""
-            SELECT a.org_id AS a, b.org_id AS b, similarity(lower(a.name), lower(b.name)) AS sim
-            FROM organizations a JOIN organizations b
-              ON a.org_id < b.org_id AND lower(a.name) % lower(b.name)
+        live = """
+            FROM company_merge_suggestions s
+            JOIN organizations a ON a.org_id = s.org_a
+            JOIN organizations b ON b.org_id = s.org_b
             WHERE NOT a.not_an_org AND NOT b.not_an_org
-        """)
-        similar = [(r['a'], r['b'], r['sim']) for r in cur.fetchall()]
-        cur.execute("SELECT org_a, org_b FROM not_same_org_pairs")
-        not_same = {(r['org_a'], r['org_b']) for r in cur.fetchall()}
+              AND a.parent_org_id IS DISTINCT FROM b.org_id
+              AND b.parent_org_id IS DISTINCT FROM a.org_id
+        """
+        cur.execute(f"""
+            SELECT s.org_a, s.org_b, s.reason, s.score, s.people {live}
+            ORDER BY s.people DESC,
+                     CASE s.reason WHEN 'acronym' THEN 0 WHEN 'similar' THEN 1 ELSE 2 END,
+                     s.score DESC, s.org_a, s.org_b
+            LIMIT %s OFFSET %s
+        """, (max(1, min(limit, 200)), max(0, offset)))
+        rows = cur.fetchall()
+        cur.execute(f"SELECT COUNT(*) AS total, MAX(s.computed_at) AS computed_at {live}")
+        meta = cur.fetchone()
 
-        pairs = _suggestion_pairs(orgs, similar, not_same)
-        summary = lambda oid: {k: orgs[oid][k] for k in ('org_id', 'name', 'org_type', 'people', 'alias_names')}
+        ids = sorted({r['org_a'] for r in rows} | {r['org_b'] for r in rows})
+        orgs = {}
+        if ids:
+            cur.execute("""
+                SELECT o.org_id, o.name, o.org_type,
+                       COUNT(DISTINCT ha.host_id) AS people,
+                       ARRAY_REMOVE(ARRAY_AGG(DISTINCT a.alias_name), NULL) AS alias_names
+                FROM organizations o
+                LEFT JOIN organization_aliases a ON a.org_id = o.org_id
+                LEFT JOIN host_affiliations ha ON ha.company_key = a.normalized_name
+                WHERE o.org_id = ANY(%s)
+                GROUP BY o.org_id
+            """, (ids,))
+            orgs = {r['org_id']: r for r in cur.fetchall()}
         return {
-            "total": len(pairs),
-            "items": [{**p, 'a': summary(p['org_a']), 'b': summary(p['org_b'])} for p in pairs[:max(1, limit)]],
+            "total": meta['total'],
+            "computed_at": meta['computed_at'],
+            "items": [{**r, 'a': orgs[r['org_a']], 'b': orgs[r['org_b']]} for r in rows],
         }
     finally:
         cur.close()
         conn.close()
+
+
+def _refresh_suggestions_job():
+    conn = get_db_connection()
+    try:
+        refresh_suggestions(conn)
+    except Exception:
+        import traceback
+        traceback.print_exc()
+    finally:
+        conn.close()
+
+
+@app.post("/api/admin/companies-suggestions/refresh", dependencies=[Depends(verify_admin)])
+async def refresh_company_merge_suggestions(background_tasks: BackgroundTasks):
+    """Rebuild the queue after the response is sent — it takes a minute or two."""
+    background_tasks.add_task(_refresh_suggestions_job)
+    return {"started": True}
 
 
 @app.post("/api/admin/people/{host_id}/scan", dependencies=[Depends(verify_admin)])
