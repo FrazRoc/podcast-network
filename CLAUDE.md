@@ -129,11 +129,19 @@ merges and credit deletions carry through without touching that code.
 - **Status: code only. Migration not run on production, no backfill yet,
   not in `scrape.yml` yet.** Needs `ANTHROPIC_API_KEY` (and it as a GitHub
   secret for the cron step).
-- Too varied for regex, so Haiku 4.5 reads it. Kept cheap by sending only
+- **Pilot (Sep 2026, 88 snippets from the Aug export):** Haiku 4.5 credited
+  another guest's role to the named person on 1-2 snippets per run —
+  "Joe Batir speaks with Jigar Shah, Director at the DOE Loan Programs
+  Office" came back as Joe Batir's role on three runs of three, despite a
+  prompt rule with that exact shape. Sonnet 5 (`--model claude-sonnet-5`,
+  thinking disabled) made no such errors and found more possessive company
+  mentions ("Tigercomm's Mike Casey"), at ~3x the cost. Model choice pending.
+- Too varied for regex, so a model reads it. Kept cheap by sending only
   ~120 chars before / ~280 after each name mention (`build_snippet`), sending
   an identical (person, snippet) once, 40 items per request, via the Batch
   API (half price). `estimate` against the Aug data export: 6,022 guest
-  appearances → 5,250 unique items → ~$0.77 (chars/4 approximation).
+  appearances → 5,250 unique items → ~$0.77 on Haiku, ~$2.34 on Sonnet 5
+  (chars/4 approximation, Sonnet scaled by the pilot's measured 1.5x).
 - **Every stored value must occur verbatim in its snippet**
   (`verified_affiliations`); anything else is dropped and counted. This is
   the guard against the model supplying a company from outside knowledge.

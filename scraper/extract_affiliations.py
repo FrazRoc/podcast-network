@@ -59,12 +59,25 @@ logger = logging.getLogger(__name__)
 
 DB = os.getenv('DATABASE_URL', 'postgresql://localhost/podcast_db')
 
+# Per million tokens (input, output) at normal price, and any extra request
+# parameters. The batch price is half. On the 88-snippet pilot Haiku credited
+# another guest's role to the named person on 1-2 snippets per run (not the
+# same ones each run); Sonnet 5 did not, and found more "Eversource's Eric
+# Bosworth"-style company mentions, at about three times the cost.
+MODELS = {
+    'claude-haiku-4-5': {'price': (1.00, 5.00), 'params': {}, 'estimate_factor': 1.0},
+    # Adaptive thinking is on by default for Sonnet 5; this is a short
+    # extraction and thinking tokens would be billed as output.
+    # estimate_factor: on the same 88 snippets Sonnet 5 used ~1.4x the input
+    # tokens (different tokenizer) and ~1.6x the output, so its real cost was
+    # ~3x Haiku's rather than the 2x the price table alone suggests.
+    'claude-sonnet-5': {'price': (2.00, 10.00), 'params': {'thinking': {'type': 'disabled'}},
+                        'estimate_factor': 1.5},
+}
 MODEL = 'claude-haiku-4-5'
 DATA_SOURCE = 'llm_extracted'
 MAX_ATTEMPTS = 3
 
-# Per million tokens, Haiku 4.5. The batch price is half the normal one.
-PRICE_IN, PRICE_OUT = 1.00, 5.00
 BATCH_DISCOUNT = 0.5
 
 # Roles almost always sit right after the name ("Jane Doe, CEO of X"), and
@@ -96,12 +109,23 @@ one episode. For that person only, list the roles the text says they hold at \
 the time of the episode.
 
 Rules:
-- Only the named person. Ignore the host and any other guest in the text.
+- Only the named person. Ignore the host and any other guest in the text. \
+A role belongs to the person it is written next to: in "Joe Smith talks with \
+Ann Lee, CEO of Acme", CEO of Acme is Ann Lee's role, and Joe Smith has none. \
+When in doubt about whose role it is, leave it out.
 - Copy `title` and `company` exactly as they are written in the text, as \
 verbatim substrings. Do not expand abbreviations, fix capitalisation, or \
 translate "Fervo's" into "Fervo Energy".
+- Split the title from the organisation: "founder of Uplift" is title \
+"founder", company "Uplift"; "Assistant Secretary of DOE's Office of \
+Electricity" is title "Assistant Secretary", company "DOE's Office of \
+Electricity". Never leave the organisation inside the title.
 - Several titles at one organisation stay together as written, e.g. \
-"co-founder and CEO". Roles at different organisations are separate entries.
+"co-founder and CEO". Roles at different organisations are separate entries, \
+one per organisation.
+- An organisation with no title still counts: "Eversource's Eric Bosworth" \
+and "Ivan Celanovic from Typhoon" give company "Eversource" / "Typhoon" \
+with title null.
 - If the text gives only a title or only an organisation, set the other to null.
 - A title is a position: CEO, partner, senior fellow, professor, \
 commissioner, founder, reporter. Descriptions such as "expert", "leader", \
@@ -264,9 +288,10 @@ def chunk(items: list, size: int = ITEMS_PER_REQUEST) -> list:
     return [items[i:i + size] for i in range(0, len(items), size)]
 
 
-def request_params(items: list) -> dict:
+def request_params(items: list, model: str = MODEL) -> dict:
     return {
-        'model': MODEL,
+        **MODELS[model]['params'],
+        'model': model,
         'max_tokens': MAX_TOKENS,
         'system': SYSTEM_PROMPT,
         'messages': [{'role': 'user', 'content': render_items(items)}],
@@ -278,6 +303,11 @@ def _normalise_for_match(text: str) -> str:
     text = unicodedata.normalize('NFKC', text)
     text = text.replace('’', "'").replace('‘', "'").replace('“', '"').replace('”', '"')
     return _collapse(text).casefold()
+
+
+# A form of address is not a position. Sonnet 5 returned "Dr." as a title
+# for a guest whose description gave nothing else.
+_HONORIFIC_ONLY_RE = re.compile(r'^(?:dr|mr|mrs|ms|mx|prof|sir|dame)\.?$', re.IGNORECASE)
 
 
 def verified_affiliations(affiliations: list, snippet: str) -> tuple:
@@ -294,6 +324,8 @@ def verified_affiliations(affiliations: list, snippet: str) -> tuple:
         for field in ('title', 'company'):
             value = aff.get(field)
             value = _collapse(value) if isinstance(value, str) else None
+            if value and field == 'title' and _HONORIFIC_ONLY_RE.match(value):
+                value = None
             if value and _normalise_for_match(value) in haystack:
                 clean[field] = value
             else:
@@ -333,7 +365,7 @@ def message_text(message) -> str | None:
     return next((b.text for b in message.content if b.type == 'text'), None)
 
 
-def estimate_cost(items: list, batch: bool = True) -> dict:
+def estimate_cost(items: list, batch: bool = True, model: str = MODEL) -> dict:
     """Approximate token counts and dollars, without calling the API."""
     requests = chunk(items)
     system_tokens = (len(SYSTEM_PROMPT) // CHARS_PER_TOKEN) + EST_SCHEMA_TOKENS
@@ -342,17 +374,17 @@ def estimate_cost(items: list, batch: bool = True) -> dict:
     )
     input_tokens = system_tokens * len(requests) + item_tokens
     output_tokens = EST_OUTPUT_TOKENS_PER_ITEM * len(items)
-    factor = BATCH_DISCOUNT if batch else 1.0
-    dollars = (input_tokens * PRICE_IN + output_tokens * PRICE_OUT) / 1_000_000 * factor
+    dollars = usage_cost(input_tokens, output_tokens, batch, model) * MODELS[model]['estimate_factor']
     return {
         'requests': len(requests), 'input_tokens': input_tokens,
         'output_tokens': output_tokens, 'dollars': round(dollars, 2),
     }
 
 
-def usage_cost(input_tokens: int, output_tokens: int, batch: bool) -> float:
+def usage_cost(input_tokens: int, output_tokens: int, batch: bool, model: str = MODEL) -> float:
+    price_in, price_out = MODELS[model]['price']
     factor = BATCH_DISCOUNT if batch else 1.0
-    return (input_tokens * PRICE_IN + output_tokens * PRICE_OUT) / 1_000_000 * factor
+    return (input_tokens * price_in + output_tokens * price_out) / 1_000_000 * factor
 
 
 # ------------------------------------------------------------------
@@ -380,21 +412,31 @@ def get_names_by_host(conn) -> dict:
 
 
 def get_appearances_to_process(conn, limit: int = None, random_sample: bool = False) -> list:
-    """Guest appearances that have not been processed yet, plus retries."""
+    """Guest appearances that have not been processed yet, plus retries.
+
+    Before the migration has run there is nothing processed, so every guest
+    appearance qualifies — that is what lets `estimate` and `pilot` run
+    against production ahead of the migration.
+    """
     cur = conn.cursor()
+    cur.execute("SELECT to_regclass('affiliation_extractions') IS NOT NULL")
+    migrated = cur.fetchone()[0]
     order = 'random()' if random_sample else 'eh.episode_id, eh.host_id'
+    join = """
+        LEFT JOIN affiliation_extractions ax
+               ON ax.episode_id = eh.episode_id AND ax.host_id = eh.host_id""" if migrated else ''
+    unprocessed = """
+          AND (ax.episode_id IS NULL OR (ax.status = 'retry' AND ax.attempts < %(max_attempts)s))""" if migrated else ''
     cur.execute(f"""
         SELECT eh.episode_id, eh.host_id, e.title, e.description, p.title
         FROM episode_host eh
         JOIN episodes e ON e.episode_id = eh.episode_id
         JOIN podcasts p ON p.podcast_id = e.podcast_id
-        LEFT JOIN affiliation_extractions ax
-               ON ax.episode_id = eh.episode_id AND ax.host_id = eh.host_id
-        WHERE eh.is_guest
-          AND (ax.episode_id IS NULL OR (ax.status = 'retry' AND ax.attempts < %s))
+        {join}
+        WHERE eh.is_guest {unprocessed}
         ORDER BY {order}
-        {'LIMIT %s' if limit else ''}
-    """, (MAX_ATTEMPTS, limit) if limit else (MAX_ATTEMPTS,))
+        {'LIMIT %(limit)s' if limit else ''}
+    """, {'max_attempts': MAX_ATTEMPTS, 'limit': limit})
     rows = cur.fetchall()
     cur.close()
     return [
@@ -487,14 +529,14 @@ def _report(appearances, no_mention, items, est):
     logger.info(f"Estimated cost at batch price: ${est['dollars']:.2f}")
 
 
-def cmd_estimate(limit=None):
+def cmd_estimate(limit=None, model=MODEL):
     conn = psycopg2.connect(DB)
     appearances, no_mention, items = _load(conn, limit)
     conn.close()
-    _report(appearances, no_mention, items, estimate_cost(items))
+    _report(appearances, no_mention, items, estimate_cost(items, model=model))
 
 
-def cmd_pilot(limit: int, out_path: str):
+def cmd_pilot(limit: int, out_path: str, model: str = MODEL):
     """A random sample, sent with normal (non-batch) calls, written to CSV.
 
     Nothing is written to the database. The CSV has one row per extracted
@@ -507,12 +549,12 @@ def cmd_pilot(limit: int, out_path: str):
     appearances, no_mention, items = _load(conn, limit, random_sample=True)
     host_names = get_names_by_host(conn)
     conn.close()
-    _report(appearances, no_mention, items, estimate_cost(items, batch=False))
+    _report(appearances, no_mention, items, estimate_cost(items, batch=False, model=model))
 
     client = anthropic.Anthropic()
     results, tokens_in, tokens_out, failed = {}, 0, 0, 0
     for group in chunk(items):
-        message = client.messages.create(**request_params(group))
+        message = client.messages.create(**request_params(group, model))
         tokens_in += message.usage.input_tokens
         tokens_out += message.usage.output_tokens
         text = message_text(message)
@@ -545,19 +587,19 @@ def cmd_pilot(limit: int, out_path: str):
     logger.info(f"Items with at least one role: {found}/{len(items)}; "
                 f"values dropped as not verbatim: {dropped_total}; items failed: {failed}")
     logger.info(f"Actual usage: {tokens_in:,} in, {tokens_out:,} out = "
-                f"${usage_cost(tokens_in, tokens_out, batch=False):.4f} at normal price "
-                f"(${usage_cost(tokens_in, tokens_out, batch=True):.4f} at batch price)")
+                f"${usage_cost(tokens_in, tokens_out, False, model):.4f} at normal price "
+                f"(${usage_cost(tokens_in, tokens_out, True, model):.4f} at batch price) on {model}")
     logger.info(f"Wrote {out_path}")
 
 
-def cmd_submit(limit=None, max_cost=2.00, dry_run=False):
+def cmd_submit(limit=None, max_cost=2.00, dry_run=False, model=MODEL):
     from anthropic import Anthropic
     from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
     from anthropic.types.messages.batch_create_params import Request
 
     conn = psycopg2.connect(DB)
     appearances, no_mention, items = _load(conn, limit)
-    est = estimate_cost(items)
+    est = estimate_cost(items, model=model)
     _report(appearances, no_mention, items, est)
 
     if dry_run:
@@ -583,13 +625,13 @@ def cmd_submit(limit=None, max_cost=2.00, dry_run=False):
 
     client = Anthropic()
     batch = client.messages.batches.create(requests=[
-        Request(custom_id=f'req-{i}', params=MessageCreateParamsNonStreaming(**request_params(group)))
+        Request(custom_id=f'req-{i}', params=MessageCreateParamsNonStreaming(**request_params(group, model)))
         for i, group in enumerate(chunk(items))
     ])
     logger.info(f"Submitted batch {batch.id}")
 
     _upsert_extractions(cur, [
-        (a['episode_id'], a['host_id'], 'pending', it['snippet'], it['snippet_hash'], batch.id, MODEL)
+        (a['episode_id'], a['host_id'], 'pending', it['snippet'], it['snippet_hash'], batch.id, model)
         for it in items for a in it['appearances']
     ])
     conn.commit()
@@ -619,10 +661,12 @@ def cmd_collect():
             continue
 
         cur.execute("""
-            SELECT episode_id, host_id, snippet, snippet_hash FROM affiliation_extractions
+            SELECT episode_id, host_id, snippet, snippet_hash, model FROM affiliation_extractions
             WHERE status = 'pending' AND batch_id = %s
         """, (batch_id,))
-        pending = cur.fetchall()
+        rows = cur.fetchall()
+        model = rows[0][4] if rows and rows[0][4] in MODELS else MODEL
+        pending = [r[:4] for r in rows]
         snippet_by_id = {item_id(h, s_hash): snippet for _, h, snippet, s_hash in pending}
         expected = set(snippet_by_id)
 
@@ -644,7 +688,7 @@ def cmd_collect():
         conn.commit()
         logger.info(f"Batch {batch_id}: {done} appearances done, {added} affiliations, "
                     f"{retry} to retry, {dropped} values dropped as not verbatim; "
-                    f"${usage_cost(tokens_in, tokens_out, batch=True):.4f}")
+                    f"${usage_cost(tokens_in, tokens_out, True, model):.4f}")
 
     cur.close()
     conn.close()
@@ -654,12 +698,16 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest='command', required=True)
 
+    model_arg = dict(choices=sorted(MODELS), default=MODEL)
+
     p = sub.add_parser('estimate', help='Count work and estimate cost; no API, no writes')
     p.add_argument('--limit', type=int)
+    p.add_argument('--model', **model_arg)
 
     p = sub.add_parser('pilot', help='Random sample to CSV; API calls, no DB writes')
     p.add_argument('--limit', type=int, default=100)
     p.add_argument('--out', default='affiliation_pilot.csv')
+    p.add_argument('--model', **model_arg)
 
     for name in ('submit', 'run'):
         p = sub.add_parser(name)
@@ -667,21 +715,22 @@ def main():
         p.add_argument('--max-cost', type=float, default=2.00,
                        help='Refuse to submit if the estimate is above this many dollars')
         p.add_argument('--dry-run', action='store_true', help='Report what would be sent, then stop')
+        p.add_argument('--model', **model_arg)
 
     sub.add_parser('collect', help='Record results of finished batches')
 
     args = parser.parse_args()
     if args.command == 'estimate':
-        cmd_estimate(args.limit)
+        cmd_estimate(args.limit, args.model)
     elif args.command == 'pilot':
-        cmd_pilot(args.limit, args.out)
+        cmd_pilot(args.limit, args.out, args.model)
     elif args.command == 'submit':
-        cmd_submit(args.limit, args.max_cost, args.dry_run)
+        cmd_submit(args.limit, args.max_cost, args.dry_run, args.model)
     elif args.command == 'collect':
         cmd_collect()
     elif args.command == 'run':
         cmd_collect()
-        cmd_submit(args.limit, args.max_cost, args.dry_run)
+        cmd_submit(args.limit, args.max_cost, args.dry_run, args.model)
 
 
 if __name__ == '__main__':

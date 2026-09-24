@@ -6,6 +6,7 @@ disposable test database) how results are recorded.
 No test here calls the API.
 """
 import json
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -14,7 +15,7 @@ from extract_affiliations import (
     build_snippet, group_appearances, verified_affiliations, parse_response_text,
     message_text, render_items, chunk, request_params, estimate_cost, snippet_hash,
     item_id, get_appearances_to_process, get_names_by_host, record_results,
-    SNIPPET_AFTER, ITEMS_PER_REQUEST, MODEL,
+    SNIPPET_AFTER, ITEMS_PER_REQUEST, MODEL, MODELS,
 )
 
 
@@ -150,6 +151,16 @@ class TestVerifiedAffiliations:
         assert kept == [{'title': None, 'company': 'Payne Institute'}]
         assert dropped == []
 
+    def test_bare_honorific_is_not_a_title(self):
+        kept, _ = verified_affiliations([{'title': 'Dr.', 'company': None}],
+                                        "Dr. Kevin Surprise joins us.")
+        assert kept == []
+
+    def test_title_containing_an_honorific_word_is_kept(self):
+        kept, _ = verified_affiliations([{'title': 'Senator', 'company': None}],
+                                        "Senator Martin Heinrich")
+        assert kept == [{'title': 'Senator', 'company': None}]
+
     def test_duplicates_collapse(self):
         aff = {'title': 'CEO', 'company': 'Fervo Energy'}
         kept, _ = verified_affiliations([aff, dict(aff)], self.SNIPPET)
@@ -205,6 +216,21 @@ class TestRequests:
         assert params['messages'][0]['role'] == 'user'
         assert params['messages'][0]['content'].count('<item ') == 2
 
+    def test_sonnet_request_turns_thinking_off(self):
+        # Adaptive thinking is on by default there and would bill as output.
+        params = request_params(self._items(1), 'claude-sonnet-5')
+        assert params['model'] == 'claude-sonnet-5'
+        assert params['thinking'] == {'type': 'disabled'}
+        assert 'thinking' not in request_params(self._items(1), 'claude-haiku-4-5')
+
+    def test_estimate_scales_with_model_price(self):
+        items = [{'snippet': 'x' * 400}] * 200
+        haiku = estimate_cost(items, model='claude-haiku-4-5')['dollars']
+        sonnet = estimate_cost(items, model='claude-sonnet-5')['dollars']
+        # 2x the price, times the measured 1.5x token factor.
+        assert sonnet == pytest.approx(haiku * 3, abs=0.01)
+        assert set(MODELS) >= {'claude-haiku-4-5', 'claude-sonnet-5'}
+
     def test_estimate_batch_is_half_of_normal(self):
         items = [{'snippet': 'x' * 400}] * 200
         batch, normal = estimate_cost(items), estimate_cost(items, batch=False)
@@ -255,6 +281,24 @@ def _pending(cur, episode_id, host_id, snippet):
         VALUES (%s, %s, 'pending', %s, %s, 'b1')
     """, (episode_id, host_id, snippet, s_hash))
     return (episode_id, host_id, snippet, s_hash)
+
+
+class TestSelectionBeforeMigration:
+    def test_works_without_the_affiliation_tables(self, db_conn):
+        # estimate/pilot have to run against production before the migration.
+        cur = db_conn.cursor()
+        cur.execute("DROP TABLE IF EXISTS host_affiliations, affiliation_extractions")
+        try:
+            pair = _setup_appearance(cur)
+            db_conn.commit()
+            apps = get_appearances_to_process(db_conn, limit=5)
+            assert [(a['episode_id'], a['host_id']) for a in apps] == [pair]
+        finally:
+            db_conn.rollback()
+            with open(os.path.join(os.path.dirname(__file__), '..',
+                                   'migrate_add_host_affiliations.sql')) as f:
+                cur.execute(f.read())
+            db_conn.commit()
 
 
 class TestSelection:
