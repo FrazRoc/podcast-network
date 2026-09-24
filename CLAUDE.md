@@ -115,6 +115,36 @@ it is not re-proposed.
   filters against known/rejected/pending/credited before its per-row insert
   loop, so its insert volume was always small.
 
+## Guest affiliations (`scraper/extract_affiliations.py`)
+
+Job title + organisation per **guest appearance**, not per person — people
+change jobs, and every observation is kept for auditing; a person's current
+role is their most recent row. Tables in `migrate_add_host_affiliations.sql`:
+`affiliation_extractions` (one row per processed `(episode, host)`, whatever
+the outcome, with the exact snippet sent) and `host_affiliations` (the
+facts; `data_source` `llm_extracted` or `manual`, and `manual` is never
+overwritten). Both FK to `episode_host` with `ON UPDATE/DELETE CASCADE`, so
+merges and credit deletions carry through without touching that code.
+
+- **Status: code only. Migration not run on production, no backfill yet,
+  not in `scrape.yml` yet.** Needs `ANTHROPIC_API_KEY` (and it as a GitHub
+  secret for the cron step).
+- Too varied for regex, so Haiku 4.5 reads it. Kept cheap by sending only
+  ~120 chars before / ~280 after each name mention (`build_snippet`), sending
+  an identical (person, snippet) once, 40 items per request, via the Batch
+  API (half price). `estimate` against the Aug data export: 6,022 guest
+  appearances → 5,250 unique items → ~$0.77 (chars/4 approximation).
+- **Every stored value must occur verbatim in its snippet**
+  (`verified_affiliations`); anything else is dropped and counted. This is
+  the guard against the model supplying a company from outside knowledge.
+- Order of operations: `estimate` (read-only) → `pilot --limit 100` (API,
+  CSV only, no DB writes) → review → migration → `submit` with approval per
+  the quantify-first rule → `collect`. `run` = collect then submit, for cron;
+  batches can take up to 24h, so each run collects the previous run's batch.
+  `--max-cost` (default $2) refuses to submit above the estimate.
+- `no_mention` rows (name not in title or description, e.g. Apple-only
+  credits) are terminal; a later description refresh does not re-open them.
+
 ## Tests
 
 **`scraper/tests/` now has a real pytest suite** (109 cases) covering
