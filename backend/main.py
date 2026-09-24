@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 
 from description_cleaner import (
     clean_description, extract_labelled_credits, name_in_text, first_name_belongs_to_other,
-    coarse_source,
+    coarse_source, strip_html,
 )
 from role_selection import pick_current_role
 
@@ -2406,6 +2406,19 @@ async def list_people(q: str = "", filter: str = "all", sort: str = "appearances
             extra_where = "AND h.data_source IN ('parsed_desc','parsed_title','approved_suggestion')"
         elif filter == "no_image":
             extra_where = "AND h.profile_image_url IS NULL"
+        elif filter == "concentrated":
+            # 5+ guest credits piled onto 3 or fewer shows — the shape a real
+            # public-figure over-crediting incident keeps taking (mentioned
+            # in a footer/citation on every episode of a couple of shows) as
+            # opposed to a real recurring guest, who tends to spread wider.
+            # Not proof either way — every batch investigated this way
+            # turned up a mix of real recurring guests, misfiled hosts, and
+            # production/staff credits — just a worklist of who's worth a
+            # closer look.
+            having_clause = """
+                HAVING COUNT(DISTINCT eh.episode_id) FILTER (WHERE eh.is_guest) >= 5
+                   AND COUNT(DISTINCT e.podcast_id) FILTER (WHERE eh.is_guest) BETWEEN 1 AND 3
+            """
 
         cur.execute(f"""
             SELECT h.host_id,
@@ -2956,18 +2969,49 @@ async def scan_person_episodes(host_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _match_snippet(full_name: str, title: str, description: str) -> str:
+    """A short window of text around wherever full_name (or, failing that,
+    its last name) turns up in the title or description — not a claim about
+    why the credit exists, just enough for a human to see it at a glance
+    instead of opening the episode. Plain substring search, not
+    word-boundary-safe like name_in_text: a rough hint is fine here even
+    if it occasionally lands on a substring match."""
+    last_name = full_name.split()[-1] if full_name.split() else full_name
+    for text in (title or '', strip_html(description or '')):
+        low = text.lower()
+        idx = low.find(full_name.lower())
+        if idx == -1:
+            idx = low.find(last_name.lower())
+        if idx == -1:
+            continue
+        start = max(0, idx - 60)
+        end = min(len(text), idx + len(full_name) + 60)
+        snippet = text[start:end].strip()
+        return snippet
+    return ''
+
+
 @app.get("/api/admin/people/{host_id}/episodes", dependencies=[Depends(verify_admin)])
 async def get_person_episodes(host_id: int):
     """Get all episodes a person appears in, grouped by podcast."""
     try:
         conn = get_db_connection()
         cur  = conn.cursor()
+        cur.execute("SELECT first_name || ' ' || last_name AS full_name FROM hosts WHERE host_id = %s", (host_id,))
+        person = cur.fetchone()
+        if not person:
+            cur.close()
+            conn.close()
+            raise HTTPException(status_code=404, detail="Person not found")
+        full_name = person['full_name']
+
         cur.execute("""
             SELECT p.title AS podcast_title,
                    p.cover_art_url,
                    p.apple_podcast_id,
                    e.episode_id,
                    e.title AS episode_title,
+                   e.description,
                    e.published_date,
                    eh.is_guest,
                    eh.data_source
@@ -2993,6 +3037,7 @@ async def get_person_episodes(host_id: int):
                 'published_date': str(r['published_date']) if r['published_date'] else None,
                 'is_guest':      r['is_guest'],
                 'data_source':   r['data_source'],
+                'snippet':       _match_snippet(full_name, r['episode_title'], r['description']),
             })
             covers[r['podcast_title']] = r['cover_art_url']
             apple_ids[r['podcast_title']] = r['apple_podcast_id']
