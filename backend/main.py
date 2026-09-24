@@ -2112,7 +2112,7 @@ async def get_diagnostics():
         # frozen at whatever credits they arrived with. Ã and Â are the
         # signature of that double-encoding; â€ covers mangled punctuation and
         # ï¿½ the replacement character.
-        cur.execute("""
+        cur.execute(r"""
             SELECT host_id,
                    first_name || ' ' || last_name AS stored,
                    convert_from(convert_to(first_name, 'LATIN1'), 'UTF8') || ' ' ||
@@ -2124,6 +2124,14 @@ async def get_diagnostics():
               -- range, which would take the whole diagnostics page down with
               -- it. Mangled text only ever contains Latin-1 characters by
               -- definition, so requiring that loses nothing and cannot throw.
+              --
+              -- This string MUST stay a Python raw string (the r-prefix on
+              -- cur.execute below) — a plain triple-quoted string interprets
+              -- \00FF itself as a Python octal/null escape before it ever
+              -- reaches Postgres, inserting a stray NUL into the query text
+              -- and producing "unterminated quoted string" (a real
+              -- incident: this broke the whole diagnostics endpoint in
+              -- production).
               AND first_name || ' ' || last_name ~ ('^[ -' || U&'\00FF' || ']+$')
             ORDER BY credits DESC, stored
         """)
