@@ -51,7 +51,7 @@ NOT_A_PERSON = {
     'political climate',
 
     # Shows whose channel name matches their own title
-    'cleantech talk', 'drilled',
+    'cleantech talk', 'drilled', 'solar surge',
 
     # Generic descriptions
     'the founders and futurists building the hard-tech frontier.',

@@ -25,6 +25,15 @@ class TestLooksLikePersonChannel:
     def test_rejects_single_word(self):
         assert not looks_like_person_channel("Drilled")
 
+    def test_rejects_show_whose_channel_name_matches_its_own_title(self):
+        # Real incident: "Solar Surge" (podcast_id 1810) had no real host
+        # registered on Apple, so its own show name — a plain two-word
+        # Title-Cased string, indistinguishable from a real name by shape
+        # alone — got stored as a fake host via the itunes_artist source,
+        # then matched as a "guest" on other shows whenever their text
+        # happened to contain the literal phrase ("Pakistan's Solar Surge").
+        assert not looks_like_person_channel("Solar Surge")
+
     def test_rejects_company_suffix(self):
         assert not looks_like_person_channel("Acme LLC")
 
