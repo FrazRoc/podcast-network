@@ -138,6 +138,13 @@ Electricity". Never leave the organisation inside the title.
 - Several titles at one organisation stay together as written, e.g. \
 "co-founder and CEO". Roles at different organisations are separate entries, \
 one per organisation.
+- `company` is always exactly one organisation. When one title covers \
+several organisations ("a fellow at Columbia University and NASA", \
+"reporter for the Wall Street Journal and Bloomberg"), return one entry per \
+organisation, each with that title: company "Columbia University" and \
+company "NASA". An "and" or "&" inside a single organisation's name stays \
+("McKinsey & Company", "Black & Veatch", "Los Angeles Department of Water \
+and Power").
 - An organisation with no title still counts: "Eversource's Eric Bosworth" \
 and "Ivan Celanovic from Typhoon" give company "Eversource" / "Typhoon" \
 with title null. Episode titles often pair a guest with their organisation \

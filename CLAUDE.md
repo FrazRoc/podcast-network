@@ -322,6 +322,17 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   read time; pairs a merge newly creates appear at the next rebuild.
   Sep 24 2026 after stage 2: 7,516 companies, 6,543 suggestions (5,013
   similar, 1,382 contains, 148 acronym); 6,308 companies have one person.
+- **Cleanup, Sep 24 2026:** 290 companies merged into 248 (formatting
+  variants, one-word misspellings, 88 acronyms checked against episode
+  text) and 2,062 pairs marked different (no distinctive word in common,
+  wrong acronym expansions); logs of both are kept outside the repo. Then
+  combined companies ("Columbia University and NASA" — one title at two
+  organisations) were split: 58 roles became 114, 52 combined companies
+  deleted; 51 books/descriptions marked not an organisation. The prompt
+  now asks for exactly one organisation per `company` (a shared title
+  becomes one entry per organisation) — written while the API account had
+  no credit, so not yet checked against a live model run. Queue after all
+  this: 3,484.
 - The merge-suggestions tab hides every card naming a company that was just
   merged away and reloads the queue; skipped cards stay hidden until
   Refresh. (First version left those cards in place, and acting on them
