@@ -20,6 +20,7 @@ Usage:
 import os
 import sys
 import psycopg2
+from psycopg2.extras import execute_values
 import re
 import argparse
 import logging
@@ -146,6 +147,28 @@ def get_already_credited_pairs(conn) -> set[tuple[str, int]]:
     return pairs
 
 
+def get_existing_credits(conn) -> set[tuple[int, int]]:
+    """(episode_id, host_id) pairs already in episode_host.
+
+    run() rediscovers the full set of known-name matches across the whole
+    archive on every scheduled invocation, by design (see
+    get_episodes_to_scan) — but until this filter, it also re-attempted an
+    INSERT ... ON CONFLICT DO NOTHING for every one of those matches every
+    single time: ~24,000 of them, one network round-trip each. At roughly
+    60ms per round-trip from a GitHub Actions runner to Render's Postgres,
+    that alone was ~25 minutes of the "Scan episodes for known names" step's
+    45-minute budget — almost all of it re-confirming credits that already
+    existed (of 24,445 matches on one measured run, only 131 were new).
+    Filtering against this set before inserting turns most runs into a
+    handful of round-trips instead of tens of thousands.
+    """
+    cur = conn.cursor()
+    cur.execute("SELECT episode_id, host_id FROM episode_host")
+    pairs = {(r[0], r[1]) for r in cur.fetchall()}
+    cur.close()
+    return pairs
+
+
 def get_pending_suggestions(conn) -> set[str]:
     """Return set of (candidate_name.lower(), episode_id) already in suggestions."""
     cur = conn.cursor()
@@ -248,7 +271,7 @@ def get_show_hosts(conn) -> dict:
 
 # Intro phrases that signal a guest is being introduced
 _INTRO_RE = re.compile(
-    r"""(?:with|joined\s+by|featuring|
+    r"""(?:with|w/|joined\s+by|featuring|
         # "(ft. Name - Org)" / "(feat. Name)" — Climate Insiders' entire
         # title convention (suggestion 5538, "Ben James"), abbreviations
         # "featuring" alone didn't cover.
@@ -301,7 +324,11 @@ _INTRO_RE = re.compile(
         # "|" (a literal pipe) is its own stop signal: "... with Todd
         # Denton | Lithic Industries | Ep 244" has no other stop word
         # between the name and the show's "Title | Org | Ep NNN" convention.
-        (?=\s+(?:of|at|from|about|for|on|to|and)\b|,|'s|\s+(?:CEO|CTO|CFO|COO|Director|(?:Co[- ]?)?Founder)\b|\s*[-–)|]|$)
+        # "&" likewise — "...—with Fred Iutzi & Tim Crews of The Land
+        # Institute" (episode 95744) has no stop word between "Iutzi" and
+        # the ampersand joining the second name; without it here, the
+        # capture can't extend OR stop, so the whole match fails silently.
+        (?=\s+(?:of|at|from|about|for|on|to|and)\b|,|'s|\s*&|\s+(?:CEO|CTO|CFO|COO|Director|(?:Co[- ]?)?Founder)\b|\s*[-–)|]|$)
     """,
     re.VERBOSE | re.IGNORECASE
 )
@@ -403,6 +430,9 @@ _BIO_SENTENCE_LEAD_BAD = {
     # "At Hyperion Search, ..." satisfy the guest-bio-line shape below
     # (Capitalized Words, comma, more text) just as well as a real name.
     'in', 'at', 'on', 'for', 'with', 'from', 'by',
+    # "As Chris tells it, ..." / "As Melissa explains, ..." — subject_verb_lead's
+    # sentence-boundary anchor treats "As" as the first word of the name.
+    'as',
 }
 
 # A company is essentially never described as "is a/the founder/reporter/
@@ -414,21 +444,35 @@ _BIO_SENTENCE_LEAD_BAD = {
 # Shared with _ROLE_LED_NAME_RE below — pulled out to a string so both
 # regexes stay in sync instead of drifting apart as the list grows.
 _ROLE_WORDS = (
-    r'founders?|co-?founders?|ceo|cto|cfo|coo|cmo|directors?|'
+    r'founders?|co-?founders?|ceo|cto|cfo|coo|cmo|svp|evp|vp|directors?|'
     r'presidents?|professors?|reporters?|journalists?|analysts?|attorneys?|'
-    r'partners?|executives?|engineers?|scientists?|hosts?|authors?|'
+    r'partners?|executives?|engineers?|scientists?|hosts?|co-?hosts?|'
+    r'guests?|moderators?|presenters?|panelists?|authors?|'
     r'columnists?|correspondents?|editors?|coach(?:es)?|investors?|'
     r'consultants?|advisors?|advisers?|chair(?:man|woman)?|managers?|'
     r'specialists?|experts?|leads?|principals?|fellows?|researchers?|'
     r'entrepreneurs?|activists?|strategists?|physicians?|doctors?|lawyers?|'
     r'economists?|geologists?|glaciologists?|ecologists?|pioneers?|advocates?|'
-    r'philanthropists?|educators?|historians?|ambassadors?'
+    r'philanthropists?|educators?|historians?|ambassadors?|champions?'
 )
 
 _BIO_ROLE_WORDS_RE = re.compile(
     r'(?<![a-zA-Z])(?:' + _ROLE_WORDS + r')(?![a-zA-Z])',
     re.IGNORECASE
 )
+
+# A handful of patterns capture a role/label word directly adjacent to the
+# real name with nothing distinguishing the two ("Host Ed Crooks talks
+# through...", "Moderator Keith Martin discusses...", "& Guest Co-Host
+# Catherine Howarth") — the trigger word IS the role noun here, so unlike
+# find_role_led_names (where the regex itself excludes the role word from
+# the capture), these leak it straight into the "name". Stripped centrally
+# in add() below rather than duplicated in each pattern that can produce it.
+_LEADING_ROLE_WORD_RE = re.compile(r'^(?:' + _ROLE_WORDS + r')\s+', re.IGNORECASE)
+
+
+def strip_leading_role_word(name: str) -> str:
+    return _LEADING_ROLE_WORD_RE.sub('', name)
 
 # "Adam Greenberg is the CEO and co-founder." — a plain declarative bio
 # sentence with no trigger word at all (suggestion 9340: Climate CEOs'
@@ -437,7 +481,12 @@ _BIO_ROLE_WORDS_RE = re.compile(
 # a sentence boundary so it doesn't fire mid-sentence ("the CEO of Tesla is
 # Elon Musk" isn't "the CEO of Tesla, is, Elon").
 _BIO_IS_RE = re.compile(
-    r'(?:^|[.!?]\s+)([A-Z][a-zA-ZÀ-ž\x27’-]+(?:[^\S\n]+[A-Z][a-zA-ZÀ-ž\x27’-]+){1,2}?)'
+    # "\n" alongside ".!?\s+" — a show-note bio often puts the guest's name
+    # alone on its own heading line ("...\n\nEric Dahnke\n\nEric Dahnke is
+    # the Founder and CEO of Power Market...", episode 96488), so the
+    # sentence genuinely starts right after a paragraph break with no
+    # preceding punctuation at all.
+    r'(?:^|[.!?]\s+|\n)([A-Z][a-zA-ZÀ-ž\x27’-]+(?:[^\S\n]+[A-Z][a-zA-ZÀ-ž\x27’-]+){1,2}?)'
     # Article is optional only when a role word sits immediately after "is"
     # with nothing between — "Alan Cooper is co-founder and CEO of
     # ON.energy" (episode 56587). Without that immediacy requirement, "Host
@@ -484,34 +533,39 @@ def find_role_led_names(text):
 
 # "Iñigo Rengifo, CEO of Concentro, discusses how tax credit transfers..."
 # (episode 56487) / "Stefan Riesinger, partner at Norton Rose Fulbright,
-# discusses..." (episode 56488) — many single-guest shows open their
-# description with exactly this shape: Name, then an appositive role
-# clause, then the sentence's verb. No trigger word exists to key off of;
-# what makes it safe is that it's anchored to the very start of the text
-# AND the appositive clause must contain a real role word, so an ordinary
-# opening line like "In this episode, we explore..." can't match (its
-# first "word" span isn't two contiguous Title-Case words).
+# discusses..." (episode 56488) — many single-guest shows open a sentence
+# with exactly this shape: Name, then an appositive role clause, then the
+# rest of the sentence. No trigger word exists to key off of; what makes it
+# safe is that it's anchored to a sentence boundary AND the appositive
+# clause must contain a real role word, so an ordinary opening like "In
+# this episode, we explore..." can't match (its first "word" span isn't two
+# contiguous Title-Case words).
+#
+# Not limited to the very start of the text — "Shane Battier—NCAA champion
+# at Duke in 2001 and two-time NBA champion with the Miami Heat—knows a
+# thing or two..." (episode 460/166905's suggestion) is the SECOND sentence
+# of its description, and uses em dashes rather than commas. Both variants
+# are common enough in show notes that the pattern needs to recognize
+# either separator in either position, not just the comma/comma pairing.
 _LEAD_APPOSITIVE_RE = re.compile(
-    r'^\s*([A-Z][a-zA-ZÀ-ž\x27’-]+(?:\s+[A-Z][a-zA-ZÀ-ž\x27’-]+){1,2}?)'
-    r',\s+([^,]{3,90}),\s+'
+    r'(?:^|[.!?]\s+|\n)\s*([A-Z][a-zA-ZÀ-ž\x27’-]+(?:\s+[A-Z][a-zA-ZÀ-ž\x27’-]+){1,2}?)'
+    r'\s*[,—–]\s*([^,—–]{3,90})\s*[,—–]\s*'
 )
 
 
 def find_lead_appositive_name(text):
-    """The name leading this text's opening "Name, role clause, verb..."
-    sentence (see _LEAD_APPOSITIVE_RE above), or None. Yields at most one
-    (name, absolute_pos) pair since it only ever looks at the very start."""
-    m = _LEAD_APPOSITIVE_RE.match(text)
-    if not m:
-        return
-    if not _BIO_ROLE_WORDS_RE.search(m.group(2)):
-        return
-    name = strip_honorific(m.group(1))
-    if not _valid_name(name):
-        return
-    if name.split()[0].lower() in _BIO_SENTENCE_LEAD_BAD:
-        return
-    yield name, m.start(1)
+    """Names leading a "Name, role clause, verb..." (or em-dash-separated
+    equivalent) sentence anywhere in the text — see _LEAD_APPOSITIVE_RE
+    above. Yields (name, absolute_pos) pairs."""
+    for m in _LEAD_APPOSITIVE_RE.finditer(text):
+        if not _BIO_ROLE_WORDS_RE.search(m.group(2)):
+            continue
+        name = strip_honorific(m.group(1))
+        if not _valid_name(name):
+            continue
+        if name.split()[0].lower() in _BIO_SENTENCE_LEAD_BAD:
+            continue
+        yield name, m.start(1)
 
 
 # "...for Cloud, Raiford Smith, joins us to explain..." (episode 56036) —
@@ -548,6 +602,47 @@ def find_mid_appositive_names(text):
         if name.split()[0].lower() in _BIO_SENTENCE_LEAD_BAD:
             continue
         if looks_like_organisation(name):
+            continue
+        if _BIO_ROLE_WORDS_RE.fullmatch(name.split()[-1]):
+            continue
+        yield name, m.start(1)
+
+
+# "Raquel Bierzwinsky sits down to tell us what she expects to see..."
+# (episode 96610) — the guest is the grammatical subject of the sentence
+# with no appositive clause and no comma at all, just a reporting verb
+# straight after the name. Reuses _ROLE_LED_NAME_VERBS' list (the same
+# verbs that end a role-led-name match) plus "sits/sat down" (_INTRO_RE's
+# own "sits down WITH X" trigger doesn't cover the reverse — the guest
+# being the one who sits down, not the object of it).
+_SUBJECT_VERB_LEAD_RE = re.compile(
+    r'(?:^|[.!?]\s+|\n)\s*([A-Z][a-zA-ZÀ-ž\x27’-]+(?:\s+[A-Z][a-zA-ZÀ-ž\x27’-]+){1,2}?)'
+    r'\s+(?:' + _ROLE_LED_NAME_VERBS + r'|sits?\s+down|sat\s+down)\b',
+    re.IGNORECASE
+)
+
+
+def find_subject_verb_lead_names(text):
+    """Names that open a sentence as the subject of a guest-introducing verb
+    with no appositive clause at all (see _SUBJECT_VERB_LEAD_RE above).
+
+    Two false-positive shapes needed guarding against beyond the usual
+    checks: an ALL-CAPS newsletter-style headline ("SWEDEN EV SHARE HITS
+    67% IN Q2", "YOUNG DRIVERS SAY ...") satisfies "2-3 capitalized words
+    then a verb" just as well as a name — real names are never written in
+    shouting case in these show notes — and a company-plus-role-abbreviation
+    headline ("Kanthal SVP Talks Electrifying...") where the second "word"
+    is a role abbreviation, not a surname (mirrors find_mid_appositive_names'
+    identical check on its OWN last word)."""
+    for m in _SUBJECT_VERB_LEAD_RE.finditer(text):
+        name = strip_honorific(m.group(1))
+        if not _valid_name(name):
+            continue
+        if name.split()[0].lower() in _BIO_SENTENCE_LEAD_BAD:
+            continue
+        if looks_like_organisation(name):
+            continue
+        if name.isupper():
             continue
         if _BIO_ROLE_WORDS_RE.fullmatch(name.split()[-1]):
             continue
@@ -747,7 +842,7 @@ def extract_candidate_names_tagged(text: str) -> list[tuple[str, str, str]]:
     seen = set()
 
     def add(name, pos, tag):
-        name = strip_honorific(strip_possessive_prefix(name))
+        name = strip_leading_role_word(strip_honorific(strip_possessive_prefix(name)))
         if _valid_name(name) and name.lower() not in seen:
             seen.add(name.lower())
             start = max(0, pos - 60)
@@ -756,7 +851,10 @@ def extract_candidate_names_tagged(text: str) -> list[tuple[str, str, str]]:
             found.append((name, context, tag))
 
     _AND_RE = re.compile(
-        r'\s+and\s+'
+        # "&" as well as "and" \u2014 "...with Fred Iutzi & Tim Crews of The
+        # Land Institute" (episode 95744) joins its second name with a bare
+        # ampersand, not the word "and".
+        r'\s+(?:and|&)\s+'
         r'(?:(?:Dr|Prof|Mr|Ms|Mrs|Senator|Sen|Rep|CEO|CTO|CFO|COO|Governor|'
         r'Director|Mayor|President)\.?\s+)*'
         # Lazy + a stop-word lookahead, same shape as _INTRO_RE/_POSSESSIVE_RE
@@ -819,6 +917,9 @@ def extract_candidate_names_tagged(text: str) -> list[tuple[str, str, str]]:
 
     for name, pos in find_mid_appositive_names(text):
         add(name, pos, 'mid_appositive')
+
+    for name, pos in find_subject_verb_lead_names(text):
+        add(name, pos, 'subject_verb_lead')
 
     return found
 
@@ -1043,33 +1144,46 @@ def run(dry_run: bool = True, title_only: bool = False, min_length: int = 7,
         conn.close()
         return
 
+    # The vast majority of matches on a full-archive scan are re-discoveries
+    # of credits already in episode_host — filtering them out here is what
+    # keeps this step's insert phase from being tens of thousands of
+    # individual round-trips. See get_existing_credits().
+    existing = get_existing_credits(conn)
+    new_matches = [m for m in matches if (m['episode_id'], m['host_id']) not in existing]
+    skipped = len(matches) - len(new_matches)
+
+    if not new_matches:
+        conn.close()
+        print(f"\nDone: 0 credits inserted, {skipped} already existed")
+        return
+
     cur = conn.cursor()
-    inserted = skipped = 0
+    rows = [
+        (m['episode_id'], m['host_id'], not m['is_show_host'],
+         'Guest' if not m['is_show_host'] else 'Host', m['source'])
+        for m in new_matches
+    ]
+    try:
+        execute_values(
+            cur,
+            """
+            INSERT INTO episode_host (episode_id, host_id, is_guest, role, data_source)
+            VALUES %s
+            ON CONFLICT (episode_id, host_id) DO NOTHING
+            """,
+            rows,
+            page_size=len(rows),
+        )
+        inserted = cur.rowcount
+        conn.commit()
+    except Exception as e:
+        logger.error(f"Error batch-inserting credits: {e}")
+        conn.rollback()
+        inserted = 0
 
-    for m in matches:
-        try:
-            is_guest = not m['is_show_host']
-            role = 'Guest' if is_guest else 'Host'
-            cur.execute(
-                """
-                INSERT INTO episode_host (episode_id, host_id, is_guest, role, data_source)
-                VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT (episode_id, host_id) DO NOTHING
-                """,
-                (m['episode_id'], m['host_id'], is_guest, role, m['source'])
-            )
-            if cur.rowcount > 0:
-                inserted += 1
-            else:
-                skipped += 1
-        except Exception as e:
-            logger.error(f"Error inserting {m['full_name']} on episode {m['episode_id']}: {e}")
-            conn.rollback()
-
-    conn.commit()
     cur.close()
     conn.close()
-    print(f"\nDone: {inserted} credits inserted, {skipped} already existed")
+    print(f"\nDone: {inserted} credits inserted, {skipped + (len(new_matches) - inserted)} already existed")
 
 
 # ------------------------------------------------------------------

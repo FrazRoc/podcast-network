@@ -100,7 +100,20 @@ it is not re-proposed.
 - Panellists count as guests.
 - **The ~40 strip patterns need auditing** — several show-specific fixes
   overreach.
-- Insert loops are per-row and slow; `execute_values` batching is the fix.
+- **`run()` re-inserted every match on every full-archive scan, not just new
+  ones** — since it scans the whole archive by design (see above), ~99% of
+  matches on a typical run were already in `episode_host`, but each still
+  cost one `INSERT ... ON CONFLICT DO NOTHING` round-trip. At ~60ms/round-trip
+  from a GitHub Actions runner to Render, ~24,000 redundant round-trips ate
+  the scheduled `scrape.yml` job's 45-minute budget and killed the "Scan
+  episodes for known names" step on 60% of runs — which meant the two steps
+  after it (queueing suggestions, recording the successful-run timestamp)
+  silently stopped running too. Fixed by filtering matches against
+  `get_existing_credits()` (a plain `(episode_id, host_id)` set from
+  `episode_host`) before inserting, then batching the genuinely-new remainder
+  with `execute_values`. `suggest()` doesn't have this problem — it already
+  filters against known/rejected/pending/credited before its per-row insert
+  loop, so its insert volume was always small.
 
 ## Tests
 
