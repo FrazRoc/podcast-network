@@ -30,6 +30,10 @@ const FILTERS = [
   // often than a genuine wide-ranging recurring guest does. A worklist to
   // review, not a verdict.
   { id: 'concentrated', label: 'Concentrated (5+ on ≤3 shows)' },
+  // On the current role shown on their profile (pinned, else derived).
+  { id: 'role_title_company', label: 'Has role & company' },
+  { id: 'role_title_only',    label: 'Has role only' },
+  { id: 'role_company_only',  label: 'Has company only' },
 ];
 
 const SORTS = [
@@ -39,6 +43,7 @@ const SORTS = [
   { id: 'name_asc',         label: 'Name A–Z' },
   { id: 'name_desc',        label: 'Name Z–A' },
   { id: 'newest',           label: 'Newest first' },
+  { id: 'company_asc',      label: 'Company A–Z' },
 ];
 
 const emptyForm = { first_name: '', last_name: '', twitter_url: '', bluesky_url: '', linkedin_url: '' };
@@ -844,6 +849,13 @@ export default function AdminPeople() {
                             {badge.label}
                           </span>
                         </div>
+                        {(person.current_title || person.current_company) && (
+                          <p className="text-xs text-gray-600 truncate">
+                            {person.current_title}
+                            {person.current_title && person.current_company ? ' · ' : ''}
+                            {person.current_company}
+                          </p>
+                        )}
                         <p className="text-xs text-gray-400">
                           {person.appearances} ep{person.appearances !== 1 ? 's' : ''}
                           {person.podcast_count > 0 && ` · ${person.podcast_count} show${person.podcast_count !== 1 ? 's' : ''}`}
