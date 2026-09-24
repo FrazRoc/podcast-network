@@ -52,7 +52,9 @@ import psycopg2
 from psycopg2.extras import execute_values
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'backend'))
-from description_cleaner import clean_description, _name_pattern  # noqa: E402
+from description_cleaner import (  # noqa: E402
+    clean_description, _name_pattern, first_name_belongs_to_other,
+)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
@@ -86,6 +88,11 @@ BATCH_DISCOUNT = 0.5
 SNIPPET_BEFORE = 120
 SNIPPET_AFTER = 280
 SNIPPET_MAX_WINDOWS = 2
+# Bios often go on by first name once the full name has been given:
+# "...speaks with Erica Downs, Tatiana Mitrova and Sergey Vakulenko ...
+# Sergey is a senior fellow at the Carnegie Russia Eurasia Center." The
+# full-name window ends before that sentence.
+SNIPPET_MAX_FIRST_NAME_WINDOWS = 1
 
 ITEMS_PER_REQUEST = 40
 MAX_TOKENS = 4096
@@ -125,13 +132,22 @@ Electricity". Never leave the organisation inside the title.
 one per organisation.
 - An organisation with no title still counts: "Eversource's Eric Bosworth" \
 and "Ivan Celanovic from Typhoon" give company "Eversource" / "Typhoon" \
-with title null.
+with title null. Episode titles often pair a guest with their organisation \
+by punctuation alone, and that counts too: "Dandelion Energy: Kathy Hannun", \
+"(with Ben Christensen @ Cambium)" and "Nikhil Vadhavkar (Raptor Maps)" give \
+company "Dandelion Energy" / "Cambium" / "Raptor Maps".
+- The text may refer back to the person by first name only ("Sergey is a \
+senior fellow at ..."); that is still them.
 - If the text gives only a title or only an organisation, set the other to null.
 - A title is a position: CEO, partner, senior fellow, professor, \
 commissioner, founder, reporter. Descriptions such as "expert", "leader", \
 "guest" or "author" on their own are not titles.
 - Skip roles the text marks as past: former, ex-, previously, retired, \
 used to.
+- If the text presents the person as a host, co-host or producer of this \
+podcast, set `is_podcast_host` to true and return no affiliations for them. \
+Hosting a different show does not count; neither does moderating a single \
+panel.
 - Skip the podcast itself and its production company unless the text says \
 the person works there.
 - If the text states no role for the person, return an empty list. Never use \
@@ -148,6 +164,7 @@ OUTPUT_SCHEMA = {
                 'type': 'object',
                 'properties': {
                     'id': {'type': 'string'},
+                    'is_podcast_host': {'type': 'boolean'},
                     'affiliations': {
                         'type': 'array',
                         'items': {
@@ -161,7 +178,7 @@ OUTPUT_SCHEMA = {
                         },
                     },
                 },
-                'required': ['id', 'affiliations'],
+                'required': ['id', 'is_podcast_host', 'affiliations'],
                 'additionalProperties': False,
             },
         },
@@ -205,16 +222,48 @@ def _window(text: str, start: int, end: int) -> tuple:
     return lo, hi
 
 
+def _first_name_spans(names: list, text: str, full_spans: list) -> list:
+    """Mentions of the person by first name alone, after their full name.
+
+    Only used once the full name has appeared (so the first name refers
+    back to them), never inside a full-name mention, and not at all when the
+    same first name is attached to a different surname in the text (a host
+    "Jason Bordoff" and a guest "Jason Price" in one description).
+    """
+    if not full_spans or not names:
+        return []
+    first, _, last = names[0].partition(' ')
+    if not first or not last or first_name_belongs_to_other(first, last, text):
+        return []
+    after = full_spans[0][1]
+    return [
+        (a, b) for a, b in _mention_spans([first], text)
+        if a >= after and not any(fa <= a < fb for fa, fb in full_spans)
+    ]
+
+
+def _merge(windows: list) -> list:
+    merged = []
+    for lo, hi in sorted(windows):
+        if merged and lo <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], hi))
+        else:
+            merged.append((lo, hi))
+    return merged
+
+
 def build_snippet(names: list, title: str, description: str) -> str | None:
     """The text that could say what this person does, or None if they are
     not named in the episode at all.
 
     The episode title is included whole when it names them (titles are short
     and often are the credit: "Jane Doe, CEO of Fervo, on geothermal").
-    From the description, the first SNIPPET_MAX_WINDOWS mentions are taken
-    with their surrounding text; overlapping windows are merged. The full
-    cleaned description is used, not the scanner's 2,500-character cap: a
-    "Guest:" block past the cap is exactly where a role is most likely to be.
+    From the description, windows around the first SNIPPET_MAX_WINDOWS
+    full-name mentions (merged where they overlap), plus up to
+    SNIPPET_MAX_FIRST_NAME_WINDOWS later first-name-only mentions, in text
+    order. The full cleaned description is used, not the scanner's
+    2,500-character cap: a "Guest:" block past the cap is exactly where a
+    role is most likely to be.
     """
     parts = []
     title = _collapse(title or '')
@@ -222,14 +271,14 @@ def build_snippet(names: list, title: str, description: str) -> str | None:
         parts.append(title)
 
     desc = clean_description(description or '', max_chars=None)
-    windows = []
-    for start, end in _mention_spans(names, desc):
-        lo, hi = _window(desc, start, end)
-        if windows and lo <= windows[-1][1]:
-            windows[-1] = (windows[-1][0], max(windows[-1][1], hi))
-        else:
-            windows.append((lo, hi))
-    for lo, hi in windows[:SNIPPET_MAX_WINDOWS]:
+    full_spans = _mention_spans(names, desc)
+    full = _merge([_window(desc, a, b) for a, b in full_spans])[:SNIPPET_MAX_WINDOWS]
+    covered = lambda a: any(lo <= a < hi for lo, hi in full)
+    first_only = [
+        _window(desc, a, b) for a, b in _first_name_spans(names, desc, full_spans)
+        if not covered(a)
+    ][:SNIPPET_MAX_FIRST_NAME_WINDOWS]
+    for lo, hi in _merge(full + first_only):
         parts.append(_collapse(desc[lo:hi]))
 
     return ' … '.join(parts) if parts else None
@@ -341,17 +390,21 @@ def verified_affiliations(affiliations: list, snippet: str) -> tuple:
 
 
 def parse_response_text(text: str, expected_ids: set) -> dict:
-    """{item id: [affiliation, ...]} for the ids this request was sent.
+    """{item id: {'is_host': bool, 'affiliations': [...]}} for the ids this
+    request was sent.
 
     Unknown ids are ignored; ids missing from the response are simply absent
-    from the result, and the caller marks them for retry.
+    from the result, and the caller marks them for retry. Anyone flagged as
+    this podcast's host gets no affiliations, whatever else came back.
     """
     data = json.loads(text)
     out = {}
     for result in data.get('results', []):
         rid = result.get('id')
         if rid in expected_ids and rid not in out:
-            out[rid] = result.get('affiliations') or []
+            is_host = bool(result.get('is_podcast_host'))
+            out[rid] = {'is_host': is_host,
+                        'affiliations': [] if is_host else (result.get('affiliations') or [])}
     return out
 
 
@@ -434,6 +487,12 @@ def get_appearances_to_process(conn, limit: int = None, random_sample: bool = Fa
         JOIN podcasts p ON p.podcast_id = e.podcast_id
         {join}
         WHERE eh.is_guest {unprocessed}
+          -- Hosts credited on their own show are not guests there; their
+          -- roles are left to a separate process.
+          AND NOT EXISTS (
+              SELECT 1 FROM host_podcast hp
+              WHERE hp.host_id = eh.host_id AND hp.podcast_id = e.podcast_id
+          )
         ORDER BY {order}
         {'LIMIT %(limit)s' if limit else ''}
     """, {'max_attempts': MAX_ATTEMPTS, 'limit': limit})
@@ -466,16 +525,20 @@ def record_results(cur, pending: list, answers: dict) -> tuple:
 
     pending: (episode_id, host_id, snippet, snippet_hash) rows still
     'pending' for the batch. answers: {item id: [affiliation, ...]}.
-    Appearances with no answer go to 'retry'. Returns
+    Appearances with no answer go to 'retry'; ones the model flagged as this
+    podcast's host go to 'host' with nothing stored. Returns
     (done, affiliations added, retried, values dropped as not verbatim).
     """
-    done, retry, new_rows, dropped_total = [], [], [], 0
+    done, retry, hosts, new_rows, dropped_total = [], [], [], [], 0
     for episode_id, host_id, snippet, s_hash in pending:
         key = item_id(host_id, s_hash)
         if key not in answers:
             retry.append((episode_id, host_id))
             continue
-        kept, dropped = verified_affiliations(answers[key], snippet)
+        if answers[key]['is_host']:
+            hosts.append((episode_id, host_id))
+            continue
+        kept, dropped = verified_affiliations(answers[key]['affiliations'], snippet)
         dropped_total += len(dropped)
         done.append((episode_id, host_id))
         new_rows.extend((episode_id, host_id, a['title'], a['company'], DATA_SOURCE) for a in kept)
@@ -499,13 +562,24 @@ def record_results(cur, pending: list, answers: dict) -> tuple:
             FROM (VALUES %s) AS d(episode_id, host_id)
             WHERE ax.episode_id = d.episode_id AND ax.host_id = d.host_id
         """, done)
+    if hosts:
+        execute_values(cur, """
+            DELETE FROM host_affiliations ha USING (VALUES %s) AS d(episode_id, host_id)
+            WHERE ha.episode_id = d.episode_id AND ha.host_id = d.host_id
+              AND ha.data_source <> 'manual'
+        """, hosts)
+        execute_values(cur, """
+            UPDATE affiliation_extractions ax SET status = 'host', completed_at = now()
+            FROM (VALUES %s) AS d(episode_id, host_id)
+            WHERE ax.episode_id = d.episode_id AND ax.host_id = d.host_id
+        """, hosts)
     if retry:
         execute_values(cur, """
             UPDATE affiliation_extractions ax SET status = 'retry'
             FROM (VALUES %s) AS d(episode_id, host_id)
             WHERE ax.episode_id = d.episode_id AND ax.host_id = d.host_id
         """, retry)
-    return len(done), len(new_rows), len(retry), dropped_total
+    return len(done) + len(hosts), len(new_rows), len(retry), dropped_total
 
 
 # ------------------------------------------------------------------
@@ -564,28 +638,32 @@ def cmd_pilot(limit: int, out_path: str, model: str = MODEL):
             continue
         results.update(parse_response_text(text, {it['id'] for it in group}))
 
-    dropped_total = 0
+    dropped_total = found = flagged_hosts = 0
+    empty = {'is_host': False, 'affiliations': []}
     with open(out_path, 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(['person', 'podcast', 'episode', 'title', 'company',
+        writer.writerow(['person', 'podcast', 'episode', 'title', 'company', 'podcast_host',
                          'dropped_unverified', 'snippet'])
         for it in items:
-            kept, dropped = verified_affiliations(results.get(it['id'], []), it['snippet'])
+            answer = results.get(it['id'], empty)
+            kept, dropped = verified_affiliations(answer['affiliations'], it['snippet'])
             dropped_total += len(dropped)
+            found += bool(kept)
+            flagged_hosts += answer['is_host']
             app = it['appearances'][0]
             dropped_s = '; '.join(f'{k}={v}' for k, v in dropped)
             for aff in kept or [{'title': None, 'company': None}]:
                 writer.writerow([it['person'], app['podcast_title'], app['episode_title'],
                                  aff['title'] or '', aff['company'] or '',
-                                 dropped_s, it['snippet']])
+                                 'yes' if answer['is_host'] else '', dropped_s, it['snippet']])
         for app in no_mention:
             name = (host_names.get(app['host_id']) or ['?'])[0]
             writer.writerow([name, app['podcast_title'], app['episode_title'],
-                             '', '', '', '(name not in title or description)'])
+                             '', '', '', '', '(name not in title or description)'])
 
-    found = sum(1 for it in items if verified_affiliations(results.get(it['id'], []), it['snippet'])[0])
-    logger.info(f"Items with at least one role: {found}/{len(items)}; "
-                f"values dropped as not verbatim: {dropped_total}; items failed: {failed}")
+    logger.info(f"Items with at least one role: {found}/{len(items)}; flagged as this podcast's "
+                f"host: {flagged_hosts}; values dropped as not verbatim: {dropped_total}; "
+                f"items failed: {failed}")
     logger.info(f"Actual usage: {tokens_in:,} in, {tokens_out:,} out = "
                 f"${usage_cost(tokens_in, tokens_out, False, model):.4f} at normal price "
                 f"(${usage_cost(tokens_in, tokens_out, True, model):.4f} at batch price) on {model}")

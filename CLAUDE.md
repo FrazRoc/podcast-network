@@ -152,6 +152,16 @@ merges and credit deletions carry through without touching that code.
   `--max-cost` (default $2) refuses to submit above the estimate.
 - `no_mention` rows (name not in title or description, e.g. Apple-only
   credits) are terminal; a later description refresh does not re-open them.
+- **Hosts are out of scope** (a separate process, per Evan). Two filters: a
+  person in `host_podcast` for that show is never selected (1,216 of 6,022
+  guest credits in the Aug export — Joe Batir alone had 195 "guest" credits
+  on his own show), and the model flags anyone the text presents as this
+  podcast's host/producer (`is_podcast_host`) for hosts `host_podcast`
+  doesn't know about (Energy Central's Jason Price and Matt Chester);
+  those get status `host` and nothing stored.
+- Snippets also take one later first-name-only mention ("Sergey is a senior
+  fellow at ..."), unless that first name is attached to another surname in
+  the same text.
 
 ## Tests
 

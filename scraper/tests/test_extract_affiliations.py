@@ -88,6 +88,28 @@ class TestBuildSnippet:
         assert "Senior journalist, BBC Verify" in snippet
 
 
+class TestFirstNameReferences:
+    DESC = ("Today on the show, Jason Bordoff speaks with Erica Downs, Tatiana Mitrova and "
+            "Sergey Vakulenko about Russia and China. " + "Background on the crisis. " * 20 +
+            "Tatiana is a global fellow at CGEP. Erica is a senior research scholar at CGEP. "
+            "Sergey is a senior fellow at the Carnegie Russia Eurasia Center.")
+
+    def test_later_first_name_bio_is_included(self):
+        # Real case: Columbia Energy Exchange, where the full-name window
+        # ends long before "Sergey is a senior fellow at ...".
+        snippet = build_snippet(["Sergey Vakulenko"], "", self.DESC)
+        assert "Carnegie Russia Eurasia Center" in snippet
+
+    def test_first_name_alone_without_full_name_is_not_a_mention(self):
+        assert build_snippet(["Sergey Vakulenko"], "", "Sergey is a senior fellow.") is None
+
+    def test_first_name_shared_with_someone_else_is_not_used(self):
+        desc = ("Jason Price joins Jason Bordoff today. " + "filler " * 80 +
+                "Jason is CEO of Acme.")
+        snippet = build_snippet(["Jason Price"], "", desc)
+        assert "CEO of Acme" not in snippet
+
+
 class TestGroupAppearances:
     def _app(self, episode_id, host_id, desc, title="Ep"):
         return {'episode_id': episode_id, 'host_id': host_id, 'episode_title': title,
@@ -168,19 +190,29 @@ class TestVerifiedAffiliations:
 
 
 class TestResponses:
+    CEO = [{'title': 'CEO', 'company': None}]
+
     def test_parse_keeps_only_expected_ids(self):
         text = json.dumps({'results': [
-            {'id': 'a', 'affiliations': [{'title': 'CEO', 'company': None}]},
-            {'id': 'zzz', 'affiliations': []},
+            {'id': 'a', 'is_podcast_host': False, 'affiliations': self.CEO},
+            {'id': 'zzz', 'is_podcast_host': False, 'affiliations': []},
         ]})
-        assert parse_response_text(text, {'a', 'b'}) == {'a': [{'title': 'CEO', 'company': None}]}
+        assert parse_response_text(text, {'a', 'b'}) == {
+            'a': {'is_host': False, 'affiliations': self.CEO}}
 
     def test_first_answer_for_a_repeated_id_wins(self):
         text = json.dumps({'results': [
-            {'id': 'a', 'affiliations': [{'title': 'CEO', 'company': None}]},
-            {'id': 'a', 'affiliations': []},
+            {'id': 'a', 'is_podcast_host': False, 'affiliations': self.CEO},
+            {'id': 'a', 'is_podcast_host': False, 'affiliations': []},
         ]})
-        assert parse_response_text(text, {'a'})['a'] == [{'title': 'CEO', 'company': None}]
+        assert parse_response_text(text, {'a'})['a']['affiliations'] == self.CEO
+
+    def test_podcast_host_gets_no_affiliations(self):
+        # Hosts are left to a separate process, even if a role came back.
+        text = json.dumps({'results': [
+            {'id': 'a', 'is_podcast_host': True, 'affiliations': self.CEO},
+        ]})
+        assert parse_response_text(text, {'a'}) == {'a': {'is_host': True, 'affiliations': []}}
 
     def _message(self, stop_reason, text='{"results": []}'):
         return SimpleNamespace(stop_reason=stop_reason,
@@ -274,6 +306,12 @@ def _setup_appearance(cur, first='Jane', last='Doe', is_guest=True,
     return episode_id, host_id
 
 
+def _insert_podcast(cur, title):
+    cur.execute("INSERT INTO podcasts (title, apple_podcast_id) VALUES (%s, %s) RETURNING podcast_id",
+                (title, title.lower().replace(' ', '-')))
+    return cur.fetchone()[0]
+
+
 def _pending(cur, episode_id, host_id, snippet):
     s_hash = snippet_hash(snippet)
     cur.execute("""
@@ -314,6 +352,25 @@ class TestSelection:
         apps = get_appearances_to_process(aff_db)
         assert [(a['episode_id'], a['host_id']) for a in apps] == [guest]
 
+    def test_show_host_is_skipped_on_their_own_show_only(self, aff_db):
+        # Real case: Joe Batir hosts Energy Transition Solutions but was
+        # credited as a guest on 195 of its episodes.
+        cur = aff_db.cursor()
+        episode_id, host_id = _setup_appearance(cur, 'Joe', 'Batir')
+        cur.execute("SELECT podcast_id FROM episodes WHERE episode_id = %s", (episode_id,))
+        own_show = cur.fetchone()[0]
+        cur.execute("INSERT INTO host_podcast (host_id, podcast_id) VALUES (%s, %s)", (host_id, own_show))
+        other_show = _insert_podcast(cur, 'Other Show')
+        cur.execute("INSERT INTO episodes (podcast_id, title, description) VALUES (%s, 'Ep', "
+                    "'Joe Batir, founder of X') RETURNING episode_id", (other_show,))
+        other_episode = cur.fetchone()[0]
+        cur.execute("INSERT INTO episode_host (episode_id, host_id, is_guest) VALUES (%s, %s, true)",
+                    (other_episode, host_id))
+        aff_db.commit()
+
+        apps = get_appearances_to_process(aff_db)
+        assert [(a['episode_id'], a['host_id']) for a in apps] == [(other_episode, host_id)]
+
     def test_retry_is_picked_up_until_attempts_run_out(self, aff_db):
         cur = aff_db.cursor()
         pair = _setup_appearance(cur)
@@ -340,10 +397,10 @@ class TestRecordResults:
         cur = aff_db.cursor()
         pair = _setup_appearance(cur)
         row = _pending(cur, *pair, 'Jane Doe, CEO of Fervo, joins us.')
-        answers = {item_id(pair[1], row[3]): [
+        answers = {item_id(pair[1], row[3]): {'is_host': False, 'affiliations': [
             {'title': 'CEO', 'company': 'Fervo'},
             {'title': 'Board member', 'company': 'Google'},   # not in the text
-        ]}
+        ]}}
         assert record_results(cur, [row], answers) == (1, 1, 0, 2)
         aff_db.commit()
 
@@ -368,11 +425,24 @@ class TestRecordResults:
         cur.execute("INSERT INTO host_affiliations (episode_id, host_id, title, company) "
                     "VALUES (%s, %s, 'Old guess', NULL)", pair)
         row = _pending(cur, *pair, 'Jane Doe, CEO of Fervo, joins us.')
-        record_results(cur, [row], {item_id(pair[1], row[3]): [{'title': 'CEO', 'company': 'Fervo'}]})
+        record_results(cur, [row], {item_id(pair[1], row[3]): {
+            'is_host': False, 'affiliations': [{'title': 'CEO', 'company': 'Fervo'}]}})
         aff_db.commit()
 
         cur.execute("SELECT title, data_source FROM host_affiliations ORDER BY title")
         assert cur.fetchall() == [('CEO', 'llm_extracted'), ('Chief Scientist', 'manual')]
+
+
+    def test_flagged_host_is_recorded_without_affiliations(self, aff_db):
+        cur = aff_db.cursor()
+        pair = _setup_appearance(cur)
+        row = _pending(cur, *pair, 'Jane Doe, CEO of Fervo, joins us.')
+        answers = {item_id(pair[1], row[3]): {'is_host': True, 'affiliations': []}}
+        assert record_results(cur, [row], answers) == (1, 0, 0, 0)
+        cur.execute("SELECT status FROM affiliation_extractions")
+        assert cur.fetchone()[0] == 'host'
+        cur.execute("SELECT count(*) FROM host_affiliations")
+        assert cur.fetchone()[0] == 0
 
 
 class TestFollowsCredits:

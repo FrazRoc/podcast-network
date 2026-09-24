@@ -36,6 +36,9 @@ CREATE TABLE IF NOT EXISTS affiliation_extractions (
     -- done       result recorded (possibly with no affiliations)
     -- no_mention the person's name does not appear in the title or
     --            description, so there was nothing to send
+    -- host       the text presents them as this podcast's host or producer
+    --            (not in host_podcast, or those would never be selected);
+    --            nothing stored, left for a separate hosts process
     -- retry      the batch request failed or the item was missing from
     --            the response; picked up again while attempts < 3
     status        VARCHAR(20) NOT NULL,
@@ -49,7 +52,7 @@ CREATE TABLE IF NOT EXISTS affiliation_extractions (
     PRIMARY KEY (episode_id, host_id),
     FOREIGN KEY (episode_id, host_id) REFERENCES episode_host (episode_id, host_id)
         ON UPDATE CASCADE ON DELETE CASCADE,
-    CHECK (status IN ('pending', 'done', 'no_mention', 'retry'))
+    CHECK (status IN ('pending', 'done', 'no_mention', 'host', 'retry'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_affiliation_extractions_host
