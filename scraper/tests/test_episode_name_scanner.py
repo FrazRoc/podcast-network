@@ -27,6 +27,8 @@ from episode_name_scanner import (
     find_role_led_names,
     find_lead_appositive_name,
     find_mid_appositive_names,
+    find_subject_verb_lead_names,
+    strip_leading_role_word,
 )
 from description_cleaner import coarse_source
 
@@ -1029,3 +1031,116 @@ class TestLeadAndMidAppositivePatterns:
         text = "Colin Smith, Senior Research Analyst, join Todd Alexander to discuss markets."
         names = [n for n, _ in find_mid_appositive_names(text)]
         assert "Research Analyst" not in names
+
+
+class TestWSlashTrigger:
+    """Episode 166905: "...—w/ Rudy Krehbiel of EcoEngineers" — "w/" is a
+    common shorthand for "with" that the intro trigger list didn't cover."""
+
+    def test_w_slash_trigger(self):
+        text = "Which story is carbon dioxide removal actually in?—w/ Rudy Krehbiel of EcoEngineers"
+        names = [n for n, _ in extract_candidate_names(text)]
+        assert "Rudy Krehbiel" in names
+
+
+class TestAmpersandContinuation:
+    """Episode 95744: "...—with Fred Iutzi & Tim Crews of The Land
+    Institute" joins its second name with a bare "&", not the word "and"."""
+
+    def test_ampersand_joins_second_name(self):
+        text = "The Shift to Perennialization—with Fred Iutzi & Tim Crews of The Land Institute"
+        names = [n for n, _ in extract_candidate_names(text)]
+        assert "Fred Iutzi" in names
+        assert "Tim Crews" in names
+
+
+class TestBioIsParagraphBoundary:
+    """Episode 96488: a show-note bio puts the guest's name alone on its own
+    heading line, so the "Name is the Role" sentence right after it starts
+    right after a paragraph break with no preceding '.', '!' or '?' at all."""
+
+    def test_name_heading_then_bio_sentence(self):
+        text = (
+            "About our Guest:\n\nEric Dahnke\n\n"
+            "Eric Dahnke is the Founder and CEO of Power Market; utilizing his experience "
+            "in the utility and software industries to provide solutions for community solar."
+        )
+        names = [n for n, _ in extract_candidate_names(text)]
+        assert "Eric Dahnke" in names
+
+
+class TestLeadAppositiveGeneralized:
+    """Episode 460 (surfaced via suggestion 15738 on episode 166905's own
+    review): "Shane Battier—NCAA champion at Duke in 2001 and two-time NBA
+    champion with the Miami Heat—knows a thing or two..." is the SECOND
+    sentence of its description (not text-start) and uses em dashes, not
+    commas — _LEAD_APPOSITIVE_RE originally only recognized comma pairs
+    anchored to the absolute start of the text."""
+
+    def test_mid_text_em_dash_appositive(self):
+        text = (
+            "March was defined by blown predictions. In many ways, those forces are shaping "
+            "the energy sector today.\nShane Battier—NCAA champion at Duke in 2001 and "
+            "two-time NBA champion with the Miami Heat—knows a thing or two about pressure."
+        )
+        names = [n for n, _ in find_lead_appositive_name(text)]
+        assert "Shane Battier" in names
+
+    def test_text_start_comma_still_works(self):
+        text = "Iñigo Rengifo, CEO of Concentro, discusses how tax credit transfers are being executed."
+        names = [n for n, _ in find_lead_appositive_name(text)]
+        assert names == ["Iñigo Rengifo"]
+
+
+class TestSubjectVerbLeadPattern:
+    """Episode 96610: "Raquel Bierzwinsky sits down to tell us what she
+    expects..." — the guest is the sentence's subject with no appositive
+    clause and no comma at all, just a reporting verb straight after the
+    name."""
+
+    def test_sits_down_subject(self):
+        text = "Raquel Bierzwinsky sits down to tell us what she expects to see in the sector."
+        names = [n for n, _ in find_subject_verb_lead_names(text)]
+        assert "Raquel Bierzwinsky" in names
+
+    def test_all_caps_headline_not_credited(self):
+        # Real false positive: "SWEDEN EV SHARE HITS 67% IN Q2" satisfies
+        # the "2-3 capitalized words then a verb" shape just as well as a
+        # name — real names are never written in shouting case here.
+        text = "SWEDEN EV SHARE HITS 67% IN Q2 Plug-in vehicles reached a new high."
+        names = [n for n, _ in find_subject_verb_lead_names(text)]
+        assert "SWEDEN EV" not in names
+
+    def test_role_abbreviation_last_word_not_credited(self):
+        # Real false positive: "Kanthal SVP Talks Electrifying..." — "SVP"
+        # is a role abbreviation standing in for a surname, not one.
+        text = "Kanthal SVP Talks Electrifying Industrial Heat for Steel and Cement."
+        names = [n for n, _ in find_subject_verb_lead_names(text)]
+        assert "Kanthal SVP" not in names
+
+    def test_leading_as_not_credited(self):
+        text = "As Chris tells it, the co-founders got to know one another in grad school."
+        names = [n for n, _ in find_subject_verb_lead_names(text)]
+        assert "As Chris" not in names
+
+
+class TestStripLeadingRoleWord:
+    """Real false positives from several patterns leaking a role/label word
+    straight into the captured name because the trigger word IS the role
+    noun ("Host Ed Crooks talks...", "Moderator Keith Martin discusses...")
+    — stripped centrally in add() via strip_leading_role_word()."""
+
+    def test_strips_host(self):
+        assert strip_leading_role_word("Host Ed Crooks") == "Ed Crooks"
+
+    def test_strips_moderator(self):
+        assert strip_leading_role_word("Moderator Keith Martin") == "Keith Martin"
+
+    def test_leaves_ordinary_name_alone(self):
+        assert strip_leading_role_word("Ed Crooks") == "Ed Crooks"
+
+    def test_end_to_end_host_not_leaked(self):
+        text = "Host Ed Crooks talks through the implications for energy with regulars."
+        names = [n for n, _ in extract_candidate_names(text)]
+        assert "Host Ed Crooks" not in names
+        assert "Ed Crooks" in names
