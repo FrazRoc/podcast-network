@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { API_BASE_URL } from '../config';
 import { adminFetch } from '../adminAuth';
 import AdminHeader from './AdminHeader';
+import AdminSubTabs from './AdminSubTabs';
+import { PEOPLE_TABS } from './AdminPeople';
 
 const API = `${API_BASE_URL}/api/admin`;
 
@@ -117,11 +119,12 @@ export default function AdminDuplicates() {
   return (
     <div className="min-h-screen bg-gray-100 font-sans">
       <AdminHeader
-        active="Duplicates"
+        active="People"
         right={<span className="text-sm text-gray-500">{items.length} possible duplicate{items.length === 1 ? '' : 's'}</span>}
       />
 
       <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-6">
+        <div className="-mb-2"><AdminSubTabs tabs={PEOPLE_TABS} active="duplicates" /></div>
         <p className="text-sm text-gray-500">
           People who may be the same person written two ways. Nothing is merged automatically —
           a shortened first name isn't proof, so each pair needs your call. Merging keeps the

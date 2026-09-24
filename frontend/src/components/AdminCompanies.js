@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { API_BASE_URL } from '../config';
 import { adminFetch } from '../adminAuth';
 import AdminHeader from './AdminHeader';
+import AdminSubTabs from './AdminSubTabs';
 
 // Company Admin. Organisations are created automatically from the company
 // names extracted for guests (scraper/organizations.py sync); this page is
@@ -408,22 +409,16 @@ export default function AdminCompanies() {
     return () => clearTimeout(t);
   }, [load]);
 
-  const tabBtn = (id, label) => (
-    <button onClick={() => setTab(id)}
-      className={`px-3 py-1.5 rounded-lg text-sm ${tab === id ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-200'}`}>
-      {label}
-    </button>
-  );
 
   return (
     <div className="min-h-screen bg-gray-100 font-sans">
       <AdminHeader active="Companies"
         right={totals && <span className="text-sm text-gray-400">{totals.active} companies · {totals.untyped} untyped</span>} />
       <div className="max-w-7xl mx-auto p-4 sm:p-6">
-        <div className="flex gap-2 mb-4">
-          {tabBtn('companies', 'Companies')}
-          {tabBtn('suggestions', 'Merge suggestions')}
-        </div>
+        <AdminSubTabs active={tab} tabs={[
+          { id: 'companies',   label: 'Companies',         onClick: () => setTab('companies') },
+          { id: 'suggestions', label: 'Merge suggestions', onClick: () => setTab('suggestions') },
+        ]} />
 
         {tab === 'suggestions' ? (
           <div className="max-w-3xl"><Suggestions onChanged={load} /></div>

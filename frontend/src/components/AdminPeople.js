@@ -2,8 +2,15 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { API_BASE_URL } from '../config';
 import { adminFetch } from '../adminAuth';
 import AdminHeader from './AdminHeader';
+import AdminSubTabs from './AdminSubTabs';
 
 const API = `${API_BASE_URL}/api/admin`;
+
+// Duplicates is its own page (AdminDuplicates) under the People section.
+export const PEOPLE_TABS = [
+  { id: 'people',     label: 'People',     href: '/admin/people' },
+  { id: 'duplicates', label: 'Duplicates', href: '/admin/duplicates' },
+];
 
 const PROXY = (url) =>
   url && !url.includes('mzstatic.com') && !url.includes('cdn.bsky.app')
@@ -761,6 +768,10 @@ export default function AdminPeople() {
   return (
     <div className="min-h-screen bg-gray-100 font-sans">
       <AdminHeader active="People" right={<span className="text-sm text-gray-400">{total} people</span>} />
+
+      <div className="max-w-7xl mx-auto px-4 pt-4 md:px-6 md:pt-6 -mb-4 md:-mb-2">
+        <AdminSubTabs tabs={PEOPLE_TABS} active="people" />
+      </div>
 
       <div className="flex flex-col md:flex-row gap-4 md:gap-6 p-4 md:p-6 max-w-7xl mx-auto">
 
