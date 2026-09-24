@@ -759,13 +759,13 @@ def cmd_pilot(limit: int, out_path: str, model: str = MODEL):
     logger.info(f"Wrote {out_path}")
 
 
-def cmd_submit(limit=None, max_cost=2.00, dry_run=False, model=MODEL):
+def cmd_submit(limit=None, max_cost=2.00, dry_run=False, model=MODEL, random_sample=False):
     from anthropic import Anthropic
     from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
     from anthropic.types.messages.batch_create_params import Request
 
     conn = psycopg2.connect(DB)
-    appearances, no_mention, items = _load(conn, limit)
+    appearances, no_mention, items = _load(conn, limit, random_sample)
     est = estimate_cost(items, model=model)
     _report(appearances, no_mention, items, est)
 
@@ -883,6 +883,9 @@ def main():
                        help='Refuse to submit if the estimate is above this many dollars')
         p.add_argument('--dry-run', action='store_true', help='Report what would be sent, then stop')
         p.add_argument('--model', **model_arg)
+        p.add_argument('--random', action='store_true',
+                       help='Pick --limit appearances at random rather than in episode order '
+                            '(for a representative quality sample)')
 
     sub.add_parser('collect', help='Record results of finished batches')
 
@@ -892,12 +895,12 @@ def main():
     elif args.command == 'pilot':
         cmd_pilot(args.limit, args.out, args.model)
     elif args.command == 'submit':
-        cmd_submit(args.limit, args.max_cost, args.dry_run, args.model)
+        cmd_submit(args.limit, args.max_cost, args.dry_run, args.model, args.random)
     elif args.command == 'collect':
         cmd_collect()
     elif args.command == 'run':
         cmd_collect()
-        cmd_submit(args.limit, args.max_cost, args.dry_run, args.model)
+        cmd_submit(args.limit, args.max_cost, args.dry_run, args.model, args.random)
 
 
 if __name__ == '__main__':
