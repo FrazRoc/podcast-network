@@ -12,7 +12,7 @@ from psycopg2.extras import RealDictCursor
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '..', 'backend'))
 
-from role_selection import pick_current_role  # noqa: E402
+from role_selection import pick_current_role, display_title, format_for_display  # noqa: E402
 
 
 def row(episode_id, published, title=None, company=None, kind=None, former=False, other=False):
@@ -72,6 +72,47 @@ class TestPickCurrentRole:
     def test_empty_pin_is_ignored(self):
         rows = [row(1, date(2025, 1, 1), 'CEO', 'Acme', 'position')]
         assert pick_current_role(rows, {'title': None, 'company': None})['source'] == 'derived'
+
+
+class TestDisplayTitle:
+    """Stored titles stay verbatim; this is only how the current one is shown.
+    Real cases from the People list after stage 1."""
+
+    @pytest.mark.parametrize('stored, kind, shown', [
+        ('a senior investigative data reporter', 'description', 'Senior investigative data reporter'),
+        ('a veteran college baseball coach and leadership consultant', 'description',
+         'Veteran college baseball coach and leadership consultant'),
+        ('ecologist, political scientist, and author', 'description',
+         'Ecologist, political scientist, and author'),
+        ('an energy reporter', 'position', 'Energy Reporter'),
+        ('the Executive Director', 'position', 'Executive Director'),
+        ('senior fellow', 'position', 'Senior Fellow'),
+        ('co-founder and CEO', 'position', 'Co-Founder and CEO'),
+        ('head of policy at the office of the governor', 'position',
+         'Head of Policy at the Office of the Governor'),
+        ("director of DOE's loan programs", 'position', "Director of DOE's Loan Programs"),
+        ('VP of Grid', 'position', 'VP of Grid'),
+        ('Founder & CTO', 'position', 'Founder & CTO'),
+    ])
+    def test_tidied(self, stored, kind, shown):
+        assert display_title(stored, kind) == shown
+
+    def test_a_lone_article_is_not_erased(self):
+        assert display_title('the', 'position') == 'The'
+
+    def test_empty(self):
+        assert display_title(None) is None and display_title('') == ''
+
+    def test_pins_shown_as_typed(self):
+        pinned = {'title': 'a partner', 'company': 'x', 'source': 'pinned'}
+        assert format_for_display(pinned) == pinned
+
+    def test_derived_role_is_tidied_and_company_left_alone(self):
+        role = {'title': 'a senior fellow', 'company': 'the Searchlight Institute',
+                'title_kind': 'position', 'source': 'derived'}
+        shown = format_for_display(role)
+        assert (shown['title'], shown['company']) == ('Senior Fellow', 'the Searchlight Institute')
+        assert role['title'] == 'a senior fellow'      # the stored row is not mutated
 
 
 # ------------------------------------------------------------------
@@ -185,6 +226,19 @@ class TestPeopleListRoles:
         ann = next(i for i in by_company if i['first_name'] == 'Ann')
         assert (ann['current_title'], ann['current_company']) == ('CEO', 'Zeta')
 
+    def test_list_shows_the_tidied_title(self, role_db, monkeypatch):
+        cur = role_db.cursor()
+        cur.execute("INSERT INTO podcasts (title, apple_podcast_id) VALUES ('Show', 'show') RETURNING podcast_id")
+        podcast_id = cur.fetchone()[0]
+        cur.execute("INSERT INTO hosts (first_name, last_name) VALUES ('Siduja', 'Test') RETURNING host_id")
+        host_id = cur.fetchone()[0]
+        ep = _appearance(cur, host_id, podcast_id, 'Ep', date(2025, 1, 1))
+        cur.execute("INSERT INTO host_affiliations (episode_id, host_id, title, title_kind) VALUES "
+                    "(%s, %s, 'a senior investigative data reporter', 'description')", (ep, host_id))
+        role_db.commit()
+        [row] = self._list(role_db, monkeypatch, filter='role_title_only')
+        assert row['current_title'] == 'Senior investigative data reporter'
+
     def test_list_matches_the_panel(self, role_db):
         # The list and a person's panel must never disagree about their role.
         from main import _all_current_roles, _role_rows, _role_pin
@@ -200,5 +254,5 @@ class TestPeopleListRoles:
                     (ep, host_id, ep, host_id))
         role_db.commit()
         dict_cur = role_db.cursor(cursor_factory=RealDictCursor)
-        panel = pick_current_role(_role_rows(dict_cur, host_id), _role_pin(dict_cur, host_id))
+        panel = format_for_display(pick_current_role(_role_rows(dict_cur, host_id), _role_pin(dict_cur, host_id)))
         assert _all_current_roles(dict_cur)[host_id] == (panel['title'], panel['company'])

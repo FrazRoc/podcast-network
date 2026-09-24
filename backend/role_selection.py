@@ -16,6 +16,7 @@ real data to tune it against:
      which beats a bare organisation.
 """
 
+import re
 from datetime import date
 
 
@@ -50,3 +51,63 @@ def pick_current_role(rows: list, pin: dict | None = None) -> dict | None:
     same_appearance = [r for r in current if r.get('episode_id') == newest.get('episode_id')]
     best = min(same_appearance, key=_rank)
     return {**best, 'source': 'derived'}
+
+
+# ------------------------------------------------------------------
+# Display formatting
+# ------------------------------------------------------------------
+#
+# host_affiliations keeps each title exactly as the episode text wrote it —
+# that is what makes every value checkable against its snippet. The tidying
+# happens here, only for the one role that is shown: "a senior investigative
+# data reporter" reads as a phrase, not a role. Pins are shown as typed.
+
+_LEADING_ARTICLE_RE = re.compile(r'^(?:a|an|the)\s+', re.IGNORECASE)
+_SMALL_WORDS = {'a', 'an', 'and', 'as', 'at', 'but', 'by', 'for', 'from', 'in', 'into',
+                'nor', 'of', 'on', 'or', 'the', 'to', 'via', 'vs', 'with'}
+_WORD_RE = re.compile(r"[A-Za-z\u00C0-\u024F][\w'’.]*")
+
+
+def _cap(word: str) -> str:
+    # A word that already has a capital is someone's deliberate spelling
+    # (CEO, DOE's, McKinsey, iPhone) and is left alone.
+    if any(c.isupper() for c in word):
+        return word
+    return word[0].upper() + word[1:]
+
+
+def _title_case(text: str) -> str:
+    """Title case for job titles: every word capitalised except small
+    connecting words (after the first); each part of a hyphenated word
+    capitalised ("co-founder" -> "Co-Founder")."""
+    first = True
+
+    def repl(m):
+        nonlocal first
+        word = m.group(0)
+        if not first and word.lower() in _SMALL_WORDS:
+            return word
+        first = False
+        return _cap(word)
+
+    return _WORD_RE.sub(repl, text)
+
+
+def display_title(title: str | None, title_kind: str | None = None) -> str | None:
+    """How a stored title is shown: leading "a"/"an"/"the" dropped, then
+    title case for a position, a capital first letter for a description
+    ("Ecologist, political scientist, and author" — title case reads oddly
+    on a phrase like that)."""
+    if not title:
+        return title
+    text = _LEADING_ARTICLE_RE.sub('', title.strip()) or title.strip()
+    if title_kind == 'description':
+        return _cap(text)
+    return _title_case(text)
+
+
+def format_for_display(role: dict | None) -> dict | None:
+    """The chosen role with its title tidied for display; pins untouched."""
+    if not role or role.get('source') == 'pinned':
+        return role
+    return {**role, 'title': display_title(role.get('title'), role.get('title_kind'))}

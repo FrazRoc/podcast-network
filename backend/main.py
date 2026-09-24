@@ -20,7 +20,7 @@ from description_cleaner import (
     clean_description, extract_labelled_credits, name_in_text, first_name_belongs_to_other,
     coarse_source,
 )
-from role_selection import pick_current_role
+from role_selection import pick_current_role, format_for_display
 
 load_dotenv()
 
@@ -2882,7 +2882,7 @@ def _all_current_roles(cur) -> dict:
 
     roles = {}
     for host_id in by_host.keys() | pins.keys():
-        role = pick_current_role(by_host.get(host_id, []), pins.get(host_id))
+        role = format_for_display(pick_current_role(by_host.get(host_id, []), pins.get(host_id)))
         if role:
             roles[host_id] = (role.get('title'), role.get('company'))
     return roles
@@ -2900,7 +2900,7 @@ async def get_current_role(host_id: int):
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        role = pick_current_role(_role_rows(cur, host_id), _role_pin(cur, host_id))
+        role = format_for_display(pick_current_role(_role_rows(cur, host_id), _role_pin(cur, host_id)))
         return {"host_id": host_id, "current_role": _public_role(role)}
     finally:
         cur.close()
@@ -2916,9 +2916,9 @@ async def get_person_roles(host_id: int):
         rows = _role_rows(cur, host_id)
         pin = _role_pin(cur, host_id)
         return {
-            "current": pick_current_role(rows, pin),
+            "current": format_for_display(pick_current_role(rows, pin)),
             # What the rule alone would show, so a pin can be judged against it.
-            "derived": pick_current_role(rows),
+            "derived": format_for_display(pick_current_role(rows)),
             "pin": pin,
             "history": rows,
         }

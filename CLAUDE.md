@@ -241,6 +241,14 @@ bare org. Public `GET /api/people/{id}/current-role` (fetched per card by
 deliberately out of scope for now. `merge_people()` moves the dropped
 person's pin only if the survivor has none.
 
+The shown title is tidied at display time only (`display_title()` /
+`format_for_display()` in `role_selection.py`): a leading "a"/"an"/"the" is
+dropped, positions get title case ("Co-Founder and CEO"; small words stay
+lower, words that already have a capital — CEO, DOE's — are untouched), and
+descriptions get a capital first letter only ("Senior investigative data
+reporter"). Stored rows stay verbatim for the snippet check and the
+Edit Person history; pins are shown exactly as typed.
+
 Pins are deliberate and never expire: a pinned person keeps the pin even
 after a newer appearance with a different role (Evan's choice; the panel
 shows what the rule alone would pick, next to the pin).
