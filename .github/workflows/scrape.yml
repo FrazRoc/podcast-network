@@ -20,6 +20,8 @@ jobs:
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       PODCAST_TITLE: ${{ inputs.podcast_title }}
+      # Only the affiliation step uses it; that step is skipped while unset.
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
     steps:
       - uses: actions/checkout@v4
 
@@ -81,6 +83,18 @@ jobs:
       - name: Queue new-name suggestions for review
         working-directory: scraper
         run: python3 episode_name_scanner.py suggest
+
+      # Job title / organisation for new guest credits (extract_affiliations.py).
+      # Collects batches submitted by earlier runs (then creates organisations
+      # for new company spellings) and submits appearances not yet processed;
+      # a batch finishes between runs. Capped at 1,000 appearances / $2 a run —
+      # over the cap it logs and waits for the next run. continue-on-error: an
+      # API problem here must never stop the run from being recorded as done.
+      - name: Extract guest roles and companies
+        working-directory: scraper
+        if: ${{ env.ANTHROPIC_API_KEY != '' && !inputs.podcast_title }}
+        continue-on-error: true
+        run: python3 extract_affiliations.py run --model claude-sonnet-5 --limit 1000 --max-cost 2
 
       - name: Record successful run timestamp
         working-directory: scraper

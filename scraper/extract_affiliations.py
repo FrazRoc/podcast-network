@@ -14,8 +14,8 @@ work at Fervo..."), so a model reads them. Cost is kept down three ways:
   * An identical snippet for the same person is sent once. Shows repeat a
     guest's bio line across episodes; the answer is copied to every
     appearance that shares it.
-  * Everything runs through the Message Batches API on Haiku 4.5, which is
-    half the normal per-token price, with ~40 snippets per request so the
+  * Everything runs through the Message Batches API (Sonnet 5 by default),
+    at half the normal per-token price, with ~40 snippets per request so the
     instructions are paid for once per request rather than once per person.
 
 Every extracted value must appear verbatim in the snippet it came from, or
@@ -30,6 +30,7 @@ Usage:
     python3 extract_affiliations.py submit [--limit N] [--max-cost 2.00]
     python3 extract_affiliations.py collect
     python3 extract_affiliations.py run [--limit N]           # collect, then submit
+                                                              # (scrape.yml, every 6 hours)
 
 `estimate` only reads. `pilot` calls the API (normal, non-batch pricing — it
 is small and returns immediately) and writes a CSV for review, never the
@@ -77,7 +78,7 @@ MODELS = {
     'claude-sonnet-5': {'price': (2.00, 10.00), 'params': {'thinking': {'type': 'disabled'}},
                         'estimate_factor': 1.5},
 }
-MODEL = 'claude-haiku-4-5'
+MODEL = 'claude-sonnet-5'   # chosen Sep 2026; see the pilot notes in CLAUDE.md
 DATA_SOURCE = 'llm_extracted'
 MAX_ATTEMPTS = 3
 
@@ -803,7 +804,8 @@ def cmd_pilot(limit: int, out_path: str, model: str = MODEL):
     logger.info(f"Wrote {out_path}")
 
 
-def cmd_submit(limit=None, max_cost=2.00, dry_run=False, model=MODEL, random_sample=False):
+def cmd_submit(limit=None, max_cost=2.00, dry_run=False, model=MODEL, random_sample=False,
+               over_cap_is_error=True):
     from anthropic import Anthropic
     from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
     from anthropic.types.messages.batch_create_params import Request
@@ -818,8 +820,14 @@ def cmd_submit(limit=None, max_cost=2.00, dry_run=False, model=MODEL, random_sam
         return
     if est['dollars'] > max_cost:
         conn.close()
-        sys.exit(f"Estimated ${est['dollars']:.2f} is over --max-cost ${max_cost:.2f}; "
-                 f"nothing submitted. Lower --limit or raise --max-cost.")
+        message = (f"Estimated ${est['dollars']:.2f} is over --max-cost ${max_cost:.2f}; "
+                   f"nothing submitted. Lower --limit or raise --max-cost.")
+        # The scheduled run must not fail the scrape over this — it logs and
+        # tries again next time. A manual submit stops with an error.
+        if over_cap_is_error:
+            sys.exit(message)
+        logger.warning(message)
+        return
 
     cur = conn.cursor()
     if no_mention:
@@ -863,6 +871,7 @@ def cmd_collect():
     batch_ids = [r[0] for r in cur.fetchall()]
     if not batch_ids:
         logger.info("No pending batches.")
+    recorded_any = False
 
     for batch_id in batch_ids:
         batch = client.messages.batches.retrieve(batch_id)
@@ -900,9 +909,16 @@ def cmd_collect():
         logger.info(f"Batch {batch_id}: {done} appearances done, {added} affiliations, "
                     f"{retry} to retry, {dropped} values dropped as not verbatim; "
                     f"${usage_cost(tokens_in, tokens_out, True, model):.4f}")
+        recorded_any = True
 
     cur.close()
     conn.close()
+
+    # New company spellings become organisations right away, so Company Admin
+    # sees them without a separate step (see organizations.py).
+    if recorded_any:
+        from organizations import sync as sync_organizations
+        sync_organizations()
 
 
 def main():
@@ -944,7 +960,8 @@ def main():
         cmd_collect()
     elif args.command == 'run':
         cmd_collect()
-        cmd_submit(args.limit, args.max_cost, args.dry_run, args.model, args.random)
+        cmd_submit(args.limit, args.max_cost, args.dry_run, args.model, args.random,
+                   over_cap_is_error=False)
 
 
 if __name__ == '__main__':

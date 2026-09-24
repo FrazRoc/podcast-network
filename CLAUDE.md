@@ -144,17 +144,22 @@ facts; `data_source` `llm_extracted` or `manual`, and `manual` is never
 overwritten). Both FK to `episode_host` with `ON UPDATE/DELETE CASCADE`, so
 merges and credit deletions carry through without touching that code.
 
-- **Status (Sep 24 2026):** both migrations (`migrate_add_host_affiliations.sql`,
-  `migrate_add_host_role_pins.sql`) have run on production, and the code is
-  merged to `main` and deployed. Stage 1 of the backfill is done: 200 random
-  guest appearances (`submit --limit 200 --random --model claude-sonnet-5`,
-  $0.15) — 194 processed, 210 roles stored, 5 `no_mention`; one appearance
-  vanished between submit and collect because its person was deleted
-  meanwhile (the cascade working as designed). **Stage 2** (the remaining
-  ~15.8k appearances, ~$12) awaits Evan's approval. **Not in `scrape.yml`
-  yet**; the cron step needs `ANTHROPIC_API_KEY` added as a GitHub Actions
-  secret. Locally the key lives in the affiliations worktree's `.env`
-  (gitignored) — load it alongside `DATABASE_URL`.
+- **Status (Sep 24 2026):** all three migrations (`host_affiliations`,
+  `host_role_pins`, `organizations`) have run on production and the code is
+  on `main`. Random samples of 200, 200 and 1,000 were reviewed, then
+  **stage 2 — the whole backlog, 14,699 appearances (~$11.35) — was
+  submitted** as `msgbatch_01Nnc1zGabXa8tDzKB2FW4ue`; `collect` records it.
+- **Scheduled:** `scrape.yml` step "Extract guest roles and companies" runs
+  `extract_affiliations.py run --model claude-sonnet-5 --limit 1000
+  --max-cost 2` every 6 hours: collect earlier batches, then submit
+  appearances not yet processed. Skipped until the `ANTHROPIC_API_KEY` GitHub
+  Actions secret exists, skipped on single-show dispatches, and
+  `continue-on-error` so it can never stop the run being recorded. Over the
+  cost cap, `run` logs and waits for the next run (a manual `submit` exits
+  with an error). `collect` runs `organizations.py sync` afterwards, so new
+  company spellings reach Company Admin without a separate step. The default
+  model is now Sonnet 5. Locally the key lives in the affiliations
+  worktree's `.env` (gitignored) — load it alongside `DATABASE_URL`.
 - Production has 16,074 guest credits (7,148 guests); only 24 are someone on
   their own show — the 1,216 in the Aug export had been cleaned up since.
 - **Pilot (Sep 2026, 88 snippets from the Aug export):** Haiku 4.5 credited
@@ -306,9 +311,12 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
 - Endpoints: `GET /api/admin/companies`, `GET/PUT /api/admin/companies/{id}`,
   `POST .../{keep}/merge/{drop}`, `POST /api/admin/companies/not-same`,
   `GET /api/admin/companies-suggestions`.
+- The merge-suggestions tab hides every card naming a company that was just
+  merged away and reloads the queue; skipped cards stay hidden until
+  Refresh. (First version left those cards in place, and acting on them
+  failed with "Company not found".)
 - Not yet: showing the canonical organisation name on the People list and
-  cards (they still show the raw company text), a public company view, and
-  running `sync` from `scrape.yml` after each extraction.
+  cards (they still show the raw company text), and a public company view.
 
 ## Tests
 

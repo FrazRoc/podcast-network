@@ -635,3 +635,30 @@ class TestFollowsCredits:
         aff_db.commit()
         cur.execute("SELECT host_id FROM host_affiliations")
         assert cur.fetchone()[0] == keep_id
+
+
+class TestCostCap:
+    """submit refuses to send a batch estimated over --max-cost. Manually that
+    is an error; from the scheduled `run` it must log and return, or the
+    scrape job would show a failure every six hours."""
+
+    def _one_appearance(self, aff_db, monkeypatch):
+        import extract_affiliations as x
+        cur = aff_db.cursor()
+        _setup_appearance(cur)
+        aff_db.commit()
+        monkeypatch.setattr(x, 'DB', aff_db.dsn)
+        return x, cur
+
+    def test_manual_submit_over_cap_is_an_error(self, aff_db, monkeypatch):
+        x, cur = self._one_appearance(aff_db, monkeypatch)
+        with pytest.raises(SystemExit):
+            x.cmd_submit(max_cost=-1.0)   # one tiny item rounds to $0.00
+        cur.execute("SELECT COUNT(*) FROM affiliation_extractions")
+        assert cur.fetchone()[0] == 0
+
+    def test_scheduled_run_over_cap_logs_and_returns(self, aff_db, monkeypatch):
+        x, cur = self._one_appearance(aff_db, monkeypatch)
+        assert x.cmd_submit(max_cost=-1.0, over_cap_is_error=False) is None
+        cur.execute("SELECT COUNT(*) FROM affiliation_extractions")
+        assert cur.fetchone()[0] == 0          # nothing written, nothing sent

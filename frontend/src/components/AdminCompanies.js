@@ -278,16 +278,27 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
   );
 }
 
-function SuggestionCard({ s, onAction }) {
+function SuggestionCard({ s, onAction, onSkip }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const reason = REASONS[s.reason] || REASONS.similar;
 
-  const act = async (fn) => {
+  // droppedId: a company that no longer exists after this action, so every
+  // other card naming it is stale too.
+  const act = async (fn, droppedId = null) => {
     setBusy(true); setError('');
-    try { await fn(); onAction(s); } catch (e) { setError(e.message); setBusy(false); }
+    try {
+      await fn();
+      onAction(s, droppedId);
+    } catch (e) {
+      // Already merged away (by an earlier card or another tab): this card is
+      // stale, not an error to act on.
+      if (/not found/i.test(e.message)) { onAction(s, null, true); return; }
+      setError(e.message); setBusy(false);
+    }
   };
-  const merge = (keep, drop) => act(() => call(`${API}/companies/${keep.org_id}/merge/${drop.org_id}`, { method: 'POST' }));
+  const merge = (keep, drop) => act(
+    () => call(`${API}/companies/${keep.org_id}/merge/${drop.org_id}`, { method: 'POST' }), drop.org_id);
   const parent = (par, child) => act(() => call(`${API}/companies/${child.org_id}`, jsonBody('PUT', { parent_org_id: par.org_id })));
   const different = () => act(() => call(`${API}/companies/not-same`, jsonBody('POST', { org_a: s.a.org_id, org_b: s.b.org_id })));
 
@@ -315,7 +326,7 @@ function SuggestionCard({ s, onAction }) {
         <button disabled={busy} onClick={() => parent(s.a, s.b)} className={btn}>“{s.b.name}” is part of “{s.a.name}”</button>
         <button disabled={busy} onClick={() => parent(s.b, s.a)} className={btn}>“{s.a.name}” is part of “{s.b.name}”</button>
         <button disabled={busy} onClick={different} className={btn}>Different</button>
-        <button disabled={busy} onClick={() => onAction(s)} className="px-2.5 py-1 text-xs text-gray-400 hover:text-gray-600">Skip</button>
+        <button disabled={busy} onClick={() => onSkip(s)} className="px-2.5 py-1 text-xs text-gray-400 hover:text-gray-600">Skip</button>
       </div>
       {error && <p className="text-xs text-red-500">{error}</p>}
     </div>
@@ -328,24 +339,32 @@ function Suggestions({ onChanged }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [hidden, setHidden] = useState(new Set());
+  const [gone, setGone] = useState(new Set());   // companies merged away this session
+  const [skipped, setSkipped] = useState(new Set());   // survives reloads until Refresh
 
-  const load = useCallback(() => {
-    setLoading(true);
+  // quiet: refresh in the background without replacing the list by "Loading…".
+  const load = useCallback((quiet = false) => {
+    if (!quiet) setLoading(true);
     call(`${API}/companies-suggestions?limit=40`)
-      .then(d => { setItems(d.items || []); setTotal(d.total || 0); setError(''); })
+      .then(d => { setItems(d.items || []); setTotal(d.total || 0); setError(''); setHidden(new Set()); })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, []);
   useEffect(() => { load(); }, [load]);
 
   const key = (s) => `${s.org_a}-${s.org_b}`;
-  const done = (s) => {
-    // A merge or parent change can invalidate other cards; drop this one now
-    // and refresh the queue in the background.
+  const done = (s, droppedId, stale = false) => {
+    // Hide this card, and every card naming a company that was just merged
+    // away — those would only fail with "not found". Then fetch a fresh
+    // queue, which also re-pairs the survivor with anything still similar.
     setHidden(prev => new Set(prev).add(key(s)));
-    onChanged?.();
+    if (droppedId) setGone(prev => new Set(prev).add(droppedId));
+    if (!stale) onChanged?.();
+    load(true);
   };
-  const visible = items.filter(s => !hidden.has(key(s)));
+  const skip = (s) => setSkipped(prev => new Set(prev).add(key(s)));
+  const visible = items.filter(s => !hidden.has(key(s)) && !skipped.has(key(s))
+                                 && !gone.has(s.org_a) && !gone.has(s.org_b));
 
   return (
     <div className="space-y-3">
@@ -353,12 +372,12 @@ function Suggestions({ onChanged }) {
         <p className="text-sm text-gray-500">
           {total} possible duplicate{total !== 1 ? 's' : ''}, biggest first. Merged spellings re-link every role at once.
         </p>
-        <button onClick={() => { setHidden(new Set()); load(); }} className="text-xs text-blue-600 hover:underline">Refresh</button>
+        <button onClick={() => { setSkipped(new Set()); load(); }} className="text-xs text-blue-600 hover:underline">Refresh</button>
       </div>
       {loading ? <p className="text-sm text-gray-400">Loading…</p>
         : error ? <p className="text-sm text-red-500">{error}</p>
         : visible.length === 0 ? <p className="text-sm text-gray-400">Nothing left in this page of suggestions — Refresh for more.</p>
-        : visible.map(s => <SuggestionCard key={key(s)} s={s} onAction={done} />)}
+        : visible.map(s => <SuggestionCard key={key(s)} s={s} onAction={done} onSkip={skip} />)}
     </div>
   );
 }
