@@ -383,8 +383,23 @@ function Suggestions({ onChanged }) {
   );
 }
 
+// Each tab has its own address, so a refresh or a shared link lands on it.
+const TAB_PATHS = { companies: '/admin/companies', suggestions: '/admin/companies/suggestions' };
+const tabFromPath = () =>
+  window.location.pathname.startsWith(TAB_PATHS.suggestions) ? 'suggestions' : 'companies';
+
 export default function AdminCompanies() {
-  const [tab, setTab] = useState('companies');
+  const [tab, setTabState] = useState(tabFromPath);
+  const setTab = (t) => {
+    setTabState(t);
+    if (window.location.pathname !== TAB_PATHS[t]) window.history.pushState(null, '', TAB_PATHS[t]);
+  };
+  // Browser back/forward between the two tabs.
+  useEffect(() => {
+    const onPop = () => setTabState(tabFromPath());
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
   const [items, setItems] = useState([]);
   const [totals, setTotals] = useState(null);
   const [q, setQ] = useState('');
