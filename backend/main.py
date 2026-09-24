@@ -21,6 +21,7 @@ from description_cleaner import (
     coarse_source,
 )
 from role_selection import pick_current_role, format_for_display
+from org_names import normalize_org_name, looks_like_acronym_of, initials
 
 load_dotenv()
 
@@ -315,6 +316,19 @@ class AliasRequest(BaseModel):
 class RolePinRequest(BaseModel):
     title: str = None
     company: str = None
+
+
+class CompanyUpdateRequest(BaseModel):
+    name: str = None
+    org_type: str = None
+    website_domain: str = None
+    parent_org_id: int = None
+    not_an_org: bool = None
+
+
+class NotSameOrgRequest(BaseModel):
+    org_a: int
+    org_b: int
 
 
 class DismissPairRequest(BaseModel):
@@ -2959,6 +2973,353 @@ async def clear_role_pin(host_id: int):
         cur.execute("DELETE FROM host_role_pins WHERE host_id = %s", (host_id,))
         conn.commit()
         return {"success": True, "cleared": cur.rowcount > 0}
+    finally:
+        cur.close()
+        conn.close()
+
+
+# ------------------------------------------------------------------
+# COMPANIES — organizations / organization_aliases (migrate_add_organizations.sql).
+# Roles link to an organisation through their normalised company string:
+# host_affiliations.company_key = organization_aliases.normalized_name.
+# New spellings are created as organisations by scraper/organizations.py
+# sync; everything here is review: edit, merge, parent, "not the same".
+# ------------------------------------------------------------------
+
+ORG_TYPES = ('company', 'nonprofit', 'government', 'academic', 'research',
+             'media', 'investor', 'association', 'other')
+
+
+def _org_alias_keys(cur, org_ids: list) -> list:
+    cur.execute("SELECT normalized_name FROM organization_aliases WHERE org_id = ANY(%s)", (org_ids,))
+    return [r['normalized_name'] for r in cur.fetchall()]
+
+
+def _org_family(cur, org_id: int) -> list:
+    """org_id plus every organisation below it, at any depth."""
+    cur.execute("""
+        WITH RECURSIVE fam AS (
+            SELECT org_id FROM organizations WHERE org_id = %s
+            UNION SELECT o.org_id FROM organizations o JOIN fam ON o.parent_org_id = fam.org_id
+        ) SELECT org_id FROM fam
+    """, (org_id,))
+    return [r['org_id'] for r in cur.fetchall()]
+
+
+@app.get("/api/admin/companies", dependencies=[Depends(verify_admin)])
+async def list_companies(q: str = "", org_type: str = "", sort: str = "people_desc",
+                         view: str = "active", limit: int = 200):
+    """Company list. view: 'active' (default), 'not_org' (marked not an
+    organisation), 'untyped' (active, no type yet). people = distinct people
+    with any role there, sub-organisations not included."""
+    sort_map = {
+        "people_desc": "people DESC, lower(o.name)",
+        "name_asc":    "lower(o.name)",
+        "newest":      "o.created_at DESC, o.org_id DESC",
+    }
+    where = ["o.not_an_org = %(not_org)s"]
+    if org_type in ORG_TYPES:
+        where.append("o.org_type = %(org_type)s")
+    if view == "untyped":
+        where.append("o.org_type IS NULL")
+    if q.strip():
+        where.append("""(o.name ILIKE '%%' || %(q)s || '%%' OR EXISTS (
+            SELECT 1 FROM organization_aliases a
+            WHERE a.org_id = o.org_id AND a.alias_name ILIKE '%%' || %(q)s || '%%'))""")
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(f"""
+            WITH counts AS (
+                SELECT oa.org_id, COUNT(DISTINCT ha.host_id) AS people, COUNT(*) AS roles
+                FROM organization_aliases oa
+                JOIN host_affiliations ha ON ha.company_key = oa.normalized_name
+                GROUP BY oa.org_id
+            )
+            SELECT o.org_id, o.name, o.org_type, o.parent_org_id, p.name AS parent_name,
+                   o.website_domain, o.not_an_org, o.created_at,
+                   COALESCE(c.people, 0) AS people, COALESCE(c.roles, 0) AS roles,
+                   (SELECT COUNT(*) FROM organization_aliases a WHERE a.org_id = o.org_id) AS alias_count,
+                   (SELECT COUNT(*) FROM organizations ch WHERE ch.parent_org_id = o.org_id) AS child_count
+            FROM organizations o
+            LEFT JOIN organizations p ON p.org_id = o.parent_org_id
+            LEFT JOIN counts c ON c.org_id = o.org_id
+            WHERE {' AND '.join(where)}
+            ORDER BY {sort_map.get(sort, sort_map['people_desc'])}
+            LIMIT %(limit)s
+        """, {"q": q.strip(), "org_type": org_type, "not_org": view == "not_org",
+              "limit": max(1, min(limit, 1000))})
+        items = cur.fetchall()
+        cur.execute("SELECT COUNT(*) FILTER (WHERE NOT not_an_org) AS active, "
+                    "COUNT(*) FILTER (WHERE not_an_org) AS not_org, "
+                    "COUNT(*) FILTER (WHERE NOT not_an_org AND org_type IS NULL) AS untyped "
+                    "FROM organizations")
+        return {"items": items, "totals": cur.fetchone()}
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.get("/api/admin/companies/{org_id}", dependencies=[Depends(verify_admin)])
+async def get_company(org_id: int, include_sub: bool = False):
+    """One organisation: its aliases, parent and sub-organisations, and the
+    people with a role there (optionally including sub-organisations'),
+    each marked current when their displayed current role is here."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT o.*, p.name AS parent_name FROM organizations o
+            LEFT JOIN organizations p ON p.org_id = o.parent_org_id WHERE o.org_id = %s
+        """, (org_id,))
+        org = cur.fetchone()
+        if not org:
+            raise HTTPException(status_code=404, detail="Company not found")
+
+        cur.execute("""
+            SELECT a.alias_id, a.alias_name, a.normalized_name, a.source,
+                   (SELECT COUNT(*) FROM host_affiliations ha WHERE ha.company_key = a.normalized_name) AS roles
+            FROM organization_aliases a WHERE a.org_id = %s ORDER BY roles DESC, a.alias_name
+        """, (org_id,))
+        aliases = cur.fetchall()
+
+        cur.execute("""
+            SELECT o.org_id, o.name, o.org_type,
+                   (SELECT COUNT(DISTINCT ha.host_id) FROM organization_aliases a
+                    JOIN host_affiliations ha ON ha.company_key = a.normalized_name
+                    WHERE a.org_id = o.org_id) AS people
+            FROM organizations o WHERE o.parent_org_id = %s ORDER BY lower(o.name)
+        """, (org_id,))
+        children = cur.fetchall()
+
+        keys = _org_alias_keys(cur, _org_family(cur, org_id) if include_sub else [org_id])
+        cur.execute("""
+            SELECT ha.host_id, h.first_name || ' ' || h.last_name AS name, ha.title, ha.company,
+                   ha.is_former, e.published_date, p.title AS podcast_title
+            FROM host_affiliations ha
+            JOIN hosts h ON h.host_id = ha.host_id
+            JOIN episodes e ON e.episode_id = ha.episode_id
+            JOIN podcasts p ON p.podcast_id = e.podcast_id
+            WHERE ha.company_key = ANY(%s)
+            ORDER BY e.published_date DESC NULLS LAST
+        """, (keys,))
+        role_rows = cur.fetchall()
+        key_set = set(keys)
+        current = {h: normalize_org_name(c) for h, (_, c) in _all_current_roles(cur).items()}
+        people = {}
+        for r in role_rows:
+            person = people.setdefault(r['host_id'], {
+                "host_id": r['host_id'], "name": r['name'], "roles": [],
+                "latest": r['published_date'], "is_current": current.get(r['host_id']) in key_set,
+            })
+            person["roles"].append({k: r[k] for k in ('title', 'company', 'is_former',
+                                                     'published_date', 'podcast_title')})
+        ordered = sorted(people.values(), key=lambda p: (not p['is_current'], p['name']))
+        return {"org": org, "aliases": aliases, "children": children, "people": ordered}
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.put("/api/admin/companies/{org_id}", dependencies=[Depends(verify_admin)])
+async def update_company(org_id: int, body: CompanyUpdateRequest):
+    """Edit name / type / domain / parent / not-an-organisation. Only the
+    fields sent are changed; send parent_org_id 0 to clear the parent."""
+    fields = body.model_dump(exclude_unset=True) if hasattr(body, 'model_dump') else body.dict(exclude_unset=True)
+    sets, params = [], {"org_id": org_id}
+    if 'name' in fields:
+        name = (fields['name'] or '').strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Name cannot be empty")
+        sets.append("name = %(name)s"); params['name'] = name
+    if 'org_type' in fields:
+        t = fields['org_type'] or None
+        if t is not None and t not in ORG_TYPES:
+            raise HTTPException(status_code=400, detail=f"org_type must be one of {', '.join(ORG_TYPES)}")
+        sets.append("org_type = %(org_type)s"); params['org_type'] = t
+    if 'website_domain' in fields:
+        d = (fields['website_domain'] or '').strip().lower()
+        d = re.sub(r'^https?://', '', d).split('/')[0].removeprefix('www.') or None
+        sets.append("website_domain = %(website_domain)s"); params['website_domain'] = d
+    if 'not_an_org' in fields:
+        sets.append("not_an_org = %(not_an_org)s"); params['not_an_org'] = bool(fields['not_an_org'])
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT 1 FROM organizations WHERE org_id = %s", (org_id,))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Company not found")
+        if 'parent_org_id' in fields:
+            parent = fields['parent_org_id'] or None
+            if parent is not None:
+                if parent == org_id or parent in _org_family(cur, org_id):
+                    raise HTTPException(status_code=400,
+                                        detail="That would make the company its own ancestor")
+                cur.execute("SELECT 1 FROM organizations WHERE org_id = %s", (parent,))
+                if not cur.fetchone():
+                    raise HTTPException(status_code=404, detail="Parent company not found")
+            sets.append("parent_org_id = %(parent)s"); params['parent'] = parent
+        if not sets:
+            raise HTTPException(status_code=400, detail="Nothing to update")
+        cur.execute(f"UPDATE organizations SET {', '.join(sets)}, updated_at = now() WHERE org_id = %(org_id)s",
+                    params)
+        conn.commit()
+        return {"success": True}
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.post("/api/admin/companies/{keep_id}/merge/{drop_id}", dependencies=[Depends(verify_admin)])
+async def merge_companies(keep_id: int, drop_id: int):
+    """Fold one organisation into another. Every spelling of the dropped one
+    becomes an alias of the survivor, so all its roles re-link at once."""
+    if keep_id == drop_id:
+        raise HTTPException(status_code=400, detail="Cannot merge a company into itself")
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT * FROM organizations WHERE org_id IN (%s, %s)", (keep_id, drop_id))
+        rows = {r['org_id']: r for r in cur.fetchall()}
+        if keep_id not in rows or drop_id not in rows:
+            raise HTTPException(status_code=404, detail="One or both companies not found")
+        keep, drop = rows[keep_id], rows[drop_id]
+        keep_family = set(_org_family(cur, keep_id))
+
+        cur.execute("UPDATE organization_aliases SET org_id = %s, "
+                    "source = CASE WHEN source = 'auto' THEN 'merge' ELSE source END "
+                    "WHERE org_id = %s", (keep_id, drop_id))
+        aliases_moved = cur.rowcount
+        # Sub-organisations of the dropped one now hang off the survivor; a
+        # survivor that was the dropped one's child keeps no self-parent.
+        cur.execute("UPDATE organizations SET parent_org_id = %s WHERE parent_org_id = %s AND org_id <> %s",
+                    (keep_id, drop_id, keep_id))
+        if keep['parent_org_id'] == drop_id:
+            cur.execute("UPDATE organizations SET parent_org_id = %s WHERE org_id = %s",
+                        (drop['parent_org_id'], keep_id))
+        # The survivor keeps its own details and picks up any it lacks.
+        cur.execute("""
+            UPDATE organizations SET
+                org_type       = COALESCE(org_type, %s),
+                website_domain = COALESCE(website_domain, %s),
+                parent_org_id  = COALESCE(parent_org_id, %s),
+                updated_at     = now()
+            WHERE org_id = %s
+        """, (drop['org_type'], drop['website_domain'],
+              # Never inherit a parent from inside the survivor's own family.
+              drop['parent_org_id'] if drop['parent_org_id'] not in keep_family else None, keep_id))
+        cur.execute("DELETE FROM organizations WHERE org_id = %s", (drop_id,))
+        conn.commit()
+        return {"success": True, "kept": keep['name'], "merged": drop['name'], "aliases_moved": aliases_moved}
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.post("/api/admin/companies/not-same", dependencies=[Depends(verify_admin)])
+async def mark_companies_not_same(body: NotSameOrgRequest):
+    """Record that two organisations are different, so they stop being suggested."""
+    a, b = sorted((body.org_a, body.org_b))
+    if a == b:
+        raise HTTPException(status_code=400, detail="Pick two different companies")
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("INSERT INTO not_same_org_pairs (org_a, org_b) VALUES (%s, %s) ON CONFLICT DO NOTHING", (a, b))
+        conn.commit()
+        return {"success": True}
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _suggestion_pairs(orgs: dict, similar: list, not_same: set) -> list:
+    """Merge candidates from three signals, strongest reason kept per pair:
+    'acronym' (BNEF / Bloomberg New Energy Finance), 'similar' (trigram
+    similarity of names: Bloomberg NEF / BloombergNEF), 'contains' (one
+    name is the other plus more words: Bloomberg / Bloomberg Green — often
+    a parent rather than a duplicate). Pairs already related as parent and
+    child, marked not-the-same, or involving a not-an-organisation are
+    skipped. Ranked by the people affected, then by signal strength."""
+    strength = {'acronym': 3, 'similar': 2, 'contains': 1}
+    found = {}
+
+    def add(a, b, reason, score):
+        if a == b:
+            return
+        a, b = sorted((a, b))
+        oa, ob = orgs.get(a), orgs.get(b)
+        if not oa or not ob or oa['not_an_org'] or ob['not_an_org'] or (a, b) in not_same:
+            return
+        if oa['parent_org_id'] == b or ob['parent_org_id'] == a:
+            return
+        prev = found.get((a, b))
+        if prev is None or strength[reason] > strength[prev['reason']]:
+            found[(a, b)] = {'org_a': a, 'org_b': b, 'reason': reason, 'score': round(score, 2)}
+
+    for a, b, sim in similar:
+        add(a, b, 'similar', sim)
+
+    keys = {oid: normalize_org_name(o['name']) or '' for oid, o in orgs.items()}
+    single = {}
+    for oid, key in keys.items():
+        if key and ' ' not in key:
+            single.setdefault(key, []).append(oid)
+    for oid, o in orgs.items():
+        for short_id in single.get(initials(o['name']) or '', []):
+            if looks_like_acronym_of(orgs[short_id]['name'], o['name']):
+                add(short_id, oid, 'acronym', 1.0)
+    by_first_words = {}
+    for oid, key in keys.items():
+        if key:
+            by_first_words.setdefault(key, []).append(oid)
+    for oid, key in keys.items():
+        words = key.split()
+        for n in range(1, len(words)):
+            for shorter in by_first_words.get(' '.join(words[:n]), []):
+                add(shorter, oid, 'contains', n / len(words))
+
+    pairs = list(found.values())
+    for p in pairs:
+        p['people'] = orgs[p['org_a']]['people'] + orgs[p['org_b']]['people']
+    pairs.sort(key=lambda p: (-p['people'], -strength[p['reason']], -p['score']))
+    return pairs
+
+
+@app.get("/api/admin/companies-suggestions", dependencies=[Depends(verify_admin)])
+async def company_merge_suggestions(limit: int = 50, min_similarity: float = 0.5):
+    """Likely duplicates to review, biggest first. Computed on request."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT o.org_id, o.name, o.org_type, o.parent_org_id, o.not_an_org,
+                   COUNT(DISTINCT ha.host_id) AS people,
+                   ARRAY_REMOVE(ARRAY_AGG(DISTINCT a.alias_name), NULL) AS alias_names
+            FROM organizations o
+            LEFT JOIN organization_aliases a ON a.org_id = o.org_id
+            LEFT JOIN host_affiliations ha ON ha.company_key = a.normalized_name
+            GROUP BY o.org_id
+        """)
+        orgs = {r['org_id']: r for r in cur.fetchall()}
+        cur.execute("SELECT set_limit(%s)", (min_similarity,))
+        cur.execute("""
+            SELECT a.org_id AS a, b.org_id AS b, similarity(lower(a.name), lower(b.name)) AS sim
+            FROM organizations a JOIN organizations b
+              ON a.org_id < b.org_id AND lower(a.name) % lower(b.name)
+            WHERE NOT a.not_an_org AND NOT b.not_an_org
+        """)
+        similar = [(r['a'], r['b'], r['sim']) for r in cur.fetchall()]
+        cur.execute("SELECT org_a, org_b FROM not_same_org_pairs")
+        not_same = {(r['org_a'], r['org_b']) for r in cur.fetchall()}
+
+        pairs = _suggestion_pairs(orgs, similar, not_same)
+        summary = lambda oid: {k: orgs[oid][k] for k in ('org_id', 'name', 'org_type', 'people', 'alias_names')}
+        return {
+            "total": len(pairs),
+            "items": [{**p, 'a': summary(p['org_a']), 'b': summary(p['org_b'])} for p in pairs[:max(1, limit)]],
+        }
     finally:
         cur.close()
         conn.close()

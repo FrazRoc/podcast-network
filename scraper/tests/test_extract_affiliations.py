@@ -472,9 +472,11 @@ class TestSelectionBeforeMigration:
             assert [(a['episode_id'], a['host_id']) for a in apps] == [pair]
         finally:
             db_conn.rollback()
-            with open(os.path.join(os.path.dirname(__file__), '..',
-                                   'migrate_add_host_affiliations.sql')) as f:
-                cur.execute(f.read())
+            # Rebuild what was dropped, including later migrations that
+            # alter these tables (company_key).
+            for name in ('migrate_add_host_affiliations.sql', 'migrate_add_organizations.sql'):
+                with open(os.path.join(os.path.dirname(__file__), '..', name)) as f:
+                    cur.execute(f.read())
             db_conn.commit()
 
 

@@ -55,6 +55,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 from description_cleaner import (  # noqa: E402
     clean_description, _name_pattern, first_name_belongs_to_other,
 )
+from org_names import normalize_org_name  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
@@ -667,7 +668,8 @@ def record_results(cur, pending: list, answers: dict) -> tuple:
         dropped_total += len(dropped)
         done.append(flags)
         new_rows.extend(
-            (episode_id, host_id, a['title'], a['company'], a['title_kind'], a['is_former'], DATA_SOURCE)
+            (episode_id, host_id, a['title'], a['company'], normalize_org_name(a['company']),
+             a['title_kind'], a['is_former'], DATA_SOURCE)
             for a in kept
         )
 
@@ -693,7 +695,7 @@ def record_results(cur, pending: list, answers: dict) -> tuple:
     if new_rows:
         execute_values(cur, """
             INSERT INTO host_affiliations
-                (episode_id, host_id, title, company, title_kind, is_former, data_source)
+                (episode_id, host_id, title, company, company_key, title_kind, is_former, data_source)
             VALUES %s ON CONFLICT DO NOTHING
         """, new_rows)
     if retry:

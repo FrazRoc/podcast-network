@@ -270,6 +270,46 @@ so the rule lives in one place; a test pins list and panel to the same
 answer. ~1–2 s with stage 1's 210 rows — if it slows after stage 2, store
 the current role instead of recomputing it per request.
 
+### Organisations and Company Admin
+
+`migrate_add_organizations.sql`: `organizations` (name, `org_type` —
+company / nonprofit / government / academic / research / media / investor /
+association / other — `parent_org_id`, `website_domain`, `not_an_org`),
+`organization_aliases` (every spelling, `normalized_name` unique),
+`not_same_org_pairs`, and `host_affiliations.company_key`. Also enables
+`pg_trgm`.
+
+- **Roles link through the alias, not a stored org id:**
+  `host_affiliations.company_key = organization_aliases.normalized_name`,
+  with the key from `backend/org_names.py normalize_org_name()` (case,
+  punctuation, leading "the", trailing possessive, legal suffixes like
+  Inc/LLC/Ltd — not "Company" or "Group", which are parts of names). A merge
+  or new alias re-links every past and future role at once.
+- **New spellings become organisations automatically** —
+  `scraper/organizations.py sync` (stamps missing keys, creates one org +
+  `auto` alias per unaliased key, named by the most common spelling, ties to
+  the bare form). Evan chose auto-create + review merges over approving each
+  company: the first ~1,300 roles gave ~1,075 organisations, nearly all seen
+  once.
+- **Company Admin** (`/admin/companies`, `AdminCompanies.js`): list (search
+  names and spellings; views All / No type yet / Not an organisation; type
+  filter; sort by people), edit panel (name, type, website, parent, not an
+  organisation, merge a duplicate in, spellings, sub-orgs, people with a
+  "current" badge, optionally including sub-orgs), and a **Merge
+  suggestions** tab. Suggestions are computed per request, ranked by people
+  affected: `acronym` (initials of a multi-word name, ≥3 letters — "BNEF" /
+  "Bloomberg New Energy Finance"), `similar` (pg_trgm similarity ≥ 0.5 —
+  "Bloomberg NEF" / "BloombergNEF"), `contains` (one name plus more words —
+  "Bloomberg" / "Bloomberg Green", often a parent). Actions: same (keep
+  either), is part of (sets parent), different (recorded in
+  `not_same_org_pairs`), skip.
+- Endpoints: `GET /api/admin/companies`, `GET/PUT /api/admin/companies/{id}`,
+  `POST .../{keep}/merge/{drop}`, `POST /api/admin/companies/not-same`,
+  `GET /api/admin/companies-suggestions`.
+- Not yet: showing the canonical organisation name on the People list and
+  cards (they still show the raw company text), a public company view, and
+  running `sync` from `scrape.yml` after each extraction.
+
 ## Tests
 
 **`scraper/tests/` has a real pytest suite** (~300 cases) covering
