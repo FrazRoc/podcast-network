@@ -140,20 +140,25 @@ class TestGroupAppearances:
         assert item['id'] == item_id(7, snippet_hash(item['snippet']))
 
 
+def pairs(kept):
+    """Just title and company, for tests about which values survive."""
+    return [{'title': a['title'], 'company': a['company']} for a in kept]
+
+
 class TestVerifiedAffiliations:
     SNIPPET = "Jane Doe, co-founder and CEO of Fervo Energy, and a fellow at the Payne Institute."
 
     def test_verbatim_values_are_kept(self):
         kept, dropped = verified_affiliations(
             [{'title': 'co-founder and CEO', 'company': 'Fervo Energy'}], self.SNIPPET)
-        assert kept == [{'title': 'co-founder and CEO', 'company': 'Fervo Energy'}]
+        assert pairs(kept) == [{'title': 'co-founder and CEO', 'company': 'Fervo Energy'}]
         assert dropped == []
 
     def test_invented_company_is_dropped(self):
         # The model "knows" a fuller name, but the text never says it.
         kept, dropped = verified_affiliations(
             [{'title': 'CEO', 'company': 'Fervo Energy Inc.'}], self.SNIPPET)
-        assert kept == [{'title': 'CEO', 'company': None}]
+        assert pairs(kept) == [{'title': 'CEO', 'company': None}]
         assert dropped == [('company', 'Fervo Energy Inc.')]
 
     def test_affiliation_with_nothing_left_is_removed(self):
@@ -164,13 +169,13 @@ class TestVerifiedAffiliations:
         kept, _ = verified_affiliations(
             [{'title': 'Head of Policy', 'company': "America's Power"}],
             "Jane Doe, head of policy at America’s Power")
-        assert kept == [{'title': 'Head of Policy', 'company': "America's Power"}]
+        assert pairs(kept) == [{'title': 'Head of Policy', 'company': "America's Power"}]
 
     def test_nulls_and_blanks(self):
         kept, dropped = verified_affiliations(
             [{'title': None, 'company': 'Payne Institute'}, {'title': '  ', 'company': None}],
             self.SNIPPET)
-        assert kept == [{'title': None, 'company': 'Payne Institute'}]
+        assert pairs(kept) == [{'title': None, 'company': 'Payne Institute'}]
         assert dropped == []
 
     def test_bare_honorific_is_not_a_title(self):
@@ -181,14 +186,14 @@ class TestVerifiedAffiliations:
     def test_title_containing_an_honorific_word_is_kept(self):
         kept, _ = verified_affiliations([{'title': 'Senator', 'company': None}],
                                         "Senator Martin Heinrich")
-        assert kept == [{'title': 'Senator', 'company': None}]
+        assert pairs(kept) == [{'title': 'Senator', 'company': None}]
 
     def test_case_only_duplicates_collapse(self):
         kept, _ = verified_affiliations(
             [{'title': 'CEO and Co-Founder', 'company': 'Wunder'},
              {'title': 'CEO and co-founder', 'company': 'Wunder'}],
             "Dave Riess, CEO and Co-Founder of Wunder ... the CEO and co-founder of Wunder")
-        assert kept == [{'title': 'CEO and Co-Founder', 'company': 'Wunder'}]
+        assert pairs(kept) == [{'title': 'CEO and Co-Founder', 'company': 'Wunder'}]
 
     def test_shorter_title_at_same_org_is_dropped(self):
         # Real case (production sample): "CEO" and "Co-Founder and CEO" at Planetary.
@@ -196,13 +201,13 @@ class TestVerifiedAffiliations:
             [{'title': 'CEO', 'company': 'Planetary'},
              {'title': 'Co-Founder and CEO', 'company': 'Planetary'}],
             "Mike Kelland, CEO of Planetary ... Mike Kelland, Co-Founder and CEO of Planetary")
-        assert kept == [{'title': 'Co-Founder and CEO', 'company': 'Planetary'}]
+        assert pairs(kept) == [{'title': 'Co-Founder and CEO', 'company': 'Planetary'}]
 
     def test_bare_org_dropped_when_a_titled_role_names_it(self):
         kept, _ = verified_affiliations(
             [{'title': None, 'company': 'Wunder'}, {'title': 'CEO', 'company': 'Wunder'}],
             "Dave Riess, CEO of Wunder")
-        assert kept == [{'title': 'CEO', 'company': 'Wunder'}]
+        assert pairs(kept) == [{'title': 'CEO', 'company': 'Wunder'}]
 
     def test_same_title_at_different_orgs_both_kept(self):
         kept, _ = verified_affiliations(
@@ -217,16 +222,64 @@ class TestVerifiedAffiliations:
         assert len(kept) == 1
 
 
+    def test_former_role_is_kept_and_flagged(self):
+        kept, _ = verified_affiliations(
+            [{'title': 'CEO', 'company': 'Acme', 'title_kind': 'position', 'is_former': True}],
+            "Jane Doe, former CEO of Acme")
+        assert kept == [{'title': 'CEO', 'company': 'Acme', 'title_kind': 'position', 'is_former': True}]
+
+    def test_former_and_current_same_role_both_kept(self):
+        # "former CFO, now CFO again" style text; they are different facts.
+        kept, _ = verified_affiliations(
+            [{'title': 'CFO', 'company': 'Acme', 'title_kind': 'position', 'is_former': True},
+             {'title': 'CFO', 'company': 'Acme', 'title_kind': 'position', 'is_former': False}],
+            "Jane Doe, CFO of Acme")
+        assert len(kept) == 2
+
+    def test_title_kind_cleared_when_title_is_dropped(self):
+        kept, _ = verified_affiliations(
+            [{'title': 'Chairman', 'company': 'Acme', 'title_kind': 'position', 'is_former': False}],
+            "Jane Doe of Acme")
+        assert kept == [{'title': None, 'company': 'Acme', 'title_kind': None, 'is_former': False}]
+
+    def test_unknown_title_kind_becomes_null(self):
+        kept, _ = verified_affiliations(
+            [{'title': 'ecologist', 'company': None, 'title_kind': 'vibe', 'is_former': False}],
+            "ecologist Jane Doe")
+        assert kept[0]['title_kind'] is None
+
+    def test_description_kind_is_kept(self):
+        kept, _ = verified_affiliations(
+            [{'title': 'ecologist and conservationist', 'company': None,
+              'title_kind': 'description', 'is_former': False}],
+            "we meet with ecologist and conservationist Dr. Gerardo Ceballos")
+        assert kept[0]['title_kind'] == 'description'
+
+
 class TestResponses:
     CEO = [{'title': 'CEO', 'company': None}]
 
+    def _result(self, rid, **kw):
+        return {'id': rid, 'is_podcast_host': False, 'appears_on_episode': True,
+                'from_other_episode': False, 'affiliations': self.CEO, **kw}
+
     def test_parse_keeps_only_expected_ids(self):
-        text = json.dumps({'results': [
-            {'id': 'a', 'is_podcast_host': False, 'affiliations': self.CEO},
-            {'id': 'zzz', 'is_podcast_host': False, 'affiliations': []},
-        ]})
+        text = json.dumps({'results': [self._result('a'), self._result('zzz', affiliations=[])]})
         assert parse_response_text(text, {'a', 'b'}) == {
-            'a': {'is_host': False, 'affiliations': self.CEO}}
+            'a': {'is_host': False, 'appears': True, 'other_episode': False, 'affiliations': self.CEO}}
+
+    def test_flags_are_carried_through(self):
+        text = json.dumps({'results': [
+            self._result('a', appears_on_episode=False, from_other_episode=True)]})
+        answer = parse_response_text(text, {'a'})['a']
+        assert answer['appears'] is False and answer['other_episode'] is True
+        # A mentioned-only person still keeps the role the text gives them.
+        assert answer['affiliations'] == self.CEO
+
+    def test_missing_appears_flag_defaults_to_appearing(self):
+        # Never flag a credit as doubtful on the strength of an absent field.
+        text = json.dumps({'results': [{'id': 'a', 'affiliations': []}]})
+        assert parse_response_text(text, {'a'})['a']['appears'] is True
 
     def test_first_answer_for_a_repeated_id_wins(self):
         text = json.dumps({'results': [
@@ -240,7 +293,8 @@ class TestResponses:
         text = json.dumps({'results': [
             {'id': 'a', 'is_podcast_host': True, 'affiliations': self.CEO},
         ]})
-        assert parse_response_text(text, {'a'}) == {'a': {'is_host': True, 'affiliations': []}}
+        answer = parse_response_text(text, {'a'})['a']
+        assert answer['is_host'] is True and answer['affiliations'] == []
 
     def _message(self, stop_reason, text='{"results": []}'):
         return SimpleNamespace(stop_reason=stop_reason,
@@ -425,7 +479,7 @@ class TestRecordResults:
         cur = aff_db.cursor()
         pair = _setup_appearance(cur)
         row = _pending(cur, *pair, 'Jane Doe, CEO of Fervo, joins us.')
-        answers = {item_id(pair[1], row[3]): {'is_host': False, 'affiliations': [
+        answers = {item_id(pair[1], row[3]): {'is_host': False, 'appears': True, 'other_episode': False, 'affiliations': [
             {'title': 'CEO', 'company': 'Fervo'},
             {'title': 'Board member', 'company': 'Google'},   # not in the text
         ]}}
@@ -454,7 +508,8 @@ class TestRecordResults:
                     "VALUES (%s, %s, 'Old guess', NULL)", pair)
         row = _pending(cur, *pair, 'Jane Doe, CEO of Fervo, joins us.')
         record_results(cur, [row], {item_id(pair[1], row[3]): {
-            'is_host': False, 'affiliations': [{'title': 'CEO', 'company': 'Fervo'}]}})
+            'is_host': False, 'appears': True, 'other_episode': False,
+            'affiliations': [{'title': 'CEO', 'company': 'Fervo'}]}})
         aff_db.commit()
 
         cur.execute("SELECT title, data_source FROM host_affiliations ORDER BY title")
@@ -465,12 +520,31 @@ class TestRecordResults:
         cur = aff_db.cursor()
         pair = _setup_appearance(cur)
         row = _pending(cur, *pair, 'Jane Doe, CEO of Fervo, joins us.')
-        answers = {item_id(pair[1], row[3]): {'is_host': True, 'affiliations': []}}
+        answers = {item_id(pair[1], row[3]): {'is_host': True, 'appears': True,
+                                              'other_episode': False, 'affiliations': []}}
         assert record_results(cur, [row], answers) == (1, 0, 0, 0)
         cur.execute("SELECT status FROM affiliation_extractions")
         assert cur.fetchone()[0] == 'host'
         cur.execute("SELECT count(*) FROM host_affiliations")
         assert cur.fetchone()[0] == 0
+
+
+    def test_flags_and_new_fields_are_stored(self, aff_db):
+        cur = aff_db.cursor()
+        pair = _setup_appearance(cur, desc='President Jane Doe, former CEO of Acme, signed it.')
+        row = _pending(cur, *pair, 'President Jane Doe, former CEO of Acme, signed it.')
+        answers = {item_id(pair[1], row[3]): {
+            'is_host': False, 'appears': False, 'other_episode': True, 'affiliations': [
+                {'title': 'President', 'company': None, 'title_kind': 'position', 'is_former': False},
+                {'title': 'CEO', 'company': 'Acme', 'title_kind': 'position', 'is_former': True},
+            ]}}
+        record_results(cur, [row], answers)
+        aff_db.commit()
+        cur.execute("SELECT appears_on_episode, from_other_episode FROM affiliation_extractions")
+        assert cur.fetchone() == (False, True)
+        cur.execute("SELECT title, company, title_kind, is_former FROM host_affiliations ORDER BY title")
+        assert cur.fetchall() == [('CEO', 'Acme', 'position', True),
+                                  ('President', None, 'position', False)]
 
 
 class TestFollowsCredits:

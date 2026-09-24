@@ -95,7 +95,10 @@ SNIPPET_MAX_WINDOWS = 2
 SNIPPET_MAX_FIRST_NAME_WINDOWS = 1
 
 ITEMS_PER_REQUEST = 40
-MAX_TOKENS = 4096
+# A 40-item Sonnet 5 request with the appearance flags and former roles
+# overran 4,096 output tokens on the second production sample. Unused
+# headroom costs nothing; a cut-off response costs the whole request.
+MAX_TOKENS = 16000
 
 # Rough sizes for `estimate`, which runs without an API key. These are
 # approximations (about four characters per token for English, and a
@@ -103,7 +106,10 @@ MAX_TOKENS = 4096
 # usage.
 CHARS_PER_TOKEN = 4
 EST_ITEM_OVERHEAD_TOKENS = 20   # the <item id=... person=...> wrapper
-EST_OUTPUT_TOKENS_PER_ITEM = 30
+# Measured on the second production sample (99 items, Sonnet 5, with the
+# appearance flags and former roles): ~100 output tokens per item. Stated
+# here in Haiku-equivalent terms; Sonnet's estimate_factor adds the rest.
+EST_OUTPUT_TOKENS_PER_ITEM = 70
 EST_SCHEMA_TOKENS = 300          # the output schema, sent with every request
 
 
@@ -112,8 +118,8 @@ You read podcast episode titles and descriptions and record the job title and \
 organisation of one named person per item.
 
 Each <item> names a person in its `person` attribute and contains text from \
-one episode. For that person only, list the roles the text says they hold at \
-the time of the episode.
+one episode. For that person only, list the roles the text gives them, and \
+say how they relate to the episode.
 
 Rules:
 - Only the named person. Ignore the host and any other guest in the text. \
@@ -139,15 +145,43 @@ company "Dandelion Energy" / "Cambium" / "Raptor Maps".
 - The text may refer back to the person by first name only ("Sergey is a \
 senior fellow at ..."); that is still them.
 - If the text gives only a title or only an organisation, set the other to null.
-- A title is a position: CEO, partner, senior fellow, professor, \
-commissioner, founder, reporter. Descriptions such as "expert", "leader", \
-"guest" or "author" on their own are not titles.
-- Skip roles the text marks as past: former, ex-, previously, retired, \
-used to.
+- A title is a noun phrase. When the text uses a verb instead ("Mark \
+co-founded SunPower's residential business", "she runs the R&D lab at \
+Vulcan"), record the organisation with title null rather than copying the \
+verb.
+- The text is an excerpt and may start or stop mid-sentence. Never take a \
+title or organisation from a fragment cut off at either end ("roles as the \
+Africa" is not a title).
+- `title_kind` says what the title is. "position" is a job or office \
+someone holds: CEO, partner, senior fellow, professor, commissioner, \
+founder, reporter, Senator. "description" is a way of describing what they \
+do rather than a post: "ecologist and conservationist", "writer and social \
+justice facilitator", "researcher and author", "climate activist". Use null \
+when `title` is null. Words that describe their part in the episode rather \
+than their work ("guest", "speaker", "expert", "friend of the show") are not \
+titles at all.
+- Include roles the text marks as past (former, ex-, previously, retired, \
+used to, "who led ... at") with `is_former` true. Roles held at the time of \
+the episode have `is_former` false.
 - If the text presents the person as a host, co-host or producer of this \
 podcast, set `is_podcast_host` to true and return no affiliations for them. \
 Hosting a different show does not count; neither does moderating a single \
 panel.
+- `appears_on_episode`: true if the text presents the person as taking part \
+in this episode (guest, interviewee, panellist, speaker, "joined by", \
+"talks with", or a recorded clip of them speaking). False if they are only \
+talked about: a politician whose policy is discussed, a person quoted from \
+elsewhere, someone named in a news item, a link or a book, a production \
+credit ("Produced by ..."), or a future episode. Moderating a panel recorded \
+for this episode counts as taking part, and so does a name in a list of \
+this episode's guests even when the excerpt starts partway through the \
+list. If you cannot tell, set it true. Still list any role the text gives \
+them.
+- `from_other_episode`: true if the text about this person refers to a \
+different or older recording rather than this episode: a list of past or \
+related episodes ("past episodes you'll love", "listen to our episode \
+with ..."), or a rerun of an earlier conversation ("we're re-running our \
+2019 episode"). Otherwise false.
 - Skip the podcast itself and its production company unless the text says \
 the person works there.
 - If the text states no role for the person, return an empty list. Never use \
@@ -165,6 +199,8 @@ OUTPUT_SCHEMA = {
                 'properties': {
                     'id': {'type': 'string'},
                     'is_podcast_host': {'type': 'boolean'},
+                    'appears_on_episode': {'type': 'boolean'},
+                    'from_other_episode': {'type': 'boolean'},
                     'affiliations': {
                         'type': 'array',
                         'items': {
@@ -172,13 +208,19 @@ OUTPUT_SCHEMA = {
                             'properties': {
                                 'title': {'anyOf': [{'type': 'string'}, {'type': 'null'}]},
                                 'company': {'anyOf': [{'type': 'string'}, {'type': 'null'}]},
+                                'title_kind': {'anyOf': [
+                                    {'type': 'string', 'enum': ['position', 'description']},
+                                    {'type': 'null'},
+                                ]},
+                                'is_former': {'type': 'boolean'},
                             },
-                            'required': ['title', 'company'],
+                            'required': ['title', 'company', 'title_kind', 'is_former'],
                             'additionalProperties': False,
                         },
                     },
                 },
-                'required': ['id', 'is_podcast_host', 'affiliations'],
+                'required': ['id', 'is_podcast_host', 'appears_on_episode',
+                             'from_other_episode', 'affiliations'],
                 'additionalProperties': False,
             },
         },
@@ -364,7 +406,9 @@ def verified_affiliations(affiliations: list, snippet: str) -> tuple:
 
     Returns (kept, dropped). A value not found in the text is set to null;
     an affiliation left with neither title nor company is dropped whole.
-    Duplicate (title, company) pairs are collapsed.
+    Duplicate (title, company, is_former) entries are collapsed. Each kept
+    entry carries title, company, title_kind (null when title is) and
+    is_former.
     """
     haystack = _normalise_for_match(snippet)
     kept, dropped, seen = [], [], set()
@@ -382,8 +426,13 @@ def verified_affiliations(affiliations: list, snippet: str) -> tuple:
                 if value:
                     dropped.append((field, value))
         pair = (clean['title'], clean['company'])
-        key = tuple(_normalise_for_match(v) if v else None for v in pair)
-        if pair == (None, None) or key in seen:
+        if pair == (None, None):
+            continue
+        clean['is_former'] = bool(aff.get('is_former'))
+        kind = aff.get('title_kind')
+        clean['title_kind'] = kind if clean['title'] and kind in ('position', 'description') else None
+        key = tuple(_normalise_for_match(v) if v else None for v in pair) + (clean['is_former'],)
+        if key in seen:
             continue
         seen.add(key)
         kept.append(clean)
@@ -403,7 +452,8 @@ def _drop_subsumed(affiliations: list) -> list:
     for i, a in enumerate(affiliations):
         at, ac = norm(a['title']), norm(a['company'])
         covered = any(
-            j != i and norm(b['company']) == ac and at in norm(b['title'])
+            j != i and b['is_former'] == a['is_former']
+            and norm(b['company']) == ac and at in norm(b['title'])
             and len(norm(b['title'])) > len(at)
             for j, b in enumerate(affiliations)
         )
@@ -413,8 +463,8 @@ def _drop_subsumed(affiliations: list) -> list:
 
 
 def parse_response_text(text: str, expected_ids: set) -> dict:
-    """{item id: {'is_host': bool, 'affiliations': [...]}} for the ids this
-    request was sent.
+    """{item id: {'is_host', 'appears', 'other_episode', 'affiliations'}} for
+    the ids this request was sent.
 
     Unknown ids are ignored; ids missing from the response are simply absent
     from the result, and the caller marks them for retry. Anyone flagged as
@@ -426,8 +476,14 @@ def parse_response_text(text: str, expected_ids: set) -> dict:
         rid = result.get('id')
         if rid in expected_ids and rid not in out:
             is_host = bool(result.get('is_podcast_host'))
-            out[rid] = {'is_host': is_host,
-                        'affiliations': [] if is_host else (result.get('affiliations') or [])}
+            out[rid] = {
+                'is_host': is_host,
+                # Missing means the schema was not followed; assume the
+                # credit is right rather than flag it as mentioned-only.
+                'appears': result.get('appears_on_episode', True) is not False,
+                'other_episode': bool(result.get('from_other_episode')),
+                'affiliations': [] if is_host else (result.get('affiliations') or []),
+            }
     return out
 
 
@@ -547,9 +603,11 @@ def record_results(cur, pending: list, answers: dict) -> tuple:
     """Write one batch's answers. Does not commit.
 
     pending: (episode_id, host_id, snippet, snippet_hash) rows still
-    'pending' for the batch. answers: {item id: [affiliation, ...]}.
+    'pending' for the batch. answers: parse_response_text() output.
     Appearances with no answer go to 'retry'; ones the model flagged as this
-    podcast's host go to 'host' with nothing stored. Returns
+    podcast's host go to 'host' with nothing stored. The appearance-level
+    flags (appears_on_episode, from_other_episode) are recorded on the
+    extraction row for both. Returns
     (done, affiliations added, retried, values dropped as not verbatim).
     """
     done, retry, hosts, new_rows, dropped_total = [], [], [], [], 0
@@ -558,44 +616,44 @@ def record_results(cur, pending: list, answers: dict) -> tuple:
         if key not in answers:
             retry.append((episode_id, host_id))
             continue
-        if answers[key]['is_host']:
-            hosts.append((episode_id, host_id))
+        answer = answers[key]
+        flags = (episode_id, host_id, answer['appears'], answer['other_episode'])
+        if answer['is_host']:
+            hosts.append(flags)
             continue
-        kept, dropped = verified_affiliations(answers[key]['affiliations'], snippet)
+        kept, dropped = verified_affiliations(answer['affiliations'], snippet)
         dropped_total += len(dropped)
-        done.append((episode_id, host_id))
-        new_rows.extend((episode_id, host_id, a['title'], a['company'], DATA_SOURCE) for a in kept)
+        done.append(flags)
+        new_rows.extend(
+            (episode_id, host_id, a['title'], a['company'], a['title_kind'], a['is_former'], DATA_SOURCE)
+            for a in kept
+        )
 
     # Replace earlier automated rows for these appearances; 'manual' rows are
     # human decisions and are never touched.
-    if done:
+    for rows, status in ((done, 'done'), (hosts, 'host')):
+        if not rows:
+            continue
+        # Replace earlier automated rows for these appearances; 'manual' rows
+        # are human decisions and are never touched.
         execute_values(cur, """
             DELETE FROM host_affiliations ha USING (VALUES %s) AS d(episode_id, host_id)
             WHERE ha.episode_id = d.episode_id AND ha.host_id = d.host_id
               AND ha.data_source <> 'manual'
-        """, done)
+        """, [r[:2] for r in rows])
+        execute_values(cur, f"""
+            UPDATE affiliation_extractions ax
+            SET status = '{status}', completed_at = now(),
+                appears_on_episode = d.appears, from_other_episode = d.other_episode
+            FROM (VALUES %s) AS d(episode_id, host_id, appears, other_episode)
+            WHERE ax.episode_id = d.episode_id AND ax.host_id = d.host_id
+        """, rows)
     if new_rows:
         execute_values(cur, """
-            INSERT INTO host_affiliations (episode_id, host_id, title, company, data_source)
+            INSERT INTO host_affiliations
+                (episode_id, host_id, title, company, title_kind, is_former, data_source)
             VALUES %s ON CONFLICT DO NOTHING
         """, new_rows)
-    if done:
-        execute_values(cur, """
-            UPDATE affiliation_extractions ax SET status = 'done', completed_at = now()
-            FROM (VALUES %s) AS d(episode_id, host_id)
-            WHERE ax.episode_id = d.episode_id AND ax.host_id = d.host_id
-        """, done)
-    if hosts:
-        execute_values(cur, """
-            DELETE FROM host_affiliations ha USING (VALUES %s) AS d(episode_id, host_id)
-            WHERE ha.episode_id = d.episode_id AND ha.host_id = d.host_id
-              AND ha.data_source <> 'manual'
-        """, hosts)
-        execute_values(cur, """
-            UPDATE affiliation_extractions ax SET status = 'host', completed_at = now()
-            FROM (VALUES %s) AS d(episode_id, host_id)
-            WHERE ax.episode_id = d.episode_id AND ax.host_id = d.host_id
-        """, hosts)
     if retry:
         execute_values(cur, """
             UPDATE affiliation_extractions ax SET status = 'retry'
@@ -661,11 +719,13 @@ def cmd_pilot(limit: int, out_path: str, model: str = MODEL):
             continue
         results.update(parse_response_text(text, {it['id'] for it in group}))
 
-    dropped_total = found = flagged_hosts = 0
-    empty = {'is_host': False, 'affiliations': []}
+    dropped_total = found = flagged_hosts = mentioned_only = other_episode = 0
+    empty = {'is_host': False, 'appears': True, 'other_episode': False, 'affiliations': []}
+    yes = lambda v: 'yes' if v else ''
     with open(out_path, 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(['person', 'podcast', 'episode', 'title', 'company', 'podcast_host',
+        writer.writerow(['person', 'podcast', 'episode', 'title', 'company', 'title_kind', 'former',
+                         'podcast_host', 'mentioned_only', 'other_episode',
                          'dropped_unverified', 'snippet'])
         for it in items:
             answer = results.get(it['id'], empty)
@@ -673,19 +733,25 @@ def cmd_pilot(limit: int, out_path: str, model: str = MODEL):
             dropped_total += len(dropped)
             found += bool(kept)
             flagged_hosts += answer['is_host']
+            mentioned_only += not answer['appears']
+            other_episode += answer['other_episode']
             app = it['appearances'][0]
             dropped_s = '; '.join(f'{k}={v}' for k, v in dropped)
-            for aff in kept or [{'title': None, 'company': None}]:
+            blank = {'title': None, 'company': None, 'title_kind': None, 'is_former': False}
+            for aff in kept or [blank]:
                 writer.writerow([it['person'], app['podcast_title'], app['episode_title'],
-                                 aff['title'] or '', aff['company'] or '',
-                                 'yes' if answer['is_host'] else '', dropped_s, it['snippet']])
+                                 aff['title'] or '', aff['company'] or '', aff['title_kind'] or '',
+                                 yes(aff['is_former']), yes(answer['is_host']),
+                                 yes(not answer['appears']), yes(answer['other_episode']),
+                                 dropped_s, it['snippet']])
         for app in no_mention:
             name = (host_names.get(app['host_id']) or ['?'])[0]
             writer.writerow([name, app['podcast_title'], app['episode_title'],
-                             '', '', '', '', '(name not in title or description)'])
+                             '', '', '', '', '', '', '', '', '(name not in title or description)'])
 
     logger.info(f"Items with at least one role: {found}/{len(items)}; flagged as this podcast's "
-                f"host: {flagged_hosts}; values dropped as not verbatim: {dropped_total}; "
+                f"host: {flagged_hosts}; mentioned only: {mentioned_only}; from another episode: "
+                f"{other_episode}; values dropped as not verbatim: {dropped_total}; "
                 f"items failed: {failed}")
     logger.info(f"Actual usage: {tokens_in:,} in, {tokens_out:,} out = "
                 f"${usage_cost(tokens_in, tokens_out, False, model):.4f} at normal price "

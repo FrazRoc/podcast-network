@@ -135,7 +135,7 @@ merges and credit deletions carry through without touching that code.
   Office" came back as Joe Batir's role on three runs of three, despite a
   prompt rule with that exact shape. Sonnet 5 (`--model claude-sonnet-5`,
   thinking disabled) made no such errors and found more possessive company
-  mentions ("Tigercomm's Mike Casey"), at ~3x the cost. Model choice pending.
+  mentions ("Tigercomm's Mike Casey"), at ~3x the cost.
 - Too varied for regex, so a model reads it. Kept cheap by sending only
   ~120 chars before / ~280 after each name mention (`build_snippet`), sending
   an identical (person, snippet) once, 40 items per request, via the Batch
@@ -162,6 +162,30 @@ merges and credit deletions carry through without touching that code.
 - Snippets also take one later first-name-only mention ("Sergey is a senior
   fellow at ..."), unless that first name is attached to another surname in
   the same text.
+- **This is raw data.** Different wording across appearances ("CEO" vs
+  "Co-Founder and CEO", "Fervo" vs "Fervo Energy") is stored as-is; a later
+  process derives each person's displayed current role. Company
+  normalisation is also later: `organizations` + `organization_aliases`
+  (same pattern as `hosts`/`host_aliases`), an `org_id` filled in on
+  `host_affiliations`, optional `parent_org_id` for sub-units (whether
+  "Microsoft" queries include "Microsoft Research" is undecided), reviewed
+  through a Company Admin page like name suggestions. Not seeded from
+  Colorado Current's `companies` table (too small to matter against
+  thousands of extracted orgs); website domain is the join key if that link
+  is ever wanted.
+- Per appearance the model also records `appears_on_episode` (false = only
+  talked about: politicians discussed, production credits, links, books —
+  a curation signal for false guest credits, never acted on automatically;
+  defaults to true when unsure) and `from_other_episode` (past-episode
+  lists, reruns). Per role: `is_former` (former roles are kept, not
+  dropped) and `title_kind` (`position` vs `description`, e.g. "ecologist
+  and conservationist").
+- **Model: Sonnet 5.** On the Sep 2026 production sample Haiku gave one
+  guest another person's role and missed all six possessive company
+  mentions ("Heatmap's Katie Brigham"); Sonnet did neither. With the extra
+  fields, measured ~100 output tokens per item; `MAX_TOKENS` raised to
+  16,000 after a 40-item request overran 4,096. Full production backfill
+  estimate: 15,554 unique snippets, ~$11.91 at batch price.
 
 ## Tests
 

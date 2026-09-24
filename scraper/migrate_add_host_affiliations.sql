@@ -46,6 +46,16 @@ CREATE TABLE IF NOT EXISTS affiliation_extractions (
     snippet_hash  CHAR(16),
     batch_id      TEXT,
     model         TEXT,
+    -- Set when the result is recorded (done / host), NULL before.
+    -- appears_on_episode false: the text only talks about the person (a
+    --   politician whose policy is discussed, someone quoted from
+    --   elsewhere). Curation signal for false guest credits; never acted on
+    --   automatically.
+    -- from_other_episode true: the text about them is a "past episodes"
+    --   list, a link to another episode, or a rerun of an older recording,
+    --   so any role is not as of this episode's date.
+    appears_on_episode BOOLEAN,
+    from_other_episode BOOLEAN,
     attempts      INTEGER     NOT NULL DEFAULT 0,
     created_at    TIMESTAMP   NOT NULL DEFAULT now(),
     completed_at  TIMESTAMP,
@@ -66,11 +76,18 @@ CREATE TABLE IF NOT EXISTS host_affiliations (
     host_id        INTEGER     NOT NULL,
     title          TEXT,
     company        TEXT,
+    -- 'position' (CEO, senior fellow, Senator) or 'description'
+    -- ("ecologist and conservationist"); NULL when title is NULL.
+    title_kind     VARCHAR(20),
+    -- Role the text marks as past (former, previously, ex-).
+    is_former      BOOLEAN     NOT NULL DEFAULT false,
     data_source    VARCHAR(50) NOT NULL DEFAULT 'llm_extracted',
     created_at     TIMESTAMP   NOT NULL DEFAULT now(),
     FOREIGN KEY (episode_id, host_id) REFERENCES episode_host (episode_id, host_id)
         ON UPDATE CASCADE ON DELETE CASCADE,
-    CHECK (title IS NOT NULL OR company IS NOT NULL)
+    CHECK (title IS NOT NULL OR company IS NOT NULL),
+    CHECK (title_kind IN ('position', 'description')),
+    CHECK (title_kind IS NULL OR title IS NOT NULL)
 );
 
 CREATE INDEX IF NOT EXISTS idx_host_affiliations_host
@@ -80,6 +97,6 @@ CREATE INDEX IF NOT EXISTS idx_host_affiliations_episode
 -- Same role recorded twice for one appearance is a duplicate, whichever
 -- side is missing.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_host_affiliations_role
-    ON host_affiliations (episode_id, host_id, COALESCE(title, ''), COALESCE(company, ''));
+    ON host_affiliations (episode_id, host_id, COALESCE(title, ''), COALESCE(company, ''), is_former);
 
 COMMIT;
