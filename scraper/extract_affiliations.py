@@ -382,11 +382,34 @@ def verified_affiliations(affiliations: list, snippet: str) -> tuple:
                 if value:
                     dropped.append((field, value))
         pair = (clean['title'], clean['company'])
-        if pair == (None, None) or pair in seen:
+        key = tuple(_normalise_for_match(v) if v else None for v in pair)
+        if pair == (None, None) or key in seen:
             continue
-        seen.add(pair)
+        seen.add(key)
         kept.append(clean)
-    return kept, dropped
+    return _drop_subsumed(kept), dropped
+
+
+def _drop_subsumed(affiliations: list) -> list:
+    """Drop a role another role at the same organisation already covers.
+
+    Sonnet 5 on the production sample returned "CEO" and "Co-Founder and
+    CEO" at Planetary as two roles for one sentence. The longer title
+    wins; so does a title over a bare organisation ("— @ Wunder" next to
+    "CEO @ Wunder").
+    """
+    norm = lambda v: _normalise_for_match(v) if v else ''
+    out = []
+    for i, a in enumerate(affiliations):
+        at, ac = norm(a['title']), norm(a['company'])
+        covered = any(
+            j != i and norm(b['company']) == ac and at in norm(b['title'])
+            and len(norm(b['title'])) > len(at)
+            for j, b in enumerate(affiliations)
+        )
+        if not covered:
+            out.append(a)
+    return out
 
 
 def parse_response_text(text: str, expected_ids: set) -> dict:

@@ -183,6 +183,34 @@ class TestVerifiedAffiliations:
                                         "Senator Martin Heinrich")
         assert kept == [{'title': 'Senator', 'company': None}]
 
+    def test_case_only_duplicates_collapse(self):
+        kept, _ = verified_affiliations(
+            [{'title': 'CEO and Co-Founder', 'company': 'Wunder'},
+             {'title': 'CEO and co-founder', 'company': 'Wunder'}],
+            "Dave Riess, CEO and Co-Founder of Wunder ... the CEO and co-founder of Wunder")
+        assert kept == [{'title': 'CEO and Co-Founder', 'company': 'Wunder'}]
+
+    def test_shorter_title_at_same_org_is_dropped(self):
+        # Real case (production sample): "CEO" and "Co-Founder and CEO" at Planetary.
+        kept, _ = verified_affiliations(
+            [{'title': 'CEO', 'company': 'Planetary'},
+             {'title': 'Co-Founder and CEO', 'company': 'Planetary'}],
+            "Mike Kelland, CEO of Planetary ... Mike Kelland, Co-Founder and CEO of Planetary")
+        assert kept == [{'title': 'Co-Founder and CEO', 'company': 'Planetary'}]
+
+    def test_bare_org_dropped_when_a_titled_role_names_it(self):
+        kept, _ = verified_affiliations(
+            [{'title': None, 'company': 'Wunder'}, {'title': 'CEO', 'company': 'Wunder'}],
+            "Dave Riess, CEO of Wunder")
+        assert kept == [{'title': 'CEO', 'company': 'Wunder'}]
+
+    def test_same_title_at_different_orgs_both_kept(self):
+        kept, _ = verified_affiliations(
+            [{'title': 'senior fellow', 'company': 'Searchlight Institute'},
+             {'title': 'senior fellow', 'company': 'States Forum'}],
+            "a senior fellow at the Searchlight Institute and the States Forum")
+        assert len(kept) == 2
+
     def test_duplicates_collapse(self):
         aff = {'title': 'CEO', 'company': 'Fervo Energy'}
         kept, _ = verified_affiliations([aff, dict(aff)], self.SNIPPET)
