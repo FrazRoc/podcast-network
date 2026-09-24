@@ -370,9 +370,28 @@ const ShowProfileCard = ({ show, connections, onClose, weighting, allLinks, name
   );
 };
 
+// The one current job title / organisation for a person — derived from
+// episode text or pinned by hand (see backend/role_selection.py). Fetched per
+// card rather than carried in the graph payload, which stays unchanged.
+const useCurrentRole = (hostId) => {
+  const [role, setRole] = useState(null);
+  useEffect(() => {
+    setRole(null);
+    if (hostId == null) return undefined;
+    let cancelled = false;
+    fetch(`${API_BASE_URL}/api/people/${hostId}/current-role`)
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (!cancelled) setRole(d?.current_role || null); })
+      .catch(() => {});   // a missing role just means no line on the card
+    return () => { cancelled = true; };
+  }, [hostId]);
+  return role;
+};
+
 const HostProfileCard = ({ host, connections, onClose, isAdmin }) => {
   const uniquePodcasts = new Set(connections.map(c => c.podcast)).size;
   const totalEpisodes = connections.reduce((s, c) => s + c.value, 0);
+  const role = useCurrentRole(host.id);
 
   return (
     <div className="bg-white rounded-lg shadow-lg p-6 relative">
@@ -395,6 +414,11 @@ const HostProfileCard = ({ host, connections, onClose, isAdmin }) => {
           </a>
         ) : (
           <h3 className="text-xl font-bold text-center">{host.name}</h3>
+        )}
+        {role && (role.title || role.company) && (
+          <p className="text-sm text-gray-700 text-center mt-1">
+            {role.title}{role.title && role.company ? ' · ' : ''}{role.company}
+          </p>
         )}
         <p className="text-gray-500 text-sm">{connections.length} connections</p>
         {host.linkedin_url && (
