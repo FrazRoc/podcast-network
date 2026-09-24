@@ -5,16 +5,27 @@ on Render, Create React App + Tailwind frontend, Python scrapers driven by
 GitHub Actions.
 
 ```
-backend/    FastAPI app (main.py, ~2.6k lines) — API + admin endpoints
+backend/    FastAPI app (main.py, ~3.5k lines) — API + admin endpoints
 frontend/   CRA + Tailwind. PodcastHostNetwork.js is the graph
 scraper/    scrapers, the name scanner, and .sql migrations
 ```
 
 ## Working agreements
 
-**Branches.** Develop on `claude/gracious-darwin-vbul7z`, push there **and**
-mirror to `main`. GitHub Actions cron only fires from the default branch, so
-scheduled work that only exists on the dev branch never runs.
+**Branches and deploys.** Everything that runs in production runs from
+**`main`**: both Render services (backend and frontend) and the GitHub
+Actions cron. Each session develops on its own branch and merges to `main`
+to ship — `claude/gracious-darwin-vbul7z` (scanner / curation) and
+`claude/podcast-guest-metadata-extraction-xvby8l` (guest affiliations).
+
+Until Sep 24 2026 both Render services deployed from
+`claude/gracious-darwin-vbul7z`, not `main` — so a merge to `main` from
+another branch did not deploy, and whichever session last pushed that branch
+decided what was live. Evan switched both services to `main` that day.
+Changing a service's branch in Render does **not** redeploy by itself; it
+needed a manual deploy. GitHub's deployment records may still show the old
+branch name as the environment label — check the deployed commit SHA, not
+the label.
 
 **Bulk data changes always get quantified and approved first.** Say how many
 rows, show a sample, wait. This has repeatedly mattered: a title-drift bug
@@ -46,7 +57,13 @@ serving. Always verify with `CI=true npm run build`, not `npm start`.
 `podcasts`, `episodes`, `hosts`, `episode_host` (PK episode_id+host_id, with
 `is_guest`, `role`, `data_source`), `host_podcast` (show-level hosts),
 `host_aliases`, `not_duplicate_pairs`, `suggestions`, `rejected_names`,
-`image_suggestions`, `host_roles`, `host_social_links`, `episode_tag`.
+`image_suggestions`, `host_roles`, `host_social_links`, `episode_tag`,
+`credit_suppressions`, and (Sep 2026) `affiliation_extractions`,
+`host_affiliations`, `host_role_pins` — see Guest affiliations below.
+
+`hosts.bluesky_handle` exists in production and is read by the backend, but
+no migration or `podcast-schema.sql` creates it; a database built from the
+repo's SQL alone lacks it (`tests/setup_test_db.sh` adds it).
 
 **`data_source` precedence:** `apple_verified` > `manual` > everything else
 (`parsed_desc`, `parsed_title`, `approved_suggestion`, `itunes_artist`).
@@ -119,19 +136,27 @@ it is not re-proposed.
 
 Job title + organisation per **guest appearance**, not per person — people
 change jobs, and every observation is kept for auditing; a person's current
-role is their most recent row. Tables in `migrate_add_host_affiliations.sql`:
+role is picked from their rows (see Displayed current role). Tables in
+`migrate_add_host_affiliations.sql`:
 `affiliation_extractions` (one row per processed `(episode, host)`, whatever
 the outcome, with the exact snippet sent) and `host_affiliations` (the
 facts; `data_source` `llm_extracted` or `manual`, and `manual` is never
 overwritten). Both FK to `episode_host` with `ON UPDATE/DELETE CASCADE`, so
 merges and credit deletions carry through without touching that code.
 
-- **Status (Sep 24 2026):** `migrate_add_host_affiliations.sql` has run on
-  production. Stage 1 done: 200 random guest appearances (Sonnet 5, $0.15),
-  194 processed, 210 roles stored. Stage 2 (~15.8k remaining, ~$12) awaits
-  approval. `migrate_add_host_role_pins.sql` has **not** run — the role
-  endpoints read that table, so it must run before the backend deploys.
-  Not in `scrape.yml` yet; needs `ANTHROPIC_API_KEY` as a GitHub secret.
+- **Status (Sep 24 2026):** both migrations (`migrate_add_host_affiliations.sql`,
+  `migrate_add_host_role_pins.sql`) have run on production, and the code is
+  merged to `main` and deployed. Stage 1 of the backfill is done: 200 random
+  guest appearances (`submit --limit 200 --random --model claude-sonnet-5`,
+  $0.15) — 194 processed, 210 roles stored, 5 `no_mention`; one appearance
+  vanished between submit and collect because its person was deleted
+  meanwhile (the cascade working as designed). **Stage 2** (the remaining
+  ~15.8k appearances, ~$12) awaits Evan's approval. **Not in `scrape.yml`
+  yet**; the cron step needs `ANTHROPIC_API_KEY` added as a GitHub Actions
+  secret. Locally the key lives in the affiliations worktree's `.env`
+  (gitignored) — load it alongside `DATABASE_URL`.
+- Production has 16,074 guest credits (7,148 guests); only 24 are someone on
+  their own show — the 1,216 in the Aug export had been cleaned up since.
 - **Pilot (Sep 2026, 88 snippets from the Aug export):** Haiku 4.5 credited
   another guest's role to the named person on 1-2 snippets per run —
   "Joe Batir speaks with Jigar Shah, Director at the DOE Loan Programs
@@ -189,6 +214,19 @@ merges and credit deletions carry through without touching that code.
   fields, measured ~100 output tokens per item; `MAX_TOKENS` raised to
   16,000 after a 40-item request overran 4,096. Full production backfill
   estimate: 15,554 unique snippets, ~$11.91 at batch price.
+- `submit`/`run` take `--random` to pick `--limit` appearances at random
+  rather than in episode order (the oldest episodes of a few shows).
+- Known rough edges from stage 1, left for the normalisation step rather
+  than fixed in extraction: plural titles from shared phrasing ("Senators",
+  "historians of technology" — singularising would break the verbatim
+  check); editorial wording copied into titles ("the controversial pick to
+  be the president"); loose descriptions ("an experienced solar
+  professional with a broad knowledge of the industry"); a single old
+  appearance shows as current (Etosha Cave, 2019). A trailing possessive is
+  now stripped from companies ("BloombergNEF's" → "BloombergNEF"), but only
+  for new extractions — stage 1's stored rows still carry it.
+- Stage 1 produced 168 distinct company strings from 174 appearances, so
+  the full backfill will mean thousands of organisations to normalise.
 
 ### Displayed current role
 
@@ -203,11 +241,26 @@ bare org. Public `GET /api/people/{id}/current-role` (fetched per card by
 deliberately out of scope for now. `merge_people()` moves the dropped
 person's pin only if the survivor has none.
 
+Pins are deliberate and never expire: a pinned person keeps the pin even
+after a newer appearance with a different role (Evan's choice; the panel
+shows what the rule alone would pick, next to the pin).
+
+The admin People list (`GET /api/admin/people`) filters on it ("Has role &
+company", "Has role only", "Has company only"), sorts by company
+(`company_asc`), and shows "title · company" per row. `_all_current_roles()`
+computes everyone's current role in one pass with the same
+`pick_current_role()` and joins it into the list query as unnested arrays,
+so the rule lives in one place; a test pins list and panel to the same
+answer. ~1–2 s with stage 1's 210 rows — if it slows after stage 2, store
+the current role instead of recomputing it per request.
+
 ## Tests
 
-**`scraper/tests/` now has a real pytest suite** (109 cases) covering
-`host_extractor.py`, `episode_name_scanner.py`, and the title/date/dedupe
-logic in `scraper.py`. Run it with:
+**`scraper/tests/` has a real pytest suite** (~300 cases) covering
+`host_extractor.py`, `episode_name_scanner.py`, the title/date/dedupe logic
+in `scraper.py`, `extract_affiliations.py` (`test_extract_affiliations.py`)
+and the backend's current-role rule, role query and People-list filters
+(`test_role_selection.py`). Run it with:
 
 ```
 cd scraper
@@ -217,8 +270,11 @@ pytest
 ```
 
 Most cases are pure-function tests over fixture strings (no DB). A handful —
-alias resolution, honorific-based host merging, first-name host attribution —
-need real tables and run against a disposable database:
+alias resolution, honorific-based host merging, first-name host attribution,
+affiliation recording, cascades on merge/delete, role queries — need real
+tables and run against a disposable database. Re-run `setup_test_db.sh`
+after adding a migration; it applies the migrations it lists, so a new one
+must be added to its list:
 
 ```
 scraper/tests/setup_test_db.sh     # creates podcast_scanner_test once
@@ -291,6 +347,10 @@ set -a; source .env; set +a          # repo-root .env, gitignored, mode 600
 psql "$DATABASE_URL" -c '\dt'
 ```
 
+Each worktree has its own `.env` — they are gitignored, so they are not
+shared. `DATABASE_URL` lives in `podcast-network-scanner/.env`;
+`ANTHROPIC_API_KEY` in `podcast-network-affiliations/.env`.
+
 `manager.py` also takes the connection string directly, which is what the
 workflow does:
 
@@ -325,21 +385,33 @@ gh run view <run-id> --log-failed
 ```
 
 Runs fire against **`main`**, not whatever branch is checked out locally, so
-scraper changes have to be pushed and mirrored before a dispatched run picks
+scraper changes have to be merged to `main` before a dispatched run picks
 them up. A full sweep takes 20-45 minutes.
 
-### Two sessions, one database
+### Several sessions, one database
 
-Work happens in two git worktrees against one production database and one
-repo. Git keeps the branches apart; nothing keeps the database apart.
+Work happens in several git worktrees against one production database and
+one repo. Git keeps the branches apart; nothing keeps the database apart.
+
+```
+~/projects/podcast-network               main
+~/projects/podcast-network-scanner       claude/gracious-darwin-vbul7z
+~/projects/podcast-network-affiliations  claude/podcast-guest-metadata-extraction-xvby8l
+```
 
 - Only one session runs migrations or bulk writes at a time. The `ALTER TABLE`
   lock cascade above is exactly what concurrent schema work reproduces, and it
   is much harder to diagnose with two actors.
 - Don't start a scrape while the other session is mid-migration, or vice
   versa.
-- After the other session pushes, `git pull --ff-only` before committing, or
-  the branches diverge and need a merge that neither of you intended.
+- Before merging to `main`, fetch it and merge it into your branch first;
+  run the tests and `CI=true npm run build` on the merged result, since it
+  includes the other session's work. After another session merges to
+  `main`, bring `main` into your branch (`git pull origin main`) before your
+  next commit — a plain `--ff-only` fails once the branches have diverged.
+- Before a migration or bulk write, check nothing else is running:
+  `gh run list --workflow scrape.yml --limit 1` and non-idle rows in
+  `pg_stat_activity`.
 
 ## Open threads
 
@@ -351,3 +423,12 @@ repo. Git keeps the branches apart; nothing keeps the database apart.
   makes those two graph filters somewhat arbitrary
 - `react-scripts` 5.0.1 is the latest release and is unmaintained; a Vite
   migration is the real fix
+- Guest affiliations, in the agreed order: `scrape.yml` extract step (+
+  `ANTHROPIC_API_KEY` GitHub secret) → stage 2 backfill (~$12, needs
+  approval) → admin review lists for `appears_on_episode = false` (feeds the
+  public-figures cleanup) and status `host` (feeds the separate hosts
+  process) → Company Admin (`organizations` / aliases / matching / review
+  page). Possibly show "as of <year>" on the public card for old roles.
+- Suspected false guest credits surfaced by the extraction: Joe Biden on
+  three POLITICO Energy episodes (talked about, not appearing) — and the
+  whole `appears_on_episode = false` set once stage 2 runs.
