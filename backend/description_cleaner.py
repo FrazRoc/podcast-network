@@ -56,9 +56,6 @@ STRIP_AFTER_PATTERNS = [
     r'Explore further:',                                # Zero: The Climate Race cross-promotion
     r'Past episode with',                               # Zero: The Climate Race past episode links
     r'See omnystudio.com',                              # Omny Studio privacy footer
-    r'\nProducer:',                                     # Outrage + Optimism production credits
-    r'\nEdited by:',                                    # production credits
-    r'\nExec Producer:',                                # production credits
     r'\nJoin the conversation:',                        # Outrage + Optimism social footer
     r'\nHosted on Acast',                               # Acast footer
     r'See acast.com/privacy',                           # Acast privacy footer
@@ -97,6 +94,20 @@ STRIP_AFTER_PATTERNS = [
     r'\nFurther reading',
     r'\nRelated reading',
     r'\bOriginal music (?:and|by)\b',                    # composer credit
+    # Real incidents (a batch of over-credited public figures investigated by
+    # hand): known hosts' names kept matching inside sign-off/credits blocks
+    # that name them for a reason that has nothing to do with being on this
+    # specific episode — thanked in a footer, part of the production team, or
+    # cited as the subject of a linked article. run()'s known-name matching
+    # has no way to tell "guest" from "mentioned in the outro" on its own; the
+    # only fix available to it is not seeing that text at all.
+    # Not \n-anchored like the others below — Zero: The Climate Race writes
+    # this mid-paragraph ("Our producer is Oscar Boyd. Special thanks to
+    # ..."), not on its own line.
+    r'\bSpecial thanks\b',                               # Zero: The Climate Race sign-off
+    r'\nMentioned:',                                     # Shift Key's linked-articles reference section
+    r'Episode production and content support provided by',  # The Carbon Curve
+    r'A huge thanks to [^.\n]{0,40} for (?:his|her|their) support',  # The Carbon Curve
 ]
 
 
@@ -161,6 +172,32 @@ REMOVE_PATTERNS = [
     # name matched here and credited her on 4 Shift Key episodes she never
     # appeared in.
     r'(?i)Listen to Shocked,.*?Find it here\.',
+    # Production-credits labels ("Reporter: X", "Producer(s): X, Y",
+    # "Researcher(s): X", "Exec Producer: X", ...) were originally added to
+    # STRIP_AFTER_PATTERNS — cutting everything from the first match onward
+    # — on the assumption these labels always sit at the very end of a
+    # description. A real BBC episode disproved that: "Reporter: Sam Brasch
+    # ... Experts: ... Professor Paul Stevens ..." names a genuine guest
+    # AFTER the "Reporter:" line, so truncating there threw away a real
+    # credit. In-place removal, one line at a time, has no such ordering
+    # assumption to get wrong — whatever comes after is left intact.
+    #
+    # Not \n-anchored: the same episode's raw feed puts "Producer:" right
+    # after a `</p><p>` tag boundary rather than a literal newline —
+    # strip_html() collapses a tag to a single space, not \n, so a \n-anchor
+    # missed it. The negative lookbehind still stops these from matching
+    # mid-word (e.g. "coproducer:" or "reeditor:", however unlikely).
+    r'(?<![A-Za-z])Reporters?:[^\n]*',
+    r'(?<![A-Za-z])Producers?:[^\n]*',
+    r'(?<![A-Za-z])Exec Producer:[^\n]*',
+    r'(?<![A-Za-z])Video Producer:[^\n]*',
+    r'(?<![A-Za-z])Edited by:[^\n]*',
+    r'(?<![A-Za-z])Editor:[^\n]*',
+    r'(?<![A-Za-z])Commissioning Editor:[^\n]*',
+    r'(?<![A-Za-z])Researchers?:[^\n]*',
+    r'(?<![A-Za-z])Production (?:Team|Coordinator):[^\n]*',
+    r'(?<![A-Za-z])Series Producers?:[^\n]*',
+    r'(?<![A-Za-z])Sound (?:Design|[Ee]ngineer|mix):[^\n]*',
 ]
 
 

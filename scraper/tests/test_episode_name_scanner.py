@@ -195,6 +195,114 @@ class TestCleanDescription:
         assert "Acme Studios" not in result
         assert "Tony Seba" in result
 
+    def test_special_thanks_footer_stripped(self):
+        # Real incident: Zero: The Climate Race writes "Our producer is Oscar
+        # Boyd. Special thanks to X, Y and Z." — a sign-off thank-you, not a
+        # statement that those people appeared. This name-collected on a
+        # dozen known hosts as guest credits on episodes they had no part in
+        # (Laura Millan, Olivia Rudgard, Eric Roston, and others). Not
+        # \n-anchored — this show writes it mid-paragraph, not on its own line.
+        text = ("This week we cover the biggest stories in clean energy policy "
+                "and grid modernization across the country and what it means. "
+                "Our producer is Oscar Boyd. Special thanks to Olivia Rudgard, "
+                "Eric Roston and Laura Millan.")
+        result = clean_description(text)
+        assert "Rudgard" not in result
+        assert "Roston" not in result
+        assert "clean energy policy" in result
+
+    def test_bbc_production_credits_block_stripped(self):
+        # Real incident: The Climate Question's end-of-description production
+        # block ("Reporter: X", "Producers: X, Y", "Researcher: X", "Sound
+        # Design: X") credited BBC staff correspondents and production crew
+        # as guests (Michael Kaloki, Thomas Naadi, Mora Morrison) purely for
+        # doing their production job, not appearing as an interviewed guest.
+        text = ("This week we explore how coastal communities are adapting to "
+                "sea level rise across several vulnerable regions this decade.\n"
+                "Reporter: Thomas Naadi\nProducers: Mora Morrison and Ben Cooper\n"
+                "Researcher: Natasha Fernandes\nSeries producer: Rosamund Jones\n"
+                "Sound Design: Tom Brignell\nEditor: Sophie Eastaugh")
+        result = clean_description(text)
+        for name in ("Naadi", "Morrison", "Fernandes", "Brignell", "Eastaugh"):
+            assert name not in result
+        assert "sea level rise" in result
+
+    def test_bbc_production_credit_before_real_guest_still_stripped(self):
+        # Real regression caught while building the fix above: this exact
+        # BBC episode (episode 97130) has "Reporter: Sam Brasch ... Experts:
+        # ... Professor Paul Stevens ..." — a genuine guest named AFTER the
+        # "Reporter:" line. The first version of this fix put these labels
+        # in STRIP_AFTER_PATTERNS (truncate everything from the first match
+        # onward), which assumed labels always sit at the very end and threw
+        # away Paul Stevens' real credit along with Sam Brasch's crew one.
+        # Switched to in-place, per-line removal (REMOVE_PATTERNS) instead,
+        # which has no such ordering assumption to get wrong. Also covers
+        # the raw feed's actual formatting: labels sit right after a
+        # `</p><p>` tag boundary (which strip_html collapses to a plain
+        # space, not \n), not on their own line — Producer:/Researchers:
+        # both needed a non-\n-anchored match to catch that.
+        text = ("<p>The rise of renewables is good news for the climate, but for "
+                "millions of families who rely on fossil fuels for a paycheque, it "
+                "means big changes.</p><p>They also hear from the Middle East and "
+                "North Africa, where countries have relied on oil and gas for their "
+                "economies. The money from fossil fuels has kept an instable region "
+                "together in the past, so what happens when that money runs out? \n"
+                "\nReporter: Sam Brasch, Colorado State Radio \nExperts: Laury "
+                "Haytayan, Middle East and North Africa director at the Natural "
+                "Resource Governance Institute; Professor Paul Stevens, Distinguished "
+                "Fellow, Energy, Environment and Resources Programme at Chatham "
+                "House. </p><p>Producer: Jordan Dunbar\nResearchers: Olivia Noon and "
+                "Dearbhail Starr\nEditor: Emma Rippon</p>")
+        result = clean_description(text)
+        assert "Paul Stevens" in result
+        for name in ("Sam Brasch", "Jordan Dunbar", "Olivia Noon", "Dearbhail Starr", "Emma Rippon"):
+            assert name not in result
+
+    def test_video_producer_and_commissioning_editor_stripped(self):
+        # Outrage + Optimism's production credits use "Video Producer:" and
+        # "Commissioning Editor:", neither of which the existing "\nProducer:"
+        # / "\nExec Producer:" patterns match.
+        text = ("This episode dives into how pension funds are shifting toward "
+                "climate-aligned investment strategies across major markets.\n"
+                "Producer: Ben Weaver-Hincks\nVideo Producer: Caitlin Hanrahan\n"
+                "Commissioning Editor: Sarah Thomas")
+        result = clean_description(text)
+        assert "Hanrahan" not in result
+        assert "Sarah Thomas" not in result
+        assert "pension funds" in result
+
+    def test_mentioned_reference_section_stripped(self):
+        # Real incident: Shift Key's "Mentioned:" section links to articles
+        # its staff writers wrote elsewhere in the show notes — "Matthew
+        # Zeitlin on Trump's electricity price problem" is a citation, not a
+        # statement that Zeitlin is on this episode.
+        text = ("This episode covers how PJM's capacity market auction results "
+                "are reshaping utility planning decisions across the region.\n"
+                "Mentioned:\nMatthew Zeitlin on Trump's electricity price problem\n"
+                "FERC Order 2023")
+        result = clean_description(text)
+        assert "Zeitlin" not in result
+        assert "PJM" in result
+
+    def test_carbon_curve_production_credit_stripped(self):
+        # Real incident: The Carbon Curve's "Episode production and content
+        # support provided by X" credits its production supporter (Tank
+        # Chen) as a guest on every episode of the show.
+        text = ("This week we look at how carbon removal purchase agreements "
+                "are structured and what buyers should watch for in 2026. "
+                "Episode production and content support provided by Tank Chen.")
+        result = clean_description(text)
+        assert "Tank Chen" not in result
+        assert "carbon removal purchase" in result
+
+    def test_carbon_curve_thanks_for_support_stripped(self):
+        text = ("This week we look at how carbon removal purchase agreements "
+                "are structured and what buyers should watch for in 2026. "
+                "A huge thanks to Tank Chen for his support with the podcast.")
+        result = clean_description(text)
+        assert "Tank Chen" not in result
+        assert "carbon removal purchase" in result
+
 
 class TestOrganisationFiltering:
     def test_rejects_org_suffix_word(self):
