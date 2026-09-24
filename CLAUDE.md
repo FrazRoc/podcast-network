@@ -126,9 +126,12 @@ facts; `data_source` `llm_extracted` or `manual`, and `manual` is never
 overwritten). Both FK to `episode_host` with `ON UPDATE/DELETE CASCADE`, so
 merges and credit deletions carry through without touching that code.
 
-- **Status: code only. Migration not run on production, no backfill yet,
-  not in `scrape.yml` yet.** Needs `ANTHROPIC_API_KEY` (and it as a GitHub
-  secret for the cron step).
+- **Status (Sep 24 2026):** `migrate_add_host_affiliations.sql` has run on
+  production. Stage 1 done: 200 random guest appearances (Sonnet 5, $0.15),
+  194 processed, 210 roles stored. Stage 2 (~15.8k remaining, ~$12) awaits
+  approval. `migrate_add_host_role_pins.sql` has **not** run — the role
+  endpoints read that table, so it must run before the backend deploys.
+  Not in `scrape.yml` yet; needs `ANTHROPIC_API_KEY` as a GitHub secret.
 - **Pilot (Sep 2026, 88 snippets from the Aug export):** Haiku 4.5 credited
   another guest's role to the named person on 1-2 snippets per run —
   "Joe Batir speaks with Jigar Shah, Director at the DOE Loan Programs
@@ -186,6 +189,19 @@ merges and credit deletions carry through without touching that code.
   fields, measured ~100 output tokens per item; `MAX_TOKENS` raised to
   16,000 after a 40-item request overran 4,096. Full production backfill
   estimate: 15,554 unique snippets, ~$11.91 at batch price.
+
+### Displayed current role
+
+`backend/role_selection.py` `pick_current_role()`: a pin in
+`host_role_pins` (`migrate_add_host_role_pins.sql`) wins; otherwise the
+newest appearance's current roles (not `is_former`, not
+`from_other_episode`), ranked position+org > position > description >
+bare org. Public `GET /api/people/{id}/current-role` (fetched per card by
+`HostProfileCard`, so the graph payload is unchanged); admin
+`GET /api/admin/people/{id}/roles`, `PUT`/`DELETE .../role-pin` (the
+`RoleEditor` section of Edit Person). No per-row history editing —
+deliberately out of scope for now. `merge_people()` moves the dropped
+person's pin only if the survivor has none.
 
 ## Tests
 

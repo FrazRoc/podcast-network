@@ -398,6 +398,10 @@ def _normalise_for_match(text: str) -> str:
 
 # A form of address is not a position. Sonnet 5 returned "Dr." as a title
 # for a guest whose description gave nothing else.
+# "BloombergNEF's Ash Wang" came back as company "BloombergNEF's". The
+# shorter form is still a verbatim substring, so stripping it keeps the check.
+_POSSESSIVE_SUFFIX_RE = re.compile(r"[’']s$")
+
 _HONORIFIC_ONLY_RE = re.compile(r'^(?:dr|mr|mrs|ms|mx|prof|sir|dame)\.?$', re.IGNORECASE)
 
 
@@ -419,6 +423,8 @@ def verified_affiliations(affiliations: list, snippet: str) -> tuple:
             value = _collapse(value) if isinstance(value, str) else None
             if value and field == 'title' and _HONORIFIC_ONLY_RE.match(value):
                 value = None
+            if value and field == 'company':
+                value = _POSSESSIVE_SUFFIX_RE.sub('', value).strip() or None
             if value and _normalise_for_match(value) in haystack:
                 clean[field] = value
             else:

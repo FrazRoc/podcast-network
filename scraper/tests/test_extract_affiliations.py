@@ -178,6 +178,13 @@ class TestVerifiedAffiliations:
         assert pairs(kept) == [{'title': None, 'company': 'Payne Institute'}]
         assert dropped == []
 
+    def test_possessive_is_stripped_from_company(self):
+        # Real case: "BloombergNEF's Ash Wang" on Switched On.
+        kept, _ = verified_affiliations(
+            [{'title': 'EV charging analyst', 'company': "BloombergNEF’s"}],
+            "BloombergNEF’s EV charging analyst Ash Wang")
+        assert pairs(kept) == [{'title': 'EV charging analyst', 'company': 'BloombergNEF'}]
+
     def test_bare_honorific_is_not_a_title(self):
         kept, _ = verified_affiliations([{'title': 'Dr.', 'company': None}],
                                         "Dr. Kevin Surprise joins us.")

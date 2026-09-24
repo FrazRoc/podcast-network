@@ -122,6 +122,153 @@ function AliasEditor({ hostId }) {
   );
 }
 
+// Job title and organisation. "Current role" is what the public profile shows:
+// derived from the newest appearance (backend/role_selection.py) unless pinned
+// here. History is every role read from episode text, newest first — raw, as
+// each show worded it.
+const formatRole = (r) => [r?.title, r?.company].filter(Boolean).join(' @ ');
+
+function RoleEditor({ hostId }) {
+  const [data, setData]       = useState(null);
+  const [editing, setEditing] = useState(false);
+  const [form, setForm]       = useState({ title: '', company: '' });
+  const [busy, setBusy]       = useState(false);
+  const [error, setError]     = useState('');
+  const [showAll, setShowAll] = useState(false);
+
+  const load = useCallback(() => {
+    adminFetch(`${API}/people/${hostId}/roles`)
+      .then(r => r.json())
+      .then(setData)
+      .catch(console.error);
+  }, [hostId]);
+
+  useEffect(() => { load(); setEditing(false); setShowAll(false); setError(''); }, [load]);
+
+  const startEdit = () => {
+    const c = data?.current;
+    setForm({ title: c?.title || '', company: c?.company || '' });
+    setEditing(true);
+    setError('');
+  };
+
+  const save = async () => {
+    setBusy(true); setError('');
+    try {
+      const res = await adminFetch(`${API}/people/${hostId}/role-pin`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.detail || `API error ${res.status}`);
+      setEditing(false);
+      load();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const clearPin = async () => {
+    setBusy(true); setError('');
+    try {
+      await adminFetch(`${API}/people/${hostId}/role-pin`, { method: 'DELETE' });
+      load();
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  };
+
+  if (!data) return null;
+  const { current, derived, history = [] } = data;
+  const pinned = current?.source === 'pinned';
+  const shown = showAll ? history : history.slice(0, 5);
+
+  return (
+    <div className="mb-4">
+      <label className="block text-xs font-medium text-gray-500 mb-1">Current role</label>
+      {!editing ? (
+        <div className="flex items-start justify-between gap-2 bg-gray-50 rounded-lg px-3 py-2 mb-2">
+          <div className="text-sm">
+            {current ? (
+              <p className="text-gray-900">{formatRole(current)}</p>
+            ) : (
+              <p className="text-gray-400">None on record</p>
+            )}
+            <p className="text-xs text-gray-400 mt-0.5">
+              {pinned
+                ? <>Pinned by hand{derived ? <> · rule would show “{formatRole(derived)}”</> : null}</>
+                : current
+                  ? <>From {current.podcast_title}{current.published_date ? `, ${current.published_date}` : ''}</>
+                  : 'Nothing extracted from episode text yet'}
+            </p>
+          </div>
+          <div className="flex gap-2 flex-shrink-0 text-xs">
+            <button onClick={startEdit} className="text-blue-600 hover:underline">
+              {pinned ? 'Edit pin' : 'Pin'}
+            </button>
+            {pinned && (
+              <button onClick={clearPin} disabled={busy} className="text-gray-500 hover:text-red-600">
+                Unpin
+              </button>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="bg-gray-50 rounded-lg p-3 mb-2 space-y-2">
+          <input type="text" value={form.title} placeholder="Title (e.g. CEO)"
+            onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none" />
+          <input type="text" value={form.company} placeholder="Company"
+            onChange={e => setForm(f => ({ ...f, company: e.target.value }))}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none" />
+          <div className="flex gap-2">
+            <button onClick={save} disabled={busy || (!form.title.trim() && !form.company.trim())}
+              className="px-3 py-1.5 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
+              Save pin
+            </button>
+            <button onClick={() => setEditing(false)}
+              className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {error && <p className="text-xs text-red-500 mb-1">{error}</p>}
+
+      {history.length > 0 && (
+        <div className="mt-2">
+          <p className="text-xs font-medium text-gray-500 mb-1">Roles from episodes ({history.length})</p>
+          <ul className="space-y-1">
+            {shown.map(r => (
+              <li key={r.affiliation_id} className="text-xs text-gray-600">
+                <span className={r.is_former ? 'text-gray-400' : 'text-gray-800'}>{formatRole(r)}</span>
+                {r.is_former && <span className="ml-1 text-gray-400">(former)</span>}
+                {r.title_kind === 'description' && <span className="ml-1 text-gray-400">(description)</span>}
+                {r.from_other_episode && (
+                  <span className="ml-1 text-amber-600" title="Text refers to another episode or a rerun">other episode</span>
+                )}
+                {r.appears_on_episode === false && (
+                  <span className="ml-1 text-amber-600" title="Only talked about, not appearing">mentioned only</span>
+                )}
+                <span className="block text-gray-400">
+                  {r.podcast_title}{r.published_date ? ` · ${r.published_date}` : ''}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {history.length > 5 && (
+            <button onClick={() => setShowAll(v => !v)} className="text-xs text-blue-600 hover:underline mt-1">
+              {showAll ? 'Show fewer' : `Show all ${history.length}`}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PersonPanel({ selected, onSaved, onCancel }) {
   const [form, setForm]         = useState(emptyForm);
   const [submitting, setSubmitting] = useState(false);
@@ -295,6 +442,8 @@ function PersonPanel({ selected, onSaved, onCancel }) {
           )}
         </div>
       )}
+
+      {isEdit && <RoleEditor hostId={selected.host_id} />}
 
       {isEdit && <AliasEditor hostId={selected.host_id} />}
 
