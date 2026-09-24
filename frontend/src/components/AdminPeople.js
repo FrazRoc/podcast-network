@@ -24,6 +24,12 @@ const FILTERS = [
   { id: 'zero',     label: '0 appearances' },
   { id: 'parsed',   label: 'Parsed only' },
   { id: 'no_image', label: 'No image' },
+  // 5+ guest credits piled onto 3 or fewer shows — not proof of anything on
+  // its own, but the shape a real over-crediting incident keeps taking
+  // (mentioned in a footer/citation repeatedly, or a misfiled host) more
+  // often than a genuine wide-ranging recurring guest does. A worklist to
+  // review, not a verdict.
+  { id: 'concentrated', label: 'Concentrated (5+ on ≤3 shows)' },
   // On the current role shown on their profile (pinned, else derived).
   { id: 'role_title_company', label: 'Has role & company' },
   { id: 'role_title_only',    label: 'Has role only' },
@@ -282,17 +288,56 @@ function PersonPanel({ selected, onSaved, onCancel }) {
   const [existingId, setExistingId] = useState(null);
   const [episodes, setEpisodes] = useState([]);
   const [expandedShows, setExpandedShows] = useState({});
+  const [creditActionId, setCreditActionId] = useState(null); // episode_id currently being acted on
   const isEdit = !!selected;
 
-  useEffect(() => {
+  const loadEpisodes = useCallback(() => {
     if (!selected) { setEpisodes([]); return; }
     adminFetch(`${API}/people/${selected.host_id}/episodes`)
       .then(r => r.json())
       .then(setEpisodes)
       .catch(console.error);
+  }, [selected]);
+
+  useEffect(() => {
+    loadEpisodes();
   // Keyed on the id rather than the object, which is a new reference each render.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected?.host_id]);
+
+  // Same two endpoints the Episodes admin page's credit management already
+  // uses — a credit removed this way is permanently suppressed against
+  // re-insertion (see remove_episode_credit's docstring), and a reclassify
+  // is just the add-credit upsert with is_guest flipped.
+  const handleRemoveCredit = async (episodeId) => {
+    setCreditActionId(episodeId);
+    try {
+      const res = await adminFetch(`${API}/episodes/${episodeId}/credits/${selected.host_id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error((await res.json()).detail || 'Failed to remove credit');
+      loadEpisodes();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setCreditActionId(null);
+    }
+  };
+
+  const handleReclassifyToHost = async (episodeId) => {
+    setCreditActionId(episodeId);
+    try {
+      const res = await adminFetch(`${API}/episodes/${episodeId}/credits`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ host_id: selected.host_id, is_guest: false }),
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || 'Failed to reclassify');
+      loadEpisodes();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setCreditActionId(null);
+    }
+  };
 
   const toggleShow = (show) =>
     setExpandedShows(prev => ({ ...prev, [show]: !prev[show] }));
@@ -585,18 +630,46 @@ function PersonPanel({ selected, onSaved, onCancel }) {
                 </div>
                 {expandedShows[pod.podcast] && (
                   <div className="divide-y divide-gray-50">
-                    {pod.episodes.map(ep => (
-                      <div key={ep.episode_id} className="px-3 py-1.5 flex items-start gap-2">
-                        <span className={`mt-0.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${ep.is_guest ? 'bg-blue-400' : 'bg-green-500'}`} />
-                        <div className="min-w-0">
-                          <a href={`/admin/episodes?episode_id=${ep.episode_id}`}
-                            className="text-xs text-gray-700 hover:text-teal-600 leading-snug block">
-                            {ep.episode_title}
-                          </a>
-                          <p className="text-xs text-gray-400">{ep.published_date?.slice(0,10)} · {ep.data_source}</p>
+                    {pod.episodes.map(ep => {
+                      const busy = creditActionId === ep.episode_id;
+                      return (
+                        <div key={ep.episode_id} className="px-3 py-1.5 flex items-start gap-2">
+                          <span className={`mt-0.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${ep.is_guest ? 'bg-blue-400' : 'bg-green-500'}`} />
+                          <div className="min-w-0 flex-1">
+                            <a href={`/admin/episodes?episode_id=${ep.episode_id}`}
+                              className="text-xs text-gray-700 hover:text-teal-600 leading-snug block">
+                              {ep.episode_title}
+                            </a>
+                            <p className="text-xs text-gray-400">{ep.published_date?.slice(0,10)} · {ep.data_source}</p>
+                            {ep.snippet && (
+                              <p className="text-xs text-gray-400 italic mt-0.5 leading-snug">
+                                …{ep.snippet}…
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex-shrink-0 flex items-center gap-1">
+                            {ep.is_guest && (
+                              <button
+                                onClick={() => handleReclassifyToHost(ep.episode_id)}
+                                disabled={busy}
+                                title="Reclassify as Host (they're the show's host/co-host, not a guest)"
+                                className="px-1.5 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700 hover:bg-green-100 disabled:opacity-50"
+                              >
+                                → Host
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleRemoveCredit(ep.episode_id)}
+                              disabled={busy}
+                              title="Remove this credit (they're mentioned — a producer, cited article, footer thanks — not actually on this episode)"
+                              className="px-1.5 py-0.5 rounded text-xs font-medium bg-red-50 text-red-700 hover:bg-red-100 disabled:opacity-50"
+                            >
+                              ✕
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
