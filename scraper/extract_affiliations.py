@@ -402,6 +402,11 @@ def _normalise_for_match(text: str) -> str:
 # shorter form is still a verbatim substring, so stripping it keeps the check.
 _POSSESSIVE_SUFFIX_RE = re.compile(r"[’']s$")
 
+# "a senior investigative data reporter" reads as a phrase, not a role. The
+# article is dropped before storing; what remains is still a verbatim
+# substring of the snippet, so the check below is unaffected.
+_LEADING_ARTICLE_RE = re.compile(r'^(?:a|an|the)\s+', re.IGNORECASE)
+
 _HONORIFIC_ONLY_RE = re.compile(r'^(?:dr|mr|mrs|ms|mx|prof|sir|dame)\.?$', re.IGNORECASE)
 
 
@@ -421,6 +426,8 @@ def verified_affiliations(affiliations: list, snippet: str) -> tuple:
         for field in ('title', 'company'):
             value = aff.get(field)
             value = _collapse(value) if isinstance(value, str) else None
+            if value and field == 'title':
+                value = _LEADING_ARTICLE_RE.sub('', value).strip() or None
             if value and field == 'title' and _HONORIFIC_ONLY_RE.match(value):
                 value = None
             if value and field == 'company':

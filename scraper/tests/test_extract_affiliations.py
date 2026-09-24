@@ -178,6 +178,24 @@ class TestVerifiedAffiliations:
         assert pairs(kept) == [{'title': None, 'company': 'Payne Institute'}]
         assert dropped == []
 
+    @pytest.mark.parametrize('title, kept_as', [
+        ('a senior investigative data reporter', 'senior investigative data reporter'),
+        ('an energy reporter', 'energy reporter'),
+        ('The Executive Director', 'Executive Director'),
+        ('Theorist', 'Theorist'),          # "The" only as a whole word
+        ('Anthropologist', 'Anthropologist'),
+    ])
+    def test_leading_article_is_dropped_from_title(self, title, kept_as):
+        # Real case: Siduja Rangarajan, stage 1.
+        kept, _ = verified_affiliations([{'title': title, 'company': None}], f"guest {title} joins")
+        assert pairs(kept) == [{'title': kept_as, 'company': None}]
+
+    def test_leading_the_kept_on_company(self):
+        # "The Nature Conservancy" is a name; only titles lose the article.
+        kept, _ = verified_affiliations([{'title': None, 'company': 'The Nature Conservancy'}],
+                                        "Jane Doe of The Nature Conservancy")
+        assert pairs(kept) == [{'title': None, 'company': 'The Nature Conservancy'}]
+
     def test_possessive_is_stripped_from_company(self):
         # Real case: "BloombergNEF's Ash Wang" on Switched On.
         kept, _ = verified_affiliations(
