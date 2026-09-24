@@ -23,4 +23,11 @@ for f in migrate_add_data_source.sql migrate_add_host_aliases.sql \
     psql -h "$PSQL_HOST" -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$f" > /dev/null
 done
 
+# hosts.bluesky_handle exists in production (backend/main.py reads it) but
+# was added without a migration file, so neither podcast-schema.sql nor any
+# migrate_add_*.sql creates it. Without it, anything that runs the admin
+# People list query fails here.
+psql -h "$PSQL_HOST" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+    -c "ALTER TABLE hosts ADD COLUMN IF NOT EXISTS bluesky_handle TEXT" > /dev/null
+
 echo "Test database '$DB_NAME' ready."

@@ -2395,6 +2395,7 @@ async def list_people(q: str = "", filter: str = "all", sort: str = "appearances
             "name_asc":         "h.last_name ASC, h.first_name ASC",
             "name_desc":        "h.last_name DESC, h.first_name DESC",
             "newest":           "h.created_at DESC",
+            "company_asc":      "LOWER(cr.company) ASC NULLS LAST, h.last_name ASC",
         }
         order = sort_map.get(sort, "appearances DESC, h.last_name ASC")
 
@@ -2406,6 +2407,22 @@ async def list_people(q: str = "", filter: str = "all", sort: str = "appearances
             extra_where = "AND h.data_source IN ('parsed_desc','parsed_title','approved_suggestion')"
         elif filter == "no_image":
             extra_where = "AND h.profile_image_url IS NULL"
+        # On the displayed current role (pin, else derived — see
+        # role_selection.py), not on any role ever extracted.
+        elif filter == "role_title_company":
+            extra_where = "AND cr.title IS NOT NULL AND cr.company IS NOT NULL"
+        elif filter == "role_title_only":
+            extra_where = "AND cr.title IS NOT NULL AND cr.company IS NULL"
+        elif filter == "role_company_only":
+            extra_where = "AND cr.title IS NULL AND cr.company IS NOT NULL"
+
+        roles = _all_current_roles(cur)
+        role_ids = list(roles)
+        role_params = {
+            "role_ids": role_ids,
+            "role_titles": [roles[i][0] for i in role_ids],
+            "role_companies": [roles[i][1] for i in role_ids],
+        }
 
         cur.execute(f"""
             SELECT h.host_id,
@@ -2414,19 +2431,24 @@ async def list_people(q: str = "", filter: str = "all", sort: str = "appearances
                    h.profile_image_url,
                    h.twitter_handle, h.bluesky_handle, h.linkedin_url,
                    h.data_source,
+                   cr.title   AS current_title,
+                   cr.company AS current_company,
                    COUNT(DISTINCT eh.episode_id) AS appearances,
                    COUNT(DISTINCT e.podcast_id)  AS podcast_count
             FROM hosts h
+            LEFT JOIN unnest(%(role_ids)s::int[], %(role_titles)s::text[], %(role_companies)s::text[])
+                 AS cr(host_id, title, company) ON cr.host_id = h.host_id
             LEFT JOIN episode_host eh ON eh.host_id = h.host_id
             LEFT JOIN episodes e ON e.episode_id = eh.episode_id
             WHERE (%(q)s = '' OR (h.first_name || ' ' || h.last_name) ILIKE '%%' || %(q)s || '%%')
             {extra_where}
             GROUP BY h.host_id, h.first_name, h.last_name, h.profile_image_url,
-                     h.twitter_handle, h.bluesky_handle, h.data_source, h.created_at
+                     h.twitter_handle, h.bluesky_handle, h.data_source, h.created_at,
+                     cr.title, cr.company
             {having_clause}
             ORDER BY {order}
             LIMIT 100
-        """, {"q": q})
+        """, {"q": q, **role_params})
         rows = cur.fetchall()
 
         cur.execute("""
@@ -2834,6 +2856,36 @@ def _role_rows(cur, host_id: int) -> list:
 def _role_pin(cur, host_id: int):
     cur.execute("SELECT title, company, updated_at FROM host_role_pins WHERE host_id = %s", (host_id,))
     return cur.fetchone()
+
+
+def _all_current_roles(cur) -> dict:
+    """{host_id: (title, company)} for everyone with a current role, using the
+    same rule as a single person's panel. One pass over host_affiliations
+    and host_role_pins rather than a query per person, so the People list
+    can filter and sort on it. Row order matches _role_rows(), so ties
+    resolve the same way on the list and on the panel.
+    """
+    cur.execute("""
+        SELECT ha.host_id, ha.episode_id, ha.title, ha.company, ha.title_kind, ha.is_former,
+               ax.from_other_episode, e.published_date
+        FROM host_affiliations ha
+        JOIN affiliation_extractions ax
+          ON ax.episode_id = ha.episode_id AND ax.host_id = ha.host_id
+        JOIN episodes e ON e.episode_id = ha.episode_id
+        ORDER BY ha.host_id, e.published_date DESC NULLS LAST, ha.episode_id DESC, ha.affiliation_id
+    """)
+    by_host = {}
+    for r in cur.fetchall():
+        by_host.setdefault(r['host_id'], []).append(r)
+    cur.execute("SELECT host_id, title, company FROM host_role_pins")
+    pins = {r['host_id']: r for r in cur.fetchall()}
+
+    roles = {}
+    for host_id in by_host.keys() | pins.keys():
+        role = pick_current_role(by_host.get(host_id, []), pins.get(host_id))
+        if role:
+            roles[host_id] = (role.get('title'), role.get('company'))
+    return roles
 
 
 def _public_role(role):
