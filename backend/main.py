@@ -2008,6 +2008,27 @@ def _duplicate_kind(a_tokens: list, b_tokens: list):
     return None
 
 
+def _duplicate_kind_prefix(a_tokens: list, b_tokens: list):
+    """A second classification, checked within FIRST-name groups rather
+    than _duplicate_kind's surname-blocking pass above: catches a record
+    that's missing its last surname word entirely, not just a middle name.
+
+    Real incident: "Amy Myers" (52 credits) and "Amy Myers Jaffe" (85
+    credits) are the same person, but their last tokens ("myers" vs
+    "jaffe") never match, so _duplicate_kind's surname grouping never even
+    considered the pair — invisible on the Duplicates admin page until a
+    human noticed by name alone. Requires the shorter name to have 2+
+    tokens; a bare first name matching is far too weak a signal on its own
+    and would flood the queue with unrelated people.
+    """
+    if len(a_tokens) < 2 or len(b_tokens) < 2 or len(a_tokens) == len(b_tokens):
+        return None
+    short, long_ = (a_tokens, b_tokens) if len(a_tokens) < len(b_tokens) else (b_tokens, a_tokens)
+    if long_[:len(short)] == short:
+        return 'compound_surname'
+    return None
+
+
 def _profile_richness(p) -> int:
     return sum(1 for f in ('profile_image_url', 'twitter_handle', 'bluesky_handle') if p.get(f))
 
@@ -2187,7 +2208,17 @@ async def find_duplicate_people():
             if p['tokens']:
                 by_surname.setdefault(p['tokens'][-1], []).append(p)
 
+        # Second blocking pass, by first name — catches a record missing its
+        # last surname word entirely ("Amy Myers" / "Amy Myers Jaffe"),
+        # which the surname grouping above can never compare since their
+        # last tokens differ. See _duplicate_kind_prefix's docstring.
+        by_first_name = {}
+        for p in people:
+            if len(p['tokens']) >= 2:
+                by_first_name.setdefault(p['tokens'][0], []).append(p)
+
         candidates = []
+        seen_pairs = set()
         for group in by_surname.values():
             for i in range(len(group)):
                 for j in range(i + 1, len(group)):
@@ -2196,8 +2227,22 @@ async def find_duplicate_people():
                     if not kind:
                         continue
                     pair = tuple(sorted((a['host_id'], b['host_id'])))
-                    if pair in dismissed:
+                    if pair in dismissed or pair in seen_pairs:
                         continue
+                    seen_pairs.add(pair)
+                    candidates.append((kind, a, b))
+
+        for group in by_first_name.values():
+            for i in range(len(group)):
+                for j in range(i + 1, len(group)):
+                    a, b = group[i], group[j]
+                    kind = _duplicate_kind_prefix(a['tokens'], b['tokens'])
+                    if not kind:
+                        continue
+                    pair = tuple(sorted((a['host_id'], b['host_id'])))
+                    if pair in dismissed or pair in seen_pairs:
+                        continue
+                    seen_pairs.add(pair)
                     candidates.append((kind, a, b))
 
         if not candidates:

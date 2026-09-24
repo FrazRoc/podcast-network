@@ -16,6 +16,7 @@ const KIND_LABEL = {
   nickname: 'nickname',
   middle_name: 'middle name',
   initial: 'initial',
+  compound_surname: 'missing surname word',
 };
 
 function Evidence({ pair }) {
