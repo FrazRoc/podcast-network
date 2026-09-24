@@ -115,6 +115,94 @@ it is not re-proposed.
   filters against known/rejected/pending/credited before its per-row insert
   loop, so its insert volume was always small.
 
+## Guest affiliations (`scraper/extract_affiliations.py`)
+
+Job title + organisation per **guest appearance**, not per person — people
+change jobs, and every observation is kept for auditing; a person's current
+role is their most recent row. Tables in `migrate_add_host_affiliations.sql`:
+`affiliation_extractions` (one row per processed `(episode, host)`, whatever
+the outcome, with the exact snippet sent) and `host_affiliations` (the
+facts; `data_source` `llm_extracted` or `manual`, and `manual` is never
+overwritten). Both FK to `episode_host` with `ON UPDATE/DELETE CASCADE`, so
+merges and credit deletions carry through without touching that code.
+
+- **Status (Sep 24 2026):** `migrate_add_host_affiliations.sql` has run on
+  production. Stage 1 done: 200 random guest appearances (Sonnet 5, $0.15),
+  194 processed, 210 roles stored. Stage 2 (~15.8k remaining, ~$12) awaits
+  approval. `migrate_add_host_role_pins.sql` has **not** run — the role
+  endpoints read that table, so it must run before the backend deploys.
+  Not in `scrape.yml` yet; needs `ANTHROPIC_API_KEY` as a GitHub secret.
+- **Pilot (Sep 2026, 88 snippets from the Aug export):** Haiku 4.5 credited
+  another guest's role to the named person on 1-2 snippets per run —
+  "Joe Batir speaks with Jigar Shah, Director at the DOE Loan Programs
+  Office" came back as Joe Batir's role on three runs of three, despite a
+  prompt rule with that exact shape. Sonnet 5 (`--model claude-sonnet-5`,
+  thinking disabled) made no such errors and found more possessive company
+  mentions ("Tigercomm's Mike Casey"), at ~3x the cost.
+- Too varied for regex, so a model reads it. Kept cheap by sending only
+  ~120 chars before / ~280 after each name mention (`build_snippet`), sending
+  an identical (person, snippet) once, 40 items per request, via the Batch
+  API (half price). `estimate` against the Aug data export: 6,022 guest
+  appearances → 5,250 unique items → ~$0.77 on Haiku, ~$2.34 on Sonnet 5
+  (chars/4 approximation, Sonnet scaled by the pilot's measured 1.5x).
+- **Every stored value must occur verbatim in its snippet**
+  (`verified_affiliations`); anything else is dropped and counted. This is
+  the guard against the model supplying a company from outside knowledge.
+- Order of operations: `estimate` (read-only) → `pilot --limit 100` (API,
+  CSV only, no DB writes) → review → migration → `submit` with approval per
+  the quantify-first rule → `collect`. `run` = collect then submit, for cron;
+  batches can take up to 24h, so each run collects the previous run's batch.
+  `--max-cost` (default $2) refuses to submit above the estimate.
+- `no_mention` rows (name not in title or description, e.g. Apple-only
+  credits) are terminal; a later description refresh does not re-open them.
+- **Hosts are out of scope** (a separate process, per Evan). Two filters: a
+  person in `host_podcast` for that show is never selected (1,216 of 6,022
+  guest credits in the Aug export — Joe Batir alone had 195 "guest" credits
+  on his own show), and the model flags anyone the text presents as this
+  podcast's host/producer (`is_podcast_host`) for hosts `host_podcast`
+  doesn't know about (Energy Central's Jason Price and Matt Chester);
+  those get status `host` and nothing stored.
+- Snippets also take one later first-name-only mention ("Sergey is a senior
+  fellow at ..."), unless that first name is attached to another surname in
+  the same text.
+- **This is raw data.** Different wording across appearances ("CEO" vs
+  "Co-Founder and CEO", "Fervo" vs "Fervo Energy") is stored as-is; a later
+  process derives each person's displayed current role. Company
+  normalisation is also later: `organizations` + `organization_aliases`
+  (same pattern as `hosts`/`host_aliases`), an `org_id` filled in on
+  `host_affiliations`, optional `parent_org_id` for sub-units (whether
+  "Microsoft" queries include "Microsoft Research" is undecided), reviewed
+  through a Company Admin page like name suggestions. Not seeded from
+  Colorado Current's `companies` table (too small to matter against
+  thousands of extracted orgs); website domain is the join key if that link
+  is ever wanted.
+- Per appearance the model also records `appears_on_episode` (false = only
+  talked about: politicians discussed, production credits, links, books —
+  a curation signal for false guest credits, never acted on automatically;
+  defaults to true when unsure) and `from_other_episode` (past-episode
+  lists, reruns). Per role: `is_former` (former roles are kept, not
+  dropped) and `title_kind` (`position` vs `description`, e.g. "ecologist
+  and conservationist").
+- **Model: Sonnet 5.** On the Sep 2026 production sample Haiku gave one
+  guest another person's role and missed all six possessive company
+  mentions ("Heatmap's Katie Brigham"); Sonnet did neither. With the extra
+  fields, measured ~100 output tokens per item; `MAX_TOKENS` raised to
+  16,000 after a 40-item request overran 4,096. Full production backfill
+  estimate: 15,554 unique snippets, ~$11.91 at batch price.
+
+### Displayed current role
+
+`backend/role_selection.py` `pick_current_role()`: a pin in
+`host_role_pins` (`migrate_add_host_role_pins.sql`) wins; otherwise the
+newest appearance's current roles (not `is_former`, not
+`from_other_episode`), ranked position+org > position > description >
+bare org. Public `GET /api/people/{id}/current-role` (fetched per card by
+`HostProfileCard`, so the graph payload is unchanged); admin
+`GET /api/admin/people/{id}/roles`, `PUT`/`DELETE .../role-pin` (the
+`RoleEditor` section of Edit Person). No per-row history editing —
+deliberately out of scope for now. `merge_people()` moves the dropped
+person's pin only if the survivor has none.
+
 ## Tests
 
 **`scraper/tests/` now has a real pytest suite** (109 cases) covering

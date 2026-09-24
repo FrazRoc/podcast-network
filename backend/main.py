@@ -20,6 +20,7 @@ from description_cleaner import (
     clean_description, extract_labelled_credits, name_in_text, first_name_belongs_to_other,
     coarse_source,
 )
+from role_selection import pick_current_role
 
 load_dotenv()
 
@@ -309,6 +310,11 @@ app = FastAPI()
 
 class AliasRequest(BaseModel):
     alias_name: str = None
+
+
+class RolePinRequest(BaseModel):
+    title: str = None
+    company: str = None
 
 
 class DismissPairRequest(BaseModel):
@@ -2643,6 +2649,13 @@ async def merge_people(keep_id: int, drop_id: int):
             )
             cur.execute(f"UPDATE {table} SET host_id = %s WHERE host_id = %s", (keep_id, drop_id))
 
+        # A pinned display role follows the dropped record only if the
+        # survivor has none of its own; otherwise it goes with the row.
+        cur.execute("""
+            UPDATE host_role_pins SET host_id = %s
+            WHERE host_id = %s AND NOT EXISTS (SELECT 1 FROM host_role_pins WHERE host_id = %s)
+        """, (keep_id, drop_id, keep_id))
+
         # Any alias pointing at the dropped record has to follow it.
         cur.execute("UPDATE host_aliases SET host_id = %s WHERE host_id = %s", (keep_id, drop_id))
 
@@ -2793,6 +2806,110 @@ async def delete_alias(alias_id: int):
     if not row:
         raise HTTPException(status_code=404, detail="Alias not found")
     return {"success": True, "alias_name": row['alias_name']}
+
+
+# ------------------------------------------------------------------
+# ROLES — job title / organisation per appearance (host_affiliations, filled
+# by scraper/extract_affiliations.py) and the one current role shown for a
+# person (role_selection.pick_current_role, overridable by a pin).
+# ------------------------------------------------------------------
+
+def _role_rows(cur, host_id: int) -> list:
+    cur.execute("""
+        SELECT ha.affiliation_id, ha.episode_id, ha.title, ha.company, ha.title_kind,
+               ha.is_former, ha.data_source,
+               ax.appears_on_episode, ax.from_other_episode,
+               e.published_date, e.title AS episode_title, p.title AS podcast_title
+        FROM host_affiliations ha
+        JOIN affiliation_extractions ax
+          ON ax.episode_id = ha.episode_id AND ax.host_id = ha.host_id
+        JOIN episodes e ON e.episode_id = ha.episode_id
+        JOIN podcasts p ON p.podcast_id = e.podcast_id
+        WHERE ha.host_id = %s
+        ORDER BY e.published_date DESC NULLS LAST, ha.episode_id DESC, ha.affiliation_id
+    """, (host_id,))
+    return cur.fetchall()
+
+
+def _role_pin(cur, host_id: int):
+    cur.execute("SELECT title, company, updated_at FROM host_role_pins WHERE host_id = %s", (host_id,))
+    return cur.fetchone()
+
+
+def _public_role(role):
+    if not role:
+        return None
+    return {k: role.get(k) for k in ('title', 'company', 'source', 'published_date')}
+
+
+@app.get("/api/people/{host_id}/current-role")
+async def get_current_role(host_id: int):
+    """The one role shown on the public person card, or null."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        role = pick_current_role(_role_rows(cur, host_id), _role_pin(cur, host_id))
+        return {"host_id": host_id, "current_role": _public_role(role)}
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.get("/api/admin/people/{host_id}/roles", dependencies=[Depends(verify_admin)])
+async def get_person_roles(host_id: int):
+    """Current role, the pin behind it if any, and every role on record."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        rows = _role_rows(cur, host_id)
+        pin = _role_pin(cur, host_id)
+        return {
+            "current": pick_current_role(rows, pin),
+            # What the rule alone would show, so a pin can be judged against it.
+            "derived": pick_current_role(rows),
+            "pin": pin,
+            "history": rows,
+        }
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.put("/api/admin/people/{host_id}/role-pin", dependencies=[Depends(verify_admin)])
+async def set_role_pin(host_id: int, body: RolePinRequest):
+    title = (body.title or '').strip() or None
+    company = (body.company or '').strip() or None
+    if not title and not company:
+        raise HTTPException(status_code=400, detail="Give a title, a company, or both")
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT 1 FROM hosts WHERE host_id = %s", (host_id,))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Person not found")
+        cur.execute("""
+            INSERT INTO host_role_pins (host_id, title, company) VALUES (%s, %s, %s)
+            ON CONFLICT (host_id) DO UPDATE
+            SET title = EXCLUDED.title, company = EXCLUDED.company, updated_at = now()
+        """, (host_id, title, company))
+        conn.commit()
+        return {"success": True, "title": title, "company": company}
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.delete("/api/admin/people/{host_id}/role-pin", dependencies=[Depends(verify_admin)])
+async def clear_role_pin(host_id: int):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("DELETE FROM host_role_pins WHERE host_id = %s", (host_id,))
+        conn.commit()
+        return {"success": True, "cleared": cur.rowcount > 0}
+    finally:
+        cur.close()
+        conn.close()
 
 
 @app.post("/api/admin/people/{host_id}/scan", dependencies=[Depends(verify_admin)])
