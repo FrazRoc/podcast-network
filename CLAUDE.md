@@ -172,7 +172,12 @@ merges and credit deletions carry through without touching that code.
   (chars/4 approximation, Sonnet scaled by the pilot's measured 1.5x).
 - **Every stored value must occur verbatim in its snippet**
   (`verified_affiliations`); anything else is dropped and counted. This is
-  the guard against the model supplying a company from outside knowledge.
+  the guard against the model supplying a company from outside knowledge. The match is on whole words (a bare substring test accepted "Director"
+  from "Directorate"), and a title may be the singular of a plural in the
+  text — "cofounders and managing directors of remove, Marian Krüger and
+  Hans Westerhof" yields "cofounder and managing director" for each (+s,
+  +es, y→ies only). Before that, shared titles were silently dropped and
+  only the company kept. Companies still need an exact whole-word match.
 - Order of operations: `estimate` (read-only) → `pilot --limit 100` (API,
   CSV only, no DB writes) → review → migration → `submit` with approval per
   the quantify-first rule → `collect`. `run` = collect then submit, for cron;
@@ -217,14 +222,17 @@ merges and credit deletions carry through without touching that code.
 - `submit`/`run` take `--random` to pick `--limit` appearances at random
   rather than in episode order (the oldest episodes of a few shows).
 - Known rough edges from stage 1, left for the normalisation step rather
-  than fixed in extraction: plural titles from shared phrasing ("Senators",
-  "historians of technology" — singularising would break the verbatim
-  check); editorial wording copied into titles ("the controversial pick to
+  than fixed in extraction: plural titles when the model copies them as
+  written ("Senators", "historians of technology"); editorial wording copied into titles ("the controversial pick to
   be the president"); loose descriptions ("an experienced solar
   professional with a broad knowledge of the industry"); a single old
-  appearance shows as current (Etosha Cave, 2019). A trailing possessive is
-  now stripped from companies ("BloombergNEF's" → "BloombergNEF"), but only
-  for new extractions — stage 1's stored rows still carry it.
+  appearance shows as current (Etosha Cave, 2019). Leading "a"/"an"/"the"
+  is stripped from titles and a trailing possessive from companies at
+  extraction; the first 200 were cleaned by a one-off UPDATE (9 titles, 1
+  company). Some organisations style their names lowercase ("remove", a CDR
+  accelerator) — that is the name, not an extraction error.
+- Second random 200 run Sep 24 2026 ($0.15): ~400 appearances processed in
+  total, 417 roles, 35 mentioned-only, 8 flagged hosts.
 - Stage 1 produced 168 distinct company strings from 174 appearances, so
   the full backfill will mean thousands of organisations to normalise.
 

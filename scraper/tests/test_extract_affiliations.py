@@ -190,6 +190,38 @@ class TestVerifiedAffiliations:
         kept, _ = verified_affiliations([{'title': title, 'company': None}], f"guest {title} joins")
         assert pairs(kept) == [{'title': kept_as, 'company': None}]
 
+    def test_singular_title_matches_plural_in_text(self):
+        # Real case: Hans Westerhof lost his title because the text shares it.
+        snippet = ("cofounders and managing directors of remove, Marian Krüger and "
+                   "Hans Westerhof, join the show")
+        kept, dropped = verified_affiliations(
+            [{'title': 'cofounder and managing director', 'company': 'remove'}], snippet)
+        assert pairs(kept) == [{'title': 'cofounder and managing director', 'company': 'remove'}]
+        assert dropped == []
+
+    @pytest.mark.parametrize('title, text', [
+        ('Senator', 'Senators Joe Manchin and Lisa Murkowski'),
+        ('historian of technology', 'Naomi Oreskes and Erik Conway, historians of technology'),
+        ('Deputy Secretary', 'the Deputy Secretaries of Energy'),
+        ('coach', 'two coaches, Jane Doe and John Roe'),
+    ])
+    def test_plural_forms(self, title, text):
+        kept, _ = verified_affiliations([{'title': title, 'company': None}], text)
+        assert pairs(kept) == [{'title': title, 'company': None}]
+
+    @pytest.mark.parametrize('title, text', [
+        ('Director', 'Directorate of Energy'),             # a different word, not a plural
+        ('partner', 'partnership lead at Acme'),
+        ('Chief Executive', 'Chief Operating Officer'),
+    ])
+    def test_plural_tolerance_does_not_admit_other_words(self, title, text):
+        kept, dropped = verified_affiliations([{'title': title, 'company': None}], text)
+        assert kept == [] and dropped == [('title', title)]
+
+    def test_companies_still_need_an_exact_match(self):
+        kept, _ = verified_affiliations([{'title': None, 'company': 'Octopus'}], "at Octopuses Ltd")
+        assert kept == []
+
     def test_leading_the_kept_on_company(self):
         # "The Nature Conservancy" is a name; only titles lose the article.
         kept, _ = verified_affiliations([{'title': None, 'company': 'The Nature Conservancy'}],

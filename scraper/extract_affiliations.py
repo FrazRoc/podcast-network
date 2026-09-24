@@ -410,8 +410,37 @@ _LEADING_ARTICLE_RE = re.compile(r'^(?:a|an|the)\s+', re.IGNORECASE)
 _HONORIFIC_ONLY_RE = re.compile(r'^(?:dr|mr|mrs|ms|mx|prof|sir|dame)\.?$', re.IGNORECASE)
 
 
+def _plural_tolerant_pattern(value: str):
+    """Match a title whose words may be plural in the text.
+
+    A title shared by two guests is written in the plural ("cofounders and
+    managing directors of remove, Marian Krüger and Hans Westerhof"), and
+    the model reasonably returns it singular for each person. Each word may
+    carry a plural ending in the text: +s, +es, or y -> ies. Nothing else
+    about the words may differ, so this cannot admit a different title.
+    """
+    parts = []
+    for word in _normalise_for_match(value).split():
+        if len(word) > 2 and word.endswith('y') and word[-2] not in 'aeiou':
+            parts.append(re.escape(word[:-1]) + r'(?:y|ies)')
+        else:
+            parts.append(re.escape(word) + r'(?:e?s)?')
+    return re.compile(r'(?<!\w)' + r'\s+'.join(parts) + r'(?!\w)')
+
+
+def _in_text(value: str, haystack: str, field: str) -> bool:
+    """Whole words only. A bare substring test accepted "Director" from
+    "Directorate" and "partner" from "partnership" — the extraction's
+    version of the scanner's "Dan Yates" inside "Jordan Yates"."""
+    exact = re.compile(r'(?<!\w)' + re.escape(_normalise_for_match(value)) + r'(?!\w)')
+    if exact.search(haystack):
+        return True
+    return field == 'title' and bool(_plural_tolerant_pattern(value).search(haystack))
+
+
 def verified_affiliations(affiliations: list, snippet: str) -> tuple:
-    """Keep only values that occur verbatim in the snippet.
+    """Keep only values that occur verbatim in the snippet (titles may be the
+    singular of a plural in the text — see _plural_tolerant_pattern).
 
     Returns (kept, dropped). A value not found in the text is set to null;
     an affiliation left with neither title nor company is dropped whole.
@@ -432,7 +461,7 @@ def verified_affiliations(affiliations: list, snippet: str) -> tuple:
                 value = None
             if value and field == 'company':
                 value = _POSSESSIVE_SUFFIX_RE.sub('', value).strip() or None
-            if value and _normalise_for_match(value) in haystack:
+            if value and _in_text(value, haystack, field):
                 clean[field] = value
             else:
                 clean[field] = None
