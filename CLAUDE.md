@@ -407,8 +407,20 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   alone. Party labels are dropped from titles. The extractor applies it
   (even when the company was a place it would otherwise drop), and 309
   stored roles were rewritten (Sep 2026). "State of X" and "City of X" are
-  government organisations, cities under their state. Pass 2 still to do:
-  non-U.S. politicians (MPs, ministers) and politicians' staff.
+  government organisations, cities under their state.
+  Pass 2 (`normalize_government_role`, same module; the extractor calls
+  both via `normalize_any_government_role`): other countries' heads of
+  government and ministers @ "Government of <Country>" (Scottish / Welsh /
+  Victorian Government, Government of Alberta for sub-national), MPs @ UK
+  House of Commons / Australian House of Representatives (constituency
+  names like "Kingswood" are not organisations), U.S. envoys @ U.S.
+  Department of State, UN / EU envoys @ United Nations / European Union,
+  U.S. President and VP @ White House, and politicians' staff @ the body
+  their politician is in (White House, State of X, U.S. Senate/House,
+  Government of X). 227 roles rewritten; "Chilean government"-style
+  variants merged into "Government of X"; White House councils sit under
+  White House. Company presidents/VPs whose company wasn't named, and COP
+  presidencies, are deliberately left alone.
 - **"former" lives in the flag, not the title**: a leading "former"/"ex-"
   is stripped and the role marked former, at extraction and in the data
   (216 titles, Sep 2026).

@@ -262,3 +262,226 @@ def normalize_political_roles(title, company, context=None, person=None, known_p
             keep = company if company and not used and not place else None
             out.append({'title': p.strip(), 'company': keep, 'is_former': former})
     return out
+
+
+# ------------------------------------------------------------------
+# Pass 2: other countries' politicians, diplomats, and politicians' staff
+# ------------------------------------------------------------------
+#
+#   heads of government / ministers   <title> @ Government of <Country>
+#     (sub-national: Scottish Government, Government of Alberta, Victorian Government)
+#   members of parliament             Member of Parliament @ UK House of Commons (etc.)
+#   U.S. envoys / ambassadors         <title> @ U.S. Department of State
+#   UN / EU envoys                    <title> @ United Nations / European Union
+#   U.S. President / Vice President   @ White House
+#   staff of a politician             <title> @ the body the politician is in
+
+# name or adjective -> (country, the body its government is called)
+_COUNTRIES = {}
+for names, country in [
+    (('uk', 'u.k.', 'united kingdom', 'britain', 'british', 'england', 'english'), 'the United Kingdom'),
+    (('canada', 'canadian'), 'Canada'), (('australia', 'australian'), 'Australia'),
+    (('new zealand',), 'New Zealand'), (('norway', 'norwegian'), 'Norway'), (('barbados',), 'Barbados'),
+    (('ireland', 'irish'), 'Ireland'), (('germany', 'german'), 'Germany'), (('france', 'french'), 'France'),
+    (('spain', 'spanish'), 'Spain'), (('chile', 'chilean'), 'Chile'), (('denmark', 'danish'), 'Denmark'),
+    (('greece', 'greek'), 'Greece'), (('ecuador',), 'Ecuador'), (('mexico', 'mexican'), 'Mexico'),
+    (('panama', 'republic of panama'), 'Panama'), (('taiwan',), 'Taiwan'), (('luxembourg',), 'Luxembourg'),
+    (('costa rica', 'costa rican'), 'Costa Rica'), (('ghana', 'ghanaian'), 'Ghana'),
+    (('marshall islands', 'the marshall islands', 'royal marshall islands'), 'the Marshall Islands'),
+    (('saint lucia',), 'Saint Lucia'), (('liberia', 'liberian'), 'Liberia'), (('indonesia', 'indonesian'), 'Indonesia'),
+    (('egypt', 'egyptian'), 'Egypt'), (('el salvador',), 'El Salvador'), (('india', 'indian'), 'India'),
+    (('japan', 'japanese'), 'Japan'), (('sweden', 'swedish'), 'Sweden'), (('singapore',), 'Singapore'),
+    (('netherlands', 'dutch'), 'the Netherlands'), (('italy', 'italian'), 'Italy'), (('brazil', 'brazilian'), 'Brazil'),
+    (('colombia', 'colombian'), 'Colombia'), (('kenya', 'kenyan'), 'Kenya'), (('nigeria', 'nigerian'), 'Nigeria'),
+    (('south africa', 'south african'), 'South Africa'), (('china', 'chinese'), 'China'), (('finland', 'finnish'), 'Finland'),
+    (('portugal', 'portuguese'), 'Portugal'), (('belgium', 'belgian'), 'Belgium'), (('fiji', 'fijian'), 'Fiji'),
+    (('palau',), 'Palau'), (('bangladesh',), 'Bangladesh'), (('pakistan',), 'Pakistan'), (('maldives',), 'the Maldives'),
+    (('uae', 'united arab emirates', 'emirati'), 'the United Arab Emirates'), (('saudi arabia', 'saudi'), 'Saudi Arabia'),
+]:
+    for n in names:
+        _COUNTRIES[n] = country
+_SUBNATIONAL = {'scotland': 'Scottish Government', 'scottish': 'Scottish Government', 'wales': 'Welsh Government',
+                'welsh': 'Welsh Government', 'alberta': 'Government of Alberta', 'victoria': 'Victorian Government',
+                'ontario': 'Government of Ontario', 'quebec': 'Government of Quebec',
+                'british columbia': 'Government of British Columbia'}
+_COUNTRY_RE = re.compile(r"(?<![\w.])(" + '|'.join(sorted((re.escape(n) for n in list(_COUNTRIES) + list(_SUBNATIONAL)),
+                                                           key=len, reverse=True)) + r")(?:['’]s)?(?![\w])", re.I)
+_PARLIAMENT = {'the United Kingdom': 'UK House of Commons', 'Australia': 'Australian House of Representatives',
+               'Canada': 'House of Commons of Canada', 'New Zealand': 'New Zealand Parliament', 'Ireland': 'Dáil Éireann',
+               'India': 'Lok Sabha'}
+# UK constituencies that were stored as if they were employers.
+_UK_CONSTITUENCIES = {'kingswood', 'sedgefield', 'copeland', 'richmond park', 'brighton pavilion', 'tottenham', 'reading west'}
+_AU_ELECTORATES = {'warringah'}
+# Governors named as the employer ("advisor" @ "Governor Newsom"), by surname.
+_GOVERNORS = {'newsom': 'California', 'brown': 'California', 'schwarzenegger': 'California', 'inslee': 'Washington',
+              'polis': 'Colorado', 'whitmer': 'Michigan', 'hochul': 'New York', 'cuomo': 'New York',
+              'murphy': 'New Jersey', 'pritzker': 'Illinois', 'healey': 'Massachusetts', 'moore': 'Maryland'}
+# Prime ministers named in "chief of staff to Prime Minister X", by surname.
+_PRIME_MINISTERS = {'trudeau': 'Canada', 'mottley': 'Barbados', 'ardern': 'New Zealand', 'albanese': 'Australia',
+                    'starmer': 'the United Kingdom', 'sunak': 'the United Kingdom', 'modi': 'India'}
+_US_RE = re.compile(r'\bu\.?s\.?\b|\bus\b|united states|\bamerica(n)?\b|\bUS’', re.I)
+
+
+def government_of(place: str) -> str:
+    return _SUBNATIONAL.get(place.lower()) or f"Government of {_COUNTRIES.get(place.lower(), place)}"
+
+
+def country_from(*texts) -> str | None:
+    """The first country or sub-national government named: 'the United
+    Kingdom', 'Canada' … or a _SUBNATIONAL body name."""
+    for text in texts:
+        if not text:
+            continue
+        m = _COUNTRY_RE.search(text)
+        if m:
+            k = m.group(1).lower()
+            return _SUBNATIONAL.get(k) or _COUNTRIES[k]
+    return None
+
+
+def _body(place: str) -> str:
+    """'the United Kingdom' -> 'Government of the United Kingdom'; a
+    sub-national body name passes through."""
+    return place if place in _SUBNATIONAL.values() else f'Government of {place}'
+
+
+_TYPO = [(re.compile(r'\bforiegn\b|\bforein\b', re.I), 'Foreign')]
+
+
+def _strip_place_words(title: str) -> str:
+    """'Chilean Minister of Energy' -> 'Minister of Energy'; 'UK’s new Climate
+    Envoy' -> 'Climate Envoy'. The place is in the organisation now."""
+    t = title
+    for rx, fix in _TYPO:
+        t = rx.sub(fix, t)
+    t = re.sub(r"^(?:the\s+)?(?:" + _COUNTRY_RE.pattern + r"|u\.?s\.?|us|united states|america['’]?s?)\s*(?:['’]s?\s+)?", '', t, flags=re.I)
+    for _ in range(2):   # "first US Special Envoy": both prefixes
+        t = re.sub(r"^(?:new|current|recently promoted|then|first(?!\s+minister)|senior)\s+", '', t, flags=re.I)
+        t = re.sub(r"^(?:the\s+)?(?:u\.?s\.?|us|united states)(?:['’]s?)?\s+", '', t, flags=re.I)
+    t = re.sub(r"\s+of (?:the )?(?:republic of )?" + _COUNTRY_RE.pattern + r"$", '', t, flags=re.I)
+    t = re.sub(r'\b(?:conservative|labour|liberal|green|tory)\s+(?=mp\b|member of parliament)', '', t, flags=re.I)
+    return t.strip(' ,') or title
+
+
+def normalize_government_role(title: str | None, company: str | None, context: str | None = None,
+                              person: str | None = None, known_places: tuple = ()) -> list | None:
+    """Pass 2 (see above). A list of {'title', 'company', 'is_former'}, or None."""
+    if not title:
+        return None
+    t0 = title.strip()
+    former = bool(_FORMER_RE.match(t0))
+    t = _FORMER_RE.sub('', t0)
+    t = re.sub(r'^fmr\.?\s+', '', t, flags=re.I)
+    former = former or bool(re.match(r'^fmr\.?\s', t0, re.I))
+    low = t.lower()
+    near = _near(context, person) if person else ''
+    here = f"{t} {company or ''} {' '.join(known_places)}"
+
+    def out(ti, co):
+        return [{'title': ti, 'company': co, 'is_former': former}]
+
+    # --- staff of a politician (before the politicians themselves) ---
+    if re.search(r'\b(advis[oe]r|assistant|chief of staff|aide|legislative director|counsel(l)?or)\b', low):
+        co = (company or '').lower()
+        foreign = country_from(t, company)
+        if not (foreign and foreign != 'the United States') and (
+                re.search(r'\bwhite house\b|\bpresident (obama|biden|trump|clinton|bush)\b|to the president\b|for president\b', f'{low} {co}')
+                or re.search(r'\bnational (climate|security|economic) advis[oe]r\b|national economic council', low)
+                or re.search(r'^(the )?(president|(obama|biden|trump|biden-harris|clinton|bush) (administration|white house))\b', co)):
+            clean = re.sub(r'^(?:u\.?s\.?\s+|us\s+)?(?:the\s+)?(?:(?:biden|obama|trump)\s+)?(?:white house\s+)?', '', t, flags=re.I)
+            clean = re.sub(r'^(?:first|top|influential|leading)\s+', '', clean, flags=re.I)
+            return out(clean.strip() or t, 'White House')
+        m = re.match(r'^(?:the )?governor\s+(?:\w+\s+)?(\w+)$', co)
+        if m and m.group(1) in _GOVERNORS:
+            return out(t, f'State of {_GOVERNORS[m.group(1)]}')
+        if re.match(r'^(?:the )?(senator|sen\.)\s', co):
+            return out(t, 'U.S. Senate')
+        if re.match(r'^(?:the )?(representative|rep\.|congress(man|woman))\s', co):
+            return out(t, 'U.S. House')
+        if re.search(r'\bgovernor\b', low):
+            s = state_from(t, company, *known_places, near)
+            return out(t, f'State of {s}') if s else None
+        if re.search(r'\bsenate aide\b|\bto (senator|sen\.)', low):
+            return out(t, 'U.S. Senate')
+        if re.search(r'\bocasio-cortez\b|\bto (representative|rep\.|congress(man|woman))', low):
+            return out(t, 'U.S. House')
+        m = re.search(r'\bprime minister\b', f'{low} {(company or "").lower()}')
+        if m:
+            c = country_from(t, company, *known_places, near) or next(
+                (v for k, v in _PRIME_MINISTERS.items() if k in f'{t} {company or ""}'.lower()), None)
+            if c:
+                keep = t if re.search(r'prime minister', low) else f'{t} to the Prime Minister'
+                return out(_strip_place_words(keep), _body(c))
+        m = re.search(r'state assembly', company or '', re.I)
+        if m:
+            s = state_from(company)
+            return out(t, f'State of {s}') if s else None
+        m = re.search(r'(u\.?s\.?|us) department of (energy|state|the interior|defense)', low)
+        if m:
+            return out(re.sub(r'^(u\.?s\.?|us) department of \w+\s+', '', t, flags=re.I), _CABINET[m.group(2)])
+        return None
+
+    # --- members of parliament ---
+    if re.search(r'\bmp\b|member of parliament|\bshadow minister\b', low):
+        c = country_from(t, company, *known_places)
+        co = (company or '').strip().lower()
+        if co in _AU_ELECTORATES:
+            c = 'Australia'
+        elif not c and (co in _UK_CONSTITUENCIES
+                        or re.search(r'\b(conservative|labour|tory|westminster|commons|shadow)\b', f'{t} {company or ""} {near}', re.I)):
+            c = 'the United Kingdom'
+        c = c or country_from(near)
+        if not c or c not in _PARLIAMENT:
+            return None
+        roles = []
+        if re.search(r'\bshadow minister\b', low):
+            roles.append({'title': 'Shadow Minister', 'company': _PARLIAMENT[c], 'is_former': former})
+        roles.append({'title': 'Member of Parliament', 'company': _PARLIAMENT[c], 'is_former': former})
+        rest = re.sub(r'\b(senior\s+)?(conservative\s+|labour\s+)?(mp|member of parliament)\b|shadow minister', '', t, flags=re.I).strip(' ,')
+        if rest:
+            # "MP, Parliamentary Under Secretary of State" keeps its other half.
+            other = company if company and co not in _UK_CONSTITUENCIES | _AU_ELECTORATES else _body(c)
+            roles.append({'title': rest, 'company': other, 'is_former': former})
+        return roles
+
+    # --- envoys and ambassadors ---
+    if re.search(r'\b(envoy|ambassador|high commissioner)\b', low):
+        if re.search(r'\b(goodwill|brand|c40|business ambassador|policy ambassador|youth envoy|at large)\b', low) \
+                and not re.search(r'ambassador[- ]at[- ]large', low):
+            return None
+        if re.search(r'^(un|u\.n\.|united nations)\b|\bun (special|high)\b', low):
+            return out(re.sub(r'^(un|u\.n\.|united nations)\s+', '', t, flags=re.I), 'United Nations')
+        if re.search(r'^eu\b|european union', low):
+            return out(re.sub(r'^eu\s+', '', t, flags=re.I), 'European Union')
+        if _US_RE.search(t) or re.search(r'special presidential envoy', low) or 'department of state' in (company or '').lower() \
+                or any(re.fullmatch(r'(the )?(u\.?s\.?|us|united states)', p.strip(), re.I) for p in known_places):
+            return out(_strip_place_words(t), 'U.S. Department of State')
+        c = country_from(t, company, *known_places)
+        if c:
+            return out(_strip_place_words(t), _body(c))
+        return None
+
+    # --- heads of government and state, ministers ---
+    head = re.search(r'\b(deputy prime minister|prime minister|first minister|premier|chancellor|president|vice president|VP)\b', t, re.I)
+    minister = re.search(r'\bminister\b|secretary of state for\b|minister of state\b', low)
+    if head or minister:
+        if head and head.group(1).lower() in ('president', 'vice president', 'vp'):
+            # Only a country's president: title little more than the word, and a country on record.
+            if not re.fullmatch(r"(?:u\.?s\.?\s+|us\s+|[a-z ]*?\s)?(president|vice president|vp)", low):
+                return None
+            if _US_RE.search(t) or re.search(r'\b(biden|obama|trump|gore|harris|clinton|bush|pence|cheney)\b', (person or '').lower()):
+                return out('President' if head.group(1).lower() == 'president' else 'VP', 'White House')
+            c = country_from(t, company, *known_places)
+            return out('President', _body(c)) if c and head.group(1).lower() == 'president' else None
+        c = country_from(t, company, *known_places, near)
+        if not c:
+            return None
+        return out(_strip_place_words(t), _body(c))
+    return None
+
+
+def normalize_any_government_role(title, company, context=None, person=None, known_places=()) -> list | None:
+    """Pass 1 (U.S. legislators, state and city roles, cabinet), then pass 2
+    (other countries, diplomats, staff). What the extractor calls."""
+    return (normalize_political_roles(title, company, context, person, known_places)
+            or normalize_government_role(title, company, context, person, known_places))

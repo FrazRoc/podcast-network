@@ -76,3 +76,55 @@ def test_attache_is_left_alone():
 def test_state_read_from_the_text_around_the_person():
     assert one('Rep.', context='Rep. Kathy Castor (D-FL) joins us', person='Kathy Castor') == \
         ('Representative', 'U.S. House', False)
+
+
+# ------------------------------------------------------------------
+# Pass 2: other countries, diplomats, staff
+# ------------------------------------------------------------------
+from politicians import normalize_government_role, normalize_any_government_role  # noqa: E402
+
+
+def two(title, company=None, places=()):
+    r = normalize_government_role(title, company, known_places=places)
+    return r and [(d['title'], d['company']) for d in r]
+
+
+@pytest.mark.parametrize('title, company, places, expected', [
+    ('UK Prime Minister', None, (), [('Prime Minister', 'Government of the United Kingdom')]),
+    ('Prime Minister', None, ('Barbados',), [('Prime Minister', 'Government of Barbados')]),
+    ('Chilean Minister of Energy and Mining', None, (), [('Minister of Energy and Mining', 'Government of Chile')]),
+    ('UK Foriegn Minister', None, (), [('Foreign Minister', 'Government of the United Kingdom')]),
+    ('First Minister of Scotland', None, (), [('First Minister', 'Scottish Government')]),
+    ('Premier', None, ('Alberta',), [('Premier', 'Government of Alberta')]),
+    ('MP', 'Kingswood', (), [('Member of Parliament', 'UK House of Commons')]),
+    ('MP', 'Warringah', (), [('Member of Parliament', 'Australian House of Representatives')]),
+    ('MP Shadow Minister', None, (), [('Shadow Minister', 'UK House of Commons'), ('Member of Parliament', 'UK House of Commons')]),
+    ('US deputy special envoy for Iran', None, (), [('deputy special envoy for Iran', 'U.S. Department of State')]),
+    ('Deputy Special Envoy for Climate Change', None, ('US',), [('Deputy Special Envoy for Climate Change', 'U.S. Department of State')]),
+    ('UN Special Envoy on Climate Action and Finance', None, (), [('Special Envoy on Climate Action and Finance', 'United Nations')]),
+    ('EU Ambassador to the U.S.', None, (), [('Ambassador to the U.S.', 'European Union')]),
+    ('Egyptian Ambassador', None, (), [('Ambassador', 'Government of Egypt')]),
+    ('President', None, ('Costa Rica',), [('President', 'Government of Costa Rica')]),
+    ('US VP', None, (), [('VP', 'White House')]),
+    ('White House Chief of Staff', None, (), [('Chief of Staff', 'White House')]),
+    ('National Climate Advisor', None, (), [('National Climate Advisor', 'White House')]),
+    ('climate adviser', 'the Obama administration', (), [('climate adviser', 'White House')]),
+    ('Climate Advisor', 'Governor Newsom', (), [('Climate Advisor', 'State of California')]),
+    ('climate policy advisor', 'Senator Elizabeth Warren', (), [('climate policy advisor', 'U.S. Senate')]),
+    ('chief of staff', 'Prime Minister Justin Trudeau', (), [('chief of staff to the Prime Minister', 'Government of Canada')]),
+])
+def test_pass2_normalised(title, company, places, expected):
+    assert two(title, company, places) == expected
+
+
+@pytest.mark.parametrize('title, company', [
+    ('President and CEO', None),                     # a company's president, company not named
+    ('VP of Business Development', None),
+    ('C40 Ambassador for Global Climate Diplomacy', None),
+    ('UN Environment Goodwill Ambassador', None),
+    ('investor, advisor and serial entrepreneur', None),
+    ('Head of Advisory in Japan', None),
+    ('Governor', 'The Bank of England'),
+])
+def test_pass2_left_alone(title, company):
+    assert normalize_any_government_role(title, company) is None

@@ -59,7 +59,7 @@ from description_cleaner import (  # noqa: E402
 )
 from org_names import normalize_org_name, not_an_organisation  # noqa: E402
 from role_selection import tidy_title  # noqa: E402
-from politicians import normalize_political_roles  # noqa: E402
+from politicians import normalize_any_government_role  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
@@ -512,7 +512,7 @@ def verified_affiliations(affiliations: list, snippet: str) -> tuple:
         # "Florida" -> Representative @ U.S. House), read with the raw company
         # even when it was a place and dropped above (backend/politicians.py).
         raw_company = _collapse(aff.get('company')) if isinstance(aff.get('company'), str) else None
-        political = normalize_political_roles(clean['title'], raw_company, snippet) if clean['title'] else None
+        political = normalize_any_government_role(clean["title"], raw_company, snippet) if clean["title"] else None
         if political:
             entries = [{'title': d['title'], 'company': d['company'],
                         'is_former': bool(d['is_former'] or clean['is_former']),
