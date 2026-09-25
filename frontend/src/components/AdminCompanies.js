@@ -90,7 +90,7 @@ function CompanyPicker({ placeholder, excludeId, onPick }) {
           {results.map(o => (
             <button key={o.org_id} onClick={() => { onPick(o); setQ(''); setResults([]); }}
               className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center justify-between gap-2">
-              <span className="truncate">{o.name}</span>
+              <span className="truncate" title={o.name}>{o.name}</span>
               <span className="text-xs text-gray-400 flex-shrink-0">{o.people} people</span>
             </button>
           ))}
@@ -222,7 +222,7 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
           <label className="block text-xs font-medium text-gray-500 mb-1">Parent organisation</label>
           {form.parent ? (
             <div className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2 text-sm">
-              <button onClick={() => onSelect(form.parent.org_id)} className="text-blue-600 hover:underline truncate">
+              <button onClick={() => onSelect(form.parent.org_id)} title={form.parent.name} className="text-blue-600 hover:underline truncate">
                 {form.parent.name}
               </button>
               <button onClick={() => setForm(f => ({ ...f, parent: null }))}
@@ -256,7 +256,7 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
             {suggestions.map(o => (
               <li key={o.org_id} className="text-sm">
                 <div className="flex items-center gap-2 min-w-0">
-                  <button onClick={() => onSelect(o.org_id)} className="text-blue-600 hover:underline truncate">{o.name}</button>
+                  <button onClick={() => onSelect(o.org_id)} title={o.name} className="text-blue-600 hover:underline truncate">{o.name}</button>
                   <TypeBadge type={o.org_type} />
                   <span className="text-xs text-gray-400 flex-shrink-0">{o.people} {o.people === 1 ? 'person' : 'people'} · {o.reason}</span>
                 </div>
@@ -329,7 +329,7 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
           <ul className="space-y-1">
             {children.map(c => (
               <li key={c.org_id} className="text-sm flex items-center justify-between">
-                <button onClick={() => onSelect(c.org_id)} className="text-blue-600 hover:underline truncate">{c.name}</button>
+                <button onClick={() => onSelect(c.org_id)} title={c.name} className="text-blue-600 hover:underline truncate">{c.name}</button>
                 <span className="text-xs text-gray-400">{c.people} people</span>
               </li>
             ))}
@@ -397,10 +397,10 @@ function SuggestionCard({ s, onAction, onSkip }) {
 
   const side = (o) => (
     <div className="min-w-0">
-      <p className="text-sm font-medium text-gray-900 truncate">{o.name}</p>
+      <p className="text-sm font-medium text-gray-900 truncate" title={o.name}>{o.name}</p>
       <p className="text-xs text-gray-400">{o.people} people{o.org_type ? ` · ${o.org_type}` : ''}</p>
       {o.alias_names?.length > 1 && (
-        <p className="text-xs text-gray-400 truncate">also: {o.alias_names.filter(n => n !== o.name).join(', ')}</p>
+        <p className="text-xs text-gray-400 truncate" title={o.alias_names.filter(n => n !== o.name).join(', ')}>also: {o.alias_names.filter(n => n !== o.name).join(', ')}</p>
       )}
     </div>
   );
@@ -609,7 +609,7 @@ export default function AdminCompanies() {
                         <div key={o.org_id} onClick={() => setSelected(o.org_id === selected ? null : o.org_id)}
                           className={`px-4 py-3 cursor-pointer hover:bg-gray-50 ${o.org_id === selected ? 'bg-blue-50 border-l-2 border-blue-500' : ''}`}>
                           <div className="flex items-center gap-2">
-                            <p className="text-sm font-medium text-gray-900 truncate">{o.name}</p>
+                            <p className="text-sm font-medium text-gray-900 truncate" title={o.name}>{o.name}</p>
                             <TypeBadge type={o.org_type} />
                           </div>
                           <p className="text-xs text-gray-400">
