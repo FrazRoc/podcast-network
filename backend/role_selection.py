@@ -43,7 +43,10 @@ def pick_current_role(rows: list, pin: dict | None = None) -> dict | None:
     if pin and (pin.get('title') or pin.get('company')):
         return {'title': pin.get('title'), 'company': pin.get('company'), 'source': 'pinned'}
 
-    current = [r for r in rows if not r.get('is_former') and not r.get('from_other_episode')]
+    # A row can be left with nothing to show once a non-organisation company
+    # is blanked out (see _role_rows); it does not count as a current role.
+    current = [r for r in rows if not r.get('is_former') and not r.get('from_other_episode')
+               and (r.get('title') or r.get('company'))]
     if not current:
         return None
 

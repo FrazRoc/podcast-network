@@ -333,6 +333,21 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   becomes one entry per organisation) — written while the API account had
   no credit, so not yet checked against a live model run. Queue after all
   this: 3,484.
+- **Places and fragments are never companies** (Evan, Sep 2026):
+  `org_names.is_place()` (a state, country, region or their abbreviation —
+  "California", "UK", "AZ", "North America"; cities are left alone, they
+  stand for a city government) and `is_fragment()` (cut off mid-name —
+  "the University of", "Dun &", "…" — or a bare placeholder like "the
+  Centre", "Solar", "the company"). The extraction drops them as companies,
+  the sync creates any that slip through as `not_an_org`, and the displayed
+  current role blanks a company marked not an organisation. 105 existing
+  ones were marked (70 places, 35 fragments); the fragments alone sat in
+  400+ merge suggestions. `extract_affiliations.py reextract` re-reads the
+  affected appearances (244) with Opus 5 and a wider window
+  (`WIDE_WINDOW`) to find the real organisation — built but **not yet run:
+  the API account is out of credit**. Watch for real names that trip the
+  fragment rule (e.g. "Compostable LA" was caught by a French "la" and
+  unmarked; "Planet A", "Instant ON" are deliberately allowed).
 - The merge-suggestions tab hides every card naming a company that was just
   merged away and reloads the queue; skipped cards stay hidden until
   Refresh. (First version left those cards in place, and acting on them

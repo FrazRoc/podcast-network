@@ -364,3 +364,65 @@ def main_body(**kw):
 def main_body_cls(cls, **kw):
     import main
     return getattr(main, cls)(**kw)
+
+
+class TestNotAnOrganisation:
+    """States, countries, abbreviations and cut-off fragments are never a
+    company (Sep 2026 cleanup: "California", "UK", "the University of")."""
+
+    @pytest.mark.parametrize('name', ['California', 'UK', 'U.S.', 'the United Kingdom', 'North America', 'AZ',
+                                      'Washington', 'The Marshall Islands', 'New Zealand'])
+    def test_places(self, name):
+        from org_names import is_place, not_an_organisation
+        assert is_place(name) and not_an_organisation(name)
+
+    @pytest.mark.parametrize('name', ['the University of', 'the Institute for', 'Dun &', 'Black and',
+                                      'Public Utility Commission of T...', 'the Centre', 'Solar', 'power', 'the firm'])
+    def test_fragments(self, name):
+        from org_names import is_fragment
+        assert is_fragment(name)
+
+    @pytest.mark.parametrize('name', ['Planet A', 'Plan A', 'Station A', 'Count Us In', 'Instant ON', 'Freetown',
+                                      'Compostable LA',
+                                      'McKinsey & Company', 'Black & Veatch', 'Georgia Tech', 'Texas Instruments',
+                                      'New York Times', 'US DOE', 'Colorado School of Mines'])
+    def test_real_organisations_are_left_alone(self, name):
+        from org_names import not_an_organisation
+        assert not not_an_organisation(name)
+
+    def test_sync_marks_them(self, org_db):
+        cur = org_db.cursor()
+        _role(cur, 'Ann', 'California')
+        _role(cur, 'Bob', 'Acme')
+        org_db.commit()
+        apply_sync(cur, plan_sync(cur))
+        org_db.commit()
+        cur.execute("SELECT name, not_an_org FROM organizations ORDER BY name")
+        assert cur.fetchall() == [('Acme', False), ('California', True)]
+
+    def test_never_shown_as_anyones_company(self, org_db):
+        pytest.importorskip("fastapi")
+        from main import _role_rows, _all_current_roles
+        from role_selection import pick_current_role
+        cur = org_db.cursor()
+        ann = _role(cur, 'Ann', 'California', title='Senator')
+        bob = _role(cur, 'Bob', 'UK')                                 # company only: nothing left to show
+        cur.execute("UPDATE host_affiliations SET title = NULL, title_kind = NULL WHERE host_id = %s", (bob,))
+        apply_sync(cur, plan_sync(cur))
+        org_db.commit()
+        dict_cur = org_db.cursor(cursor_factory=RealDictCursor)
+        role = pick_current_role(_role_rows(dict_cur, ann))
+        assert (role['title'], role['company']) == ('Senator', None)
+        assert pick_current_role(_role_rows(dict_cur, bob)) is None
+        roles = _all_current_roles(dict_cur)
+        assert roles[ann] == ('Senator', None) and bob not in roles
+
+    def test_reextract_selects_them(self, org_db):
+        import extract_affiliations as x
+        cur = org_db.cursor()
+        ann = _role(cur, 'Ann', 'the University of')
+        _role(cur, 'Bob', 'Acme')
+        apply_sync(cur, plan_sync(cur))
+        org_db.commit()
+        apps = x.get_appearances_with_non_org_companies(org_db)
+        assert [a['host_id'] for a in apps] == [ann]

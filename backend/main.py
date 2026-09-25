@@ -2866,13 +2866,19 @@ async def delete_alias(alias_id: int):
 
 def _role_rows(cur, host_id: int) -> list:
     cur.execute("""
-        SELECT ha.affiliation_id, ha.episode_id, ha.title, ha.company, ha.title_kind,
+        SELECT ha.affiliation_id, ha.episode_id, ha.title,
+               -- A company marked "not an organisation" (a state, a fragment)
+               -- is never shown as anyone's company.
+               CASE WHEN org.not_an_org THEN NULL ELSE ha.company END AS company,
+               ha.company AS company_as_written, ha.title_kind,
                ha.is_former, ha.data_source,
                ax.appears_on_episode, ax.from_other_episode,
                e.published_date, e.title AS episode_title, p.title AS podcast_title
         FROM host_affiliations ha
         JOIN affiliation_extractions ax
           ON ax.episode_id = ha.episode_id AND ax.host_id = ha.host_id
+        LEFT JOIN organization_aliases oa ON oa.normalized_name = ha.company_key
+        LEFT JOIN organizations org ON org.org_id = oa.org_id
         JOIN episodes e ON e.episode_id = ha.episode_id
         JOIN podcasts p ON p.podcast_id = e.podcast_id
         WHERE ha.host_id = %s
@@ -2894,11 +2900,14 @@ def _all_current_roles(cur) -> dict:
     resolve the same way on the list and on the panel.
     """
     cur.execute("""
-        SELECT ha.host_id, ha.episode_id, ha.title, ha.company, ha.title_kind, ha.is_former,
-               ax.from_other_episode, e.published_date
+        SELECT ha.host_id, ha.episode_id, ha.title,
+               CASE WHEN org.not_an_org THEN NULL ELSE ha.company END AS company,
+               ha.title_kind, ha.is_former, ax.from_other_episode, e.published_date
         FROM host_affiliations ha
         JOIN affiliation_extractions ax
           ON ax.episode_id = ha.episode_id AND ax.host_id = ha.host_id
+        LEFT JOIN organization_aliases oa ON oa.normalized_name = ha.company_key
+        LEFT JOIN organizations org ON org.org_id = oa.org_id
         JOIN episodes e ON e.episode_id = ha.episode_id
         ORDER BY ha.host_id, e.published_date DESC NULLS LAST, ha.episode_id DESC, ha.affiliation_id
     """)

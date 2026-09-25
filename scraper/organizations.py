@@ -30,7 +30,7 @@ import psycopg2
 from psycopg2.extras import execute_values
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'backend'))
-from org_names import normalize_org_name, _LEGAL_SUFFIXES  # noqa: E402
+from org_names import normalize_org_name, not_an_organisation, _LEGAL_SUFFIXES  # noqa: E402
 from org_suggestions import refresh_suggestions  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
@@ -85,7 +85,10 @@ def apply_sync(cur, plan: dict) -> None:
             WHERE ha.affiliation_id = d.affiliation_id
         """, plan['to_stamp'])
     for key, name in plan['new_orgs']:
-        cur.execute("INSERT INTO organizations (name) VALUES (%s) RETURNING org_id", (name,))
+        # A state/country or a cut-off fragment is kept (so the spelling is
+        # not re-created) but marked, never shown as anyone's company.
+        cur.execute("INSERT INTO organizations (name, not_an_org) VALUES (%s, %s) RETURNING org_id",
+                    (name, not_an_organisation(name)))
         org_id = cur.fetchone()[0]
         cur.execute("""
             INSERT INTO organization_aliases (org_id, alias_name, normalized_name, source)

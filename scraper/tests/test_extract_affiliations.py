@@ -228,6 +228,13 @@ class TestVerifiedAffiliations:
                                         "Jane Doe of The Nature Conservancy")
         assert pairs(kept) == [{'title': None, 'company': 'The Nature Conservancy'}]
 
+    @pytest.mark.parametrize('company', ['California', 'UK', 'the University of', 'Dun &'])
+    def test_places_and_fragments_are_not_stored_as_companies(self, company):
+        kept, dropped = verified_affiliations([{'title': 'Senator', 'company': company}],
+                                              f"Senator Jane Doe of {company} joins")
+        assert pairs(kept) == [{'title': 'Senator', 'company': None}]
+        assert ('company', company) in dropped
+
     def test_possessive_is_stripped_from_company(self):
         # Real case: "BloombergNEF's Ash Wang" on Switched On.
         kept, _ = verified_affiliations(
@@ -386,6 +393,12 @@ class TestRequests:
         assert params['output_config']['format']['type'] == 'json_schema'
         assert params['messages'][0]['role'] == 'user'
         assert params['messages'][0]['content'].count('<item ') == 2
+
+    def test_opus_request_sets_effort_alongside_the_schema(self):
+        params = request_params(self._items(1), 'claude-opus-5')
+        assert params['output_config']['effort'] == 'medium'
+        assert params['output_config']['format']['type'] == 'json_schema'
+        assert 'thinking' not in params            # adaptive by default on Opus 5
 
     def test_sonnet_request_turns_thinking_off(self):
         # Adaptive thinking is on by default there and would bill as output.
