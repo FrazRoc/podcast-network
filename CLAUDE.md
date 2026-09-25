@@ -183,6 +183,21 @@ merges and credit deletions carry through without touching that code.
   Hans Westerhof" yields "cofounder and managing director" for each (+s,
   +es, y→ies only). Before that, shared titles were silently dropped and
   only the company kept. Companies still need an exact whole-word match.
+- **Organisations inside titles** (Sep 25 2026, after a hand review found
+  ~130 company-less rows like "Grist reporter", "BBC Science Correspondent",
+  "Aurora's Head of Consulting"): the prompt now shows that pattern, names
+  the company when it's in a nearby sentence ("a company called Sakuu … CTO
+  Karl Littau"), and each snippet starts `[Show: <podcast title>]` so "our
+  Head of Italy" on "Energy Unplugged by Aurora" can name Aurora verbatim.
+  `SNIPPET_BEFORE` went 120 → 200 for the nearby-sentence case. After the
+  verbatim check, `with_title_orgs()` (`backend/title_orgs.py`) catches what
+  the model still leaves in a title, by looking pieces of the title up among
+  known organisation spellings; it refuses ordinary words ("Science fiction
+  writer", "Earth scientist", "Australian energy analyst"), title acronyms
+  (EVP), events (COP26), honours and books, and press titles at non-media
+  companies ("Tesla reporter"). On the reviewed data it made no wrong matches
+  (121 of 134 found). Existing rows were fixed by a one-off pass, not by
+  re-extraction.
 - Order of operations: `estimate` (read-only) → `pilot --limit 100` (API,
   CSV only, no DB writes) → review → migration → `submit` with approval per
   the quantify-first rule → `collect`. `run` = collect then submit, for cron;

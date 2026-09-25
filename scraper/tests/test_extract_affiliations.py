@@ -691,3 +691,26 @@ class TestCostCap:
         assert x.cmd_submit(max_cost=-1.0, over_cap_is_error=False) is None
         cur.execute("SELECT COUNT(*) FROM affiliation_extractions")
         assert cur.fetchone()[0] == 0          # nothing written, nothing sent
+
+
+class TestTitleOrgsAndShow:
+    def test_show_name_leads_the_snippet(self):
+        from extract_affiliations import build_snippet
+        snippet = build_snippet(["Matteo Coriglioni"], "", "joins Matteo Coriglioni, our Head of Italy.",
+                                "Energy Unplugged by Aurora")
+        assert snippet.startswith('[Show: Energy Unplugged by Aurora] ')
+        assert build_snippet(["Jane Doe"], "", "No one here.", "Some Show") is None
+
+    def test_company_pulled_out_of_a_title(self):
+        from extract_affiliations import with_title_orgs
+        known = {'grist': {'name': 'Grist', 'org_type': 'media'}}
+        kept = [{'title': 'Grist reporter', 'company': None, 'title_kind': 'position', 'is_former': False}]
+        out = with_title_orgs(kept, known.get, [])
+        assert (out[0]['title'], out[0]['company']) == ('reporter', 'Grist')
+
+    def test_not_duplicated_when_already_a_company(self):
+        from extract_affiliations import with_title_orgs
+        known = {'grist': {'name': 'Grist', 'org_type': 'media'}}
+        kept = [{'title': 'Grist reporter', 'company': None, 'title_kind': 'position', 'is_former': False},
+                {'title': None, 'company': 'Grist', 'title_kind': None, 'is_former': False}]
+        assert with_title_orgs(kept, known.get, [])[0]['company'] is None

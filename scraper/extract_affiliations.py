@@ -60,6 +60,7 @@ from description_cleaner import (  # noqa: E402
 from org_names import normalize_org_name, not_an_organisation  # noqa: E402
 from role_selection import tidy_title  # noqa: E402
 from politicians import normalize_any_government_role  # noqa: E402
+from title_orgs import split_org_from_title  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
@@ -95,7 +96,7 @@ BATCH_DISCOUNT = 0.5
 # Roles almost always sit right after the name ("Jane Doe, CEO of X"), and
 # sometimes just before it ("Fervo CEO Jane Doe"), so the window leans
 # forward.
-SNIPPET_BEFORE = 120
+SNIPPET_BEFORE = 200   # was 120: "a company called Sakuu ... CTO Karl Littau" fell outside it
 SNIPPET_AFTER = 280
 SNIPPET_MAX_WINDOWS = 2
 # Bios often go on by first name once the full name has been given:
@@ -142,7 +143,25 @@ translate "Fervo's" into "Fervo Energy".
 - Split the title from the organisation: "founder of Uplift" is title \
 "founder", company "Uplift"; "Assistant Secretary of DOE's Office of \
 Electricity" is title "Assistant Secretary", company "DOE's Office of \
-Electricity". Never leave the organisation inside the title.
+Electricity". Never leave the organisation inside the title. That includes \
+an organisation written in front of the title: "Grist reporter" is title \
+"reporter", company "Grist"; "BBC Science Correspondent" is title "Science \
+Correspondent", company "BBC"; "BNEF specialist in renewable fuels" is \
+company "BNEF"; "Aurora's Head of Consulting" is company "Aurora". When the \
+organisation sits in the middle ("head of Goldman's Sustainable Finance \
+Group"), keep the title as written and still set company "Goldman".
+- The organisation may be named in a different sentence from the title: \
+"a company called Sakuu says it has cracked the code ... I talk with CTO \
+Karl Littau" gives title "CTO", company "Sakuu"; "Nautilus Solar recently \
+celebrated ... We talked with CEO Jim Rice" gives company "Nautilus \
+Solar". Use it only when the text makes clear the post is at that \
+organisation ("its CEO", "the company's CTO", the organisation the episode \
+is about); otherwise leave company null.
+- Each item starts with the show's name in brackets, "[Show: ...]". A show \
+published by an organisation speaks for it: "our Head of Italy" or "joins \
+our team" on "Energy Unplugged by Aurora" means company "Aurora", copied \
+from the show name. Use the show name as the company only for such "our" / \
+"we" wording, never just because someone appears on the show.
 - Several titles at one organisation stay together as written, e.g. \
 "co-founder and CEO". Roles at different organisations are separate entries, \
 one per organisation.
@@ -311,7 +330,7 @@ def _merge(windows: list) -> list:
     return merged
 
 
-def build_snippet(names: list, title: str, description: str) -> str | None:
+def build_snippet(names: list, title: str, description: str, show: str | None = None) -> str | None:
     """The text that could say what this person does, or None if they are
     not named in the episode at all.
 
@@ -340,7 +359,12 @@ def build_snippet(names: list, title: str, description: str) -> str | None:
     for lo, hi in _merge(full + first_only):
         parts.append(_collapse(desc[lo:hi]))
 
-    return ' … '.join(parts) if parts else None
+    if not parts:
+        return None
+    # The show's name, so "our Head of Italy" on a company's own podcast can
+    # name the company — and, being in the snippet, pass the verbatim check.
+    lead = f'[Show: {_collapse(show)}] ' if show and show.strip() else ''
+    return lead + ' … '.join(parts)
 
 
 def snippet_hash(snippet: str) -> str:
@@ -360,7 +384,7 @@ def group_appearances(appearances: list, names_by_host: dict) -> tuple:
     no_mention, items = [], {}
     for app in appearances:
         names = names_by_host.get(app['host_id'], [])
-        snippet = build_snippet(names, app['episode_title'], app['description'])
+        snippet = build_snippet(names, app['episode_title'], app['description'], app.get('podcast_title'))
         if snippet is None:
             no_mention.append(app)
             continue
@@ -687,6 +711,47 @@ def _upsert_extractions(cur, rows: list):
     """, [r + (1,) for r in rows], template='(%s, %s, %s, %s, %s, %s, %s, %s)')
 
 
+def _org_lookups(cur, host_ids: set) -> tuple:
+    """(lookup(normalized_key) -> {'name', 'org_type'} over every known
+    organisation spelling, {host_id: [their organisations' names]})."""
+    cur.execute("""
+        SELECT a.normalized_name, o.name, o.org_type
+        FROM organization_aliases a JOIN organizations o ON o.org_id = a.org_id
+        WHERE NOT o.not_an_org
+    """)
+    known = {key: {'name': name, 'org_type': kind} for key, name, kind in cur.fetchall()}
+    own = {}
+    if host_ids:
+        cur.execute("""
+            SELECT DISTINCT ha.host_id, o.name
+            FROM host_affiliations ha
+            JOIN organization_aliases a ON a.normalized_name = ha.company_key
+            JOIN organizations o ON o.org_id = a.org_id
+            WHERE NOT o.not_an_org AND ha.host_id = ANY(%s)
+        """, (list(host_ids),))
+        for host_id, name in cur.fetchall():
+            own.setdefault(host_id, []).append(name)
+    return known.get, own
+
+
+def with_title_orgs(kept: list, lookup, own_orgs: list) -> list:
+    """A title with no company that names its organisation ("Grist
+    reporter") gets that organisation as its company — see title_orgs.py.
+    The model is told to split these; this catches the ones it doesn't."""
+    out = []
+    companies = {a['company'] for a in kept if a['company']}
+    for a in kept:
+        if a['title'] and not a['company']:
+            found = split_org_from_title(a['title'], lookup, own_orgs)
+            if found and found[0] not in companies:
+                company, title = found
+                a = {**a, 'company': company, 'title': tidy_title(title) if title else None,
+                     'title_kind': a['title_kind'] if title else None}
+                companies.add(company)
+        out.append(a)
+    return out
+
+
 def record_results(cur, pending: list, answers: dict) -> tuple:
     """Write one batch's answers. Does not commit.
 
@@ -699,6 +764,7 @@ def record_results(cur, pending: list, answers: dict) -> tuple:
     (done, affiliations added, retried, values dropped as not verbatim).
     """
     done, retry, hosts, new_rows, dropped_total = [], [], [], [], 0
+    lookup, own_orgs = _org_lookups(cur, {host_id for _, host_id, _, _ in pending})
     for episode_id, host_id, snippet, s_hash in pending:
         key = item_id(host_id, s_hash)
         if key not in answers:
@@ -710,6 +776,7 @@ def record_results(cur, pending: list, answers: dict) -> tuple:
             hosts.append(flags)
             continue
         kept, dropped = verified_affiliations(answer['affiliations'], snippet)
+        kept = with_title_orgs(kept, lookup, own_orgs.get(host_id, []))
         dropped_total += len(dropped)
         done.append(flags)
         new_rows.extend(
