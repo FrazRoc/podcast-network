@@ -397,6 +397,21 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   publisher column; Most-Booked leaves those guests out by default.
   Role kinds come from title wording (`org_stats.ROLE_KINDS`, first match
   wins) — approximate by design.
+- **Politicians are one title at one organisation** (Evan, Sep 2026,
+  `backend/politicians.py`): Representative @ U.S. House, Senator @ U.S.
+  Senate, state roles @ "State of X", city roles @ "City of X" (London's
+  mayor @ Greater London Authority), U.S. cabinet @ their department
+  (deputy/under/assistant secretaries keep their own title), EPA
+  Administrator, FERC Commissioner/Chair. The state comes from the title,
+  the company, or the text around the name; unresolvable ones are left
+  alone. Party labels are dropped from titles. The extractor applies it
+  (even when the company was a place it would otherwise drop), and 309
+  stored roles were rewritten (Sep 2026). "State of X" and "City of X" are
+  government organisations, cities under their state. Pass 2 still to do:
+  non-U.S. politicians (MPs, ministers) and politicians' staff.
+- **"former" lives in the flag, not the title**: a leading "former"/"ex-"
+  is stripped and the role marked former, at extraction and in the data
+  (216 titles, Sep 2026).
 - Not yet: a public company view.
 
 ## Tests

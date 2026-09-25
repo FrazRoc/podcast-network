@@ -59,6 +59,7 @@ from description_cleaner import (  # noqa: E402
 )
 from org_names import normalize_org_name, not_an_organisation  # noqa: E402
 from role_selection import tidy_title  # noqa: E402
+from politicians import normalize_political_roles  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
@@ -424,6 +425,8 @@ _POSSESSIVE_SUFFIX_RE = re.compile(r"[’']s$")
 # substring of the snippet, so the check below is unaffected.
 _LEADING_ARTICLE_RE = re.compile(r'^(?:a|an|the)\s+', re.IGNORECASE)
 
+_LEADING_FORMER_RE = re.compile(r'^\s*(?:former|ex-)\s*', re.IGNORECASE)
+
 _HONORIFIC_ONLY_RE = re.compile(r'^(?:dr|mr|mrs|ms|mx|prof|sir|dame)\.?$', re.IGNORECASE)
 
 
@@ -498,13 +501,29 @@ def verified_affiliations(affiliations: list, snippet: str) -> tuple:
         if pair == (None, None):
             continue
         clean['is_former'] = bool(aff.get('is_former'))
+        # "former CEO" -> CEO, marked former; the flag already says it.
+        if clean['title'] and _LEADING_FORMER_RE.match(clean['title']):
+            clean['title'] = _LEADING_FORMER_RE.sub('', clean['title']).strip() or clean['title']
+            clean['is_former'] = True
         kind = aff.get('title_kind')
         clean['title_kind'] = kind if clean['title'] and kind in ('position', 'description') else None
-        key = tuple(_normalise_for_match(v) if v else None for v in pair) + (clean['is_former'],)
-        if key in seen:
-            continue
-        seen.add(key)
-        kept.append(clean)
+        entries = [clean]
+        # A politician's role becomes one title at one organisation ("Rep." +
+        # "Florida" -> Representative @ U.S. House), read with the raw company
+        # even when it was a place and dropped above (backend/politicians.py).
+        raw_company = _collapse(aff.get('company')) if isinstance(aff.get('company'), str) else None
+        political = normalize_political_roles(clean['title'], raw_company, snippet) if clean['title'] else None
+        if political:
+            entries = [{'title': d['title'], 'company': d['company'],
+                        'is_former': bool(d['is_former'] or clean['is_former']),
+                        'title_kind': 'position'} for d in political]
+        for entry in entries:
+            key = tuple(_normalise_for_match(v) if v else None
+                        for v in (entry['title'], entry['company'])) + (entry['is_former'],)
+            if key in seen:
+                continue
+            seen.add(key)
+            kept.append(entry)
     return _drop_subsumed(kept), dropped
 
 
