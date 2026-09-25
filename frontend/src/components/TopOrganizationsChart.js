@@ -72,7 +72,7 @@ export default function TopOrganizationsChart() {
           <p className="text-xs text-gray-400 mt-3">
             Guests with a current role there; departments, labs and offices count under their parent
             (DOE's offices under DOE, BNEF under Bloomberg). A show's own organisation is inferred from who it
-            books most: {data.house_shows.map(h => `${h.org} on ${h.title}`).join(', ')}.
+            books most.
           </p>
         </>
       )}
