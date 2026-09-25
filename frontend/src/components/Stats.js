@@ -70,11 +70,6 @@ export default function Stats() {
 
         {view === 'people' ? (
           <>
-            <Section title="The Revolving Door"
-              description="Where guests used to work and where they work now, by kind of organisation.">
-              <RevolvingDoorChart />
-            </Section>
-
             <Section title="Most-Booked Organisations"
               description="The organisations whose people turn up most, by how many of them have been guests or how many different shows they've been on.">
               <TopOrganizationsChart />
@@ -83,6 +78,11 @@ export default function Stats() {
             <Section title="What Guests Do"
               description="Guests by the kind of role they hold: founders, executives, investors, academics, journalists and officials.">
               <GuestRolesChart />
+            </Section>
+
+            <Section title="The Revolving Door"
+              description="Where guests used to work and where they work now, by kind of organisation.">
+              <RevolvingDoorChart />
             </Section>
 
             <Section title="Guest Mix by Year"

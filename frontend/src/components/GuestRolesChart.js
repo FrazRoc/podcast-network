@@ -21,12 +21,15 @@ export default function GuestRolesChart() {
 
   const peak = Math.max(1, ...data.kinds.map(k => data.overall[k] || 0));
   const rows = data.shows.map(s => ({ id: s.podcast_id, label: s.title, counts: s.counts, total: s.total }));
+  // Most guests first; the catch-all "other" stays at the bottom.
+  const byCount = [...data.kinds].sort((a, b) =>
+    (a === 'other') - (b === 'other') || (data.overall[b] || 0) - (data.overall[a] || 0));
 
   return (
     <div>
       <p className="text-xs font-medium text-gray-500 mb-2">Across the network · {data.total.toLocaleString()} guests</p>
       <div className="space-y-1 mb-6">
-        {data.kinds.map(k => (
+        {byCount.map(k => (
           <div key={k} className="flex items-center gap-2">
             <span className="w-40 sm:w-52 flex-shrink-0 text-xs text-gray-700 text-right">{data.labels[k]}</span>
             <div className="flex-1 h-4">

@@ -597,10 +597,14 @@ async def stats_revolving_door():
 
 
 @app.get("/api/stats/top-organizations")
-async def stats_top_organizations(by: str = "guests", exclude_in_house: bool = True):
-    """Most-booked organisations, sub-organisations counted under their parent."""
+async def stats_top_organizations(by: str = "guests", exclude_in_house: bool = True,
+                                  org_type: str = "", limit: int = 15, offset: int = 0):
+    """Most-booked organisations, sub-organisations counted under their
+    parent; optionally one type of organisation, a page at a time."""
     return _org_stat(org_stats.top_organisations, by="shows" if by == "shows" else "guests",
-                     exclude_in_house=exclude_in_house)
+                     exclude_in_house=exclude_in_house,
+                     org_type=org_type if org_type in org_stats.ORG_TYPES + ('none',) else None,
+                     limit=max(1, min(limit, 100)), offset=max(0, offset))
 
 
 @app.get("/api/stats/guest-mix-by-year")

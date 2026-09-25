@@ -7,25 +7,48 @@ import OrgLogo from './OrgLogo';
 // guests or by distinct shows, with sub-organisations under their parent.
 // By default a guest on their own organisation's show (BNEF analysts on
 // Switched On) isn't counted — that's the house, not a booking.
+const PAGE = 15;
+// Filter chips, in the order the type colours are listed.
+const TYPE_ORDER = ['company', 'investor', 'nonprofit', 'research', 'academic', 'government', 'media', 'association'];
+
 export default function TopOrganizationsChart() {
   const [by, setBy] = useState('guests');
   const [excludeHouse, setExcludeHouse] = useState(true);
+  const [orgType, setOrgType] = useState('');
   const [data, setData] = useState(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(null);
+
+  const url = (offset) => `${API_BASE_URL}/api/stats/top-organizations?by=${by}&exclude_in_house=${excludeHouse}` +
+    `&org_type=${orgType}&limit=${PAGE}&offset=${offset}`;
 
   useEffect(() => {
     setData(null);
-    fetch(`${API_BASE_URL}/api/stats/top-organizations?by=${by}&exclude_in_house=${excludeHouse}`)
+    fetch(url(0))
       .then(r => { if (!r.ok) throw new Error(`API error ${r.status}`); return r.json(); })
       .then(setData)
       .catch(e => setError(e.message));
-  }, [by, excludeHouse]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [by, excludeHouse, orgType]);
+
+  const loadMore = () => {
+    setLoadingMore(true);
+    fetch(url(data.items.length))
+      .then(r => { if (!r.ok) throw new Error(`API error ${r.status}`); return r.json(); })
+      .then(d => setData(prev => ({ ...d, items: [...prev.items, ...d.items] })))
+      .catch(e => setError(e.message))
+      .finally(() => setLoadingMore(false));
+  };
 
   if (error) return <p className="text-sm text-red-500">Couldn't load this chart: {error}</p>;
 
   const value = o => (by === 'shows' ? o.shows : o.guests);
-  const peak = data ? Math.max(1, ...data.items.map(value)) : 1;
+  // The first row is the largest of everything loaded, so bars keep their
+  // scale as more rows are added.
+  const peak = data && data.items.length ? Math.max(1, value(data.items[0])) : 1;
   const types = data ? [...new Set(data.items.map(o => o.org_type).filter(Boolean))] : [];
+  const counts = data?.type_counts || {};
+  const allCount = Object.values(counts).reduce((a, b) => a + b, 0);
 
   return (
     <div>
@@ -42,6 +65,17 @@ export default function TopOrganizationsChart() {
           <input type="checkbox" checked={excludeHouse} onChange={e => setExcludeHouse(e.target.checked)} />
           Leave out guests on their own organisation's show
         </label>
+      </div>
+      <div className="flex flex-wrap gap-1.5 mb-4 text-xs">
+        {[['', 'All', allCount], ...TYPE_ORDER.map(t => [t, ORG_TYPE_LABELS[t], counts[t] || 0])].map(([t, label, n]) => (
+          <button key={t || 'all'} onClick={() => setOrgType(t)} disabled={t && !n && orgType !== t}
+            className={`flex items-center gap-1.5 px-2 py-1 rounded-full border disabled:opacity-40 ${
+              orgType === t ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+            {t && <span className="w-2 h-2 rounded-sm" style={{ background: ORG_TYPE_COLORS[t] }} />}
+            {label}
+            {data && <span className={orgType === t ? 'text-gray-300' : 'text-gray-400'}>{n}</span>}
+          </button>
+        ))}
       </div>
 
       {!data ? <p className="text-sm text-gray-400">Loading…</p> : (
@@ -66,8 +100,16 @@ export default function TopOrganizationsChart() {
               </div>
             ))}
           </div>
+          {data.items.length === 0 && <p className="text-sm text-gray-400">No organisations of this type yet.</p>}
+          {data.items.length < data.total && (
+            <button onClick={loadMore} disabled={loadingMore}
+              className="mt-3 text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50">
+              {loadingMore ? 'Loading…' : `Load ${Math.min(PAGE, data.total - data.items.length)} more`}
+              <span className="text-gray-400"> · {data.items.length} of {data.total}</span>
+            </button>
+          )}
           <div className="flex flex-wrap gap-3 mt-3">
-            {types.map(t => (
+            {!orgType && types.map(t => (
               <span key={t} className="flex items-center gap-1.5 text-xs text-gray-500">
                 <span className="w-2.5 h-2.5 rounded-sm" style={{ background: ORG_TYPE_COLORS[t] }} />{ORG_TYPE_LABELS[t]}
               </span>

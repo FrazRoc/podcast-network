@@ -146,11 +146,14 @@ def house_organisations(cur, min_guests: int = 5, min_share: float = 0.1) -> dic
     return house
 
 
-def top_organisations(cur, by: str = 'guests', exclude_in_house: bool = True, limit: int = 25) -> dict:
+def top_organisations(cur, by: str = 'guests', exclude_in_house: bool = True, limit: int = 25,
+                      offset: int = 0, org_type: str | None = None) -> dict:
     """Organisations (sub-organisations counted under their top parent) by
     distinct guests with a current role there, or by distinct shows those
     guests appeared on. exclude_in_house drops a guest's appearances on
-    their own organisation's show (see house_organisations)."""
+    their own organisation's show (see house_organisations). org_type keeps
+    one kind of organisation (by the top parent's type); limit/offset page
+    through the ranking, and total / type_counts cover all of it."""
     house = house_organisations(cur)
     cur.execute(_GUEST_ROLES + """
         SELECT DISTINCT podcast_id, host_id, top_id, top_name, org_type
@@ -172,11 +175,18 @@ def top_organisations(cur, by: str = 'guests', exclude_in_house: bool = True, li
     for r in cur.fetchall():
         if r['org_type']:
             kind[r['org_id']] = r['org_type']
-    ids = sorted(guests, key=lambda o: (-(len(shows[o]) if by == 'shows' else len(guests[o])), names[o]))[:limit]
+    ranked = sorted(guests, key=lambda o: (-(len(shows[o]) if by == 'shows' else len(guests[o])), names[o]))
+    type_counts = defaultdict(int)
+    for o in ranked:
+        type_counts[kind.get(o) or 'none'] += 1
+    if org_type:
+        ranked = [o for o in ranked if (kind.get(o) or 'none') == org_type]
+    ids = ranked[offset:offset + limit]
     cur.execute("SELECT podcast_id, title FROM podcasts WHERE podcast_id = ANY(%s)", (list(house),))
     titles = {r['podcast_id']: r['title'] for r in cur.fetchall()}
     return {
-        'by': by, 'exclude_in_house': exclude_in_house,
+        'by': by, 'exclude_in_house': exclude_in_house, 'org_type': org_type,
+        'total': len(ranked), 'offset': offset, 'type_counts': dict(type_counts),
         'items': [{'org_id': o, 'name': names[o], 'org_type': kind.get(o), 'guests': len(guests[o]),
                    'shows': len(shows[o]), 'in_house_guests': len(in_house[o] - guests[o]) if exclude_in_house else 0}
                   for o in ids],
