@@ -354,6 +354,16 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   merged away and reloads the queue; skipped cards stay hidden until
   Refresh. (First version left those cards in place, and acting on them
   failed with "Company not found".)
+- **Ambiguous spellings are checked before a merge** (Sep 25 2026, after
+  "aurora" had been merged into Aurora Solar and pulled 21 Aurora Energy
+  Research people with it; Ceres and EDF were the same shape). Every merge
+  in Company Admin first calls `GET .../{keep}/merge/{drop}/preview`; any
+  spelling `org_names.ambiguous_spelling()` flags — one non-acronym word
+  that is only the first word of a longer name — is listed in a dialog,
+  unticked by default. Unticked spellings are sent as `split_alias_ids` and
+  become their own companies instead of moving. It flags Harvard/Fervo-style
+  names too; tick those. A spelling already merged wrongly can be split off
+  with the ✕ on its chip (`POST .../{org_id}/aliases/{alias_id}/split`).
 - **Role lines show the organisation's name** (`organizations.name`), not
   the episode's wording, on the public card, People list and Company Admin —
   so a merge or rename reaches every role line at once. People Admin's role

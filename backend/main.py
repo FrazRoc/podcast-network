@@ -25,7 +25,7 @@ from description_cleaner import (
     coarse_source, strip_html,
 )
 from role_selection import pick_current_role, format_for_display
-from org_names import normalize_org_name
+from org_names import normalize_org_name, ambiguous_spelling
 import org_stats
 from org_suggestions import refresh_suggestions
 
@@ -3390,10 +3390,78 @@ async def update_company(org_id: int, body: CompanyUpdateRequest):
         conn.close()
 
 
+class MergeCompaniesRequest(BaseModel):
+    # Spellings of the dropped company NOT to carry across: each becomes its
+    # own company instead (see ambiguous_spelling).
+    split_alias_ids: Optional[list[int]] = None
+
+
+def _spellings_moving(cur, keep: dict, drop_id: int) -> list:
+    """The dropped company's spellings, each flagged when it's ambiguous as a
+    spelling of the company it would join."""
+    cur.execute("""
+        SELECT a.alias_id, a.alias_name,
+               (SELECT COUNT(*) FROM host_affiliations ha WHERE ha.company_key = a.normalized_name) AS roles
+        FROM organization_aliases a WHERE a.org_id = %s ORDER BY roles DESC, a.alias_name
+    """, (drop_id,))
+    return [{**r, 'ambiguous': ambiguous_spelling(r['alias_name'], keep['name'])} for r in cur.fetchall()]
+
+
+def _split_alias(cur, alias_id: int) -> int:
+    """Move one spelling (and every role using it) into a new company of its own."""
+    cur.execute("SELECT alias_name, org_id FROM organization_aliases WHERE alias_id = %s", (alias_id,))
+    a = cur.fetchone()
+    if not a:
+        raise HTTPException(status_code=404, detail="Spelling not found")
+    cur.execute("INSERT INTO organizations (name) VALUES (%s) RETURNING org_id", (a['alias_name'],))
+    new_id = cur.fetchone()['org_id']
+    cur.execute("UPDATE organization_aliases SET org_id = %s, source = 'manual' WHERE alias_id = %s", (new_id, alias_id))
+    return new_id
+
+
+@app.get("/api/admin/companies/{keep_id}/merge/{drop_id}/preview", dependencies=[Depends(verify_admin)])
+async def merge_companies_preview(keep_id: int, drop_id: int):
+    """What a merge would carry across, with ambiguous spellings flagged, so
+    the page can ask before "Aurora" becomes a spelling of Aurora Solar."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT org_id, name FROM organizations WHERE org_id = %s", (keep_id,))
+        keep = cur.fetchone()
+        if not keep:
+            raise HTTPException(status_code=404, detail="Company not found")
+        return {"keep": keep, "spellings": _spellings_moving(cur, keep, drop_id)}
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.post("/api/admin/companies/{org_id}/aliases/{alias_id}/split", dependencies=[Depends(verify_admin)])
+async def split_company_alias(org_id: int, alias_id: int):
+    """Split one spelling off into a company of its own — the fix when a
+    merge carried across a word that means another organisation too."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT COUNT(*) AS n FROM organization_aliases WHERE org_id = %s", (org_id,))
+        if cur.fetchone()['n'] < 2:
+            raise HTTPException(status_code=400, detail="A company's only spelling can't be split off")
+        cur.execute("SELECT 1 FROM organization_aliases WHERE alias_id = %s AND org_id = %s", (alias_id, org_id))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Spelling not found on this company")
+        new_id = _split_alias(cur, alias_id)
+        conn.commit()
+        return {"success": True, "org_id": new_id}
+    finally:
+        cur.close()
+        conn.close()
+
+
 @app.post("/api/admin/companies/{keep_id}/merge/{drop_id}", dependencies=[Depends(verify_admin)])
-async def merge_companies(keep_id: int, drop_id: int):
+async def merge_companies(keep_id: int, drop_id: int, body: Optional[MergeCompaniesRequest] = None):
     """Fold one organisation into another. Every spelling of the dropped one
-    becomes an alias of the survivor, so all its roles re-link at once."""
+    becomes an alias of the survivor, so all its roles re-link at once —
+    except any listed in split_alias_ids, which become companies of their own."""
     if keep_id == drop_id:
         raise HTTPException(status_code=400, detail="Cannot merge a company into itself")
     conn = get_db_connection()
@@ -3405,6 +3473,11 @@ async def merge_companies(keep_id: int, drop_id: int):
             raise HTTPException(status_code=404, detail="One or both companies not found")
         keep, drop = rows[keep_id], rows[drop_id]
         keep_family = set(_org_family(cur, keep_id))
+
+        split = set((body.split_alias_ids if body else None) or [])
+        cur.execute("SELECT alias_id FROM organization_aliases WHERE org_id = %s", (drop_id,))
+        for alias_id in [r['alias_id'] for r in cur.fetchall() if r['alias_id'] in split]:
+            _split_alias(cur, alias_id)
 
         cur.execute("UPDATE organization_aliases SET org_id = %s, "
                     "source = CASE WHEN source = 'auto' THEN 'merge' ELSE source END "

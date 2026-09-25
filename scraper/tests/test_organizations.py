@@ -615,3 +615,66 @@ def test_wikimedia_photos_are_allowed_through_the_proxy():
     assert main.is_allowed_image_url('https://commons.wikimedia.org/wiki/Special:FilePath/Jane.jpg?width=400')
     assert main.is_allowed_image_url('https://upload.wikimedia.org/wikipedia/commons/a/ab/Jane.jpg')
     assert not main.is_allowed_image_url('https://example.com/x.png')
+
+
+# ------------------------------------------------------------------
+# Ambiguous spellings on merge ("Aurora" is Aurora Solar *and* Aurora
+# Energy Research)
+# ------------------------------------------------------------------
+
+@pytest.mark.parametrize('alias, org, flagged', [
+    ('Aurora', 'Aurora Solar', True), ('Ceres', 'Ceres Power', True), ('Shell', 'Shell Oil Company', True),
+    ('MIT', 'Massachusetts Institute of Technology', False), ('SEIA', 'Solar Energy Industries Association', False),
+    ('Aurora Solar', 'Aurora Solar', False), ('2150', '2150 VC', False), ('BNEF', 'BloombergNEF', False),
+])
+def test_ambiguous_spelling(alias, org, flagged):
+    from org_names import ambiguous_spelling
+    assert ambiguous_spelling(alias, org) is flagged
+
+
+class TestAmbiguousMerge:
+    def _setup(self, org_db):
+        cur = org_db.cursor()
+        _role(cur, 'Ann', 'Aurora Solar', 'CEO')
+        _role(cur, 'Bob', 'Aurora', 'Project Leader')          # an Aurora Energy Research analyst
+        apply_sync(cur, plan_sync(cur))
+        org_db.commit()
+        return cur
+
+    def test_preview_flags_the_bare_word(self, org_db, monkeypatch):
+        cur = self._setup(org_db)
+        r = _run(org_db, monkeypatch, 'merge_companies_preview', _org_id(cur, 'Aurora Solar'), _org_id(cur, 'Aurora'))
+        assert [(s['alias_name'], s['ambiguous']) for s in r['spellings']] == [('Aurora', True)]
+
+    def test_merge_can_leave_a_spelling_behind(self, org_db, monkeypatch):
+        import main
+        cur = self._setup(org_db)
+        solar, bare = _org_id(cur, 'Aurora Solar'), _org_id(cur, 'Aurora')
+        cur.execute("SELECT alias_id FROM organization_aliases WHERE org_id = %s", (bare,))
+        alias_id = cur.fetchone()[0]
+        org_db.commit()
+        _run(org_db, monkeypatch, 'merge_companies', solar, bare, main.MergeCompaniesRequest(split_alias_ids=[alias_id]))
+        cur.execute("SELECT o.name FROM organization_aliases a JOIN organizations o USING (org_id) WHERE a.alias_id = %s", (alias_id,))
+        assert cur.fetchone()[0] == 'Aurora'                   # its own company, not Aurora Solar's
+        people = _run(org_db, monkeypatch, 'get_company', solar)['people']
+        assert [p['name'] for p in people] == ['Ann Test']
+
+    def test_split_off_after_the_fact(self, org_db, monkeypatch):
+        cur = self._setup(org_db)
+        solar, bare = _org_id(cur, 'Aurora Solar'), _org_id(cur, 'Aurora')
+        _run(org_db, monkeypatch, 'merge_companies', solar, bare)   # the old behaviour: carried across
+        cur.execute("SELECT alias_id FROM organization_aliases WHERE normalized_name = 'aurora'")
+        alias_id = cur.fetchone()[0]
+        org_db.commit()
+        r = _run(org_db, monkeypatch, 'split_company_alias', solar, alias_id)
+        assert [p['name'] for p in _run(org_db, monkeypatch, 'get_company', r['org_id'])['people']] == ['Bob Test']
+        assert [p['name'] for p in _run(org_db, monkeypatch, 'get_company', solar)['people']] == ['Ann Test']
+
+    def test_only_spelling_cannot_be_split(self, org_db, monkeypatch):
+        from fastapi import HTTPException
+        cur = self._setup(org_db)
+        solar = _org_id(cur, 'Aurora Solar')
+        cur.execute("SELECT alias_id FROM organization_aliases WHERE org_id = %s", (solar,))
+        with pytest.raises(HTTPException) as e:
+            _run(org_db, monkeypatch, 'split_company_alias', solar, cur.fetchone()[0])
+        assert e.value.status_code == 400
