@@ -14,6 +14,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 import os
 import json
+import urllib.parse
 import httpx
 from urllib.parse import urlparse
 from dotenv import load_dotenv
@@ -3257,13 +3258,21 @@ async def update_company(org_id: int, body: CompanyUpdateRequest):
             raise HTTPException(status_code=400, detail=f"org_type must be one of {', '.join(ORG_TYPES)}")
         sets.append("org_type = %(org_type)s"); params['org_type'] = t
     if 'website_domain' in fields:
-        d = (fields['website_domain'] or '').strip().lower()
-        d = re.sub(r'^https?://', '', d).split('/')[0].removeprefix('www.') or None
+        # A bare domain ("wartsila.com") or a full link to the organisation's
+        # own page ("https://www.wartsila.com/energy"): the domain is kept for
+        # the logo, the link only when it has a path.
+        raw = (fields['website_domain'] or '').strip()
+        with_scheme = raw if re.match(r'^https?://', raw, re.I) else f'https://{raw}'
+        parts = urllib.parse.urlsplit(with_scheme) if raw else None
+        d = (parts.hostname or '').lower().removeprefix('www.') or None if parts else None
+        url = with_scheme if parts and parts.path.strip('/') else None
         sets.append("website_domain = %(website_domain)s"); params['website_domain'] = d
+        sets.append("website_url = %(website_url)s"); params['website_url'] = url
         # Changed here, so scraper/enrich.py never overwrites it (the form sends
         # the website on every save, so only a changed value counts; cleared =
-        # open to enrichment again).
+        # open to enrichment again). SET sees the row as it was before.
         sets.append("""website_source = CASE WHEN website_domain IS NOT DISTINCT FROM %(website_domain)s
+                                                AND website_url IS NOT DISTINCT FROM %(website_url)s
                                            THEN website_source
                                            WHEN %(website_domain)s IS NULL THEN NULL ELSE 'admin' END""")
     if 'not_an_org' in fields:

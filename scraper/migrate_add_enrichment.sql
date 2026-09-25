@@ -38,3 +38,8 @@ ALTER TABLE hosts
     ADD COLUMN IF NOT EXISTS field_sources  JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 COMMIT;
+
+-- A full link when the organisation's page isn't its domain's home page
+-- ("https://www.wartsila.com/energy" for Wärtsilä Energy). website_domain
+-- stays the bare domain, which is what the logo lookup uses.
+ALTER TABLE organizations ADD COLUMN IF NOT EXISTS website_url TEXT;

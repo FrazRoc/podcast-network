@@ -110,7 +110,8 @@ const WEBSITE_SOURCE = {
 // Facts found outside the episode text: links, where it's based, when founded.
 function OrgFacts({ org }) {
   const links = [
-    org.website_domain && { href: `https://${org.website_domain}`, label: org.website_domain,
+    org.website_domain && { href: org.website_url || `https://${org.website_domain}`,
+      label: (org.website_url || org.website_domain).replace(/^https?:\/\/(www\.)?/, ''),
       note: WEBSITE_SOURCE[org.website_source] },
     org.wikipedia_url && { href: org.wikipedia_url, label: 'Wikipedia' },
     org.linkedin_url && { href: org.linkedin_url, label: 'LinkedIn' },
@@ -162,7 +163,7 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
         if (token !== latest.current) return;
         setData(d);
         setForm({
-          name: d.org.name, org_type: d.org.org_type || '', website_domain: d.org.website_domain || '',
+          name: d.org.name, org_type: d.org.org_type || '', website_domain: d.org.website_url || d.org.website_domain || '',
           parent: d.org.parent_org_id ? { org_id: d.org.parent_org_id, name: d.org.parent_name } : null,
         });
       })
@@ -260,7 +261,7 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Website</label>
-            <input type="text" value={form.website_domain} placeholder="example.com"
+            <input type="text" value={form.website_domain} placeholder="example.com or a full link"
               onChange={e => setForm(f => ({ ...f, website_domain: e.target.value }))}
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none" />
           </div>

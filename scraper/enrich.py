@@ -139,7 +139,11 @@ def host_of(url: str | None) -> str | None:
         h = urllib.parse.urlparse(url if '//' in url else '//' + url).hostname
     except ValueError:
         return None
-    return h.lower().removeprefix('www.') if h else None
+    if not h:
+        return None
+    h = h.lower().removeprefix('www.')
+    # "ar.enec.gov.ae" -> "enec.gov.ae": a language edition of the site.
+    return re.sub(r'^(ar|en|fr|de|es|it|pt|ja|zh|ko|ru|nl|sv|da|no|fi)\.(?=[^.]+\.[^.]+)', '', h)
 
 
 def domain_exactly_names(domain: str, name: str) -> bool:
@@ -188,7 +192,13 @@ def wd_claim_values(entity: dict, prop: str) -> list:
     return [v for _, v in out]
 
 
-def wd_ids(entity: dict, prop: str) -> list:
+def wd_ids(entity: dict, prop: str, current_only: bool = False) -> list:
+    if current_only:
+        # Skip claims with an end date: General Atomics' parent *was* General Dynamics.
+        claims = [c for c in entity.get('claims', {}).get(prop, [])
+                  if c.get('rank') != 'deprecated' and 'P582' not in c.get('qualifiers', {})]
+        return [c['mainsnak']['datavalue']['value']['id'] for c in claims
+                if isinstance(c.get('mainsnak', {}).get('datavalue', {}).get('value'), dict)]
     return [v['id'] for v in wd_claim_values(entity, prop) if isinstance(v, dict) and 'id' in v]
 
 
@@ -308,11 +318,59 @@ def clearbit_domain(fetch: Fetcher, name: str) -> str | None:
     return None
 
 
+def _load_words() -> set:
+    try:
+        with open('/usr/share/dict/words') as f:
+            return {w.strip().lower() for w in f}
+    except OSError:
+        return set()
+
+
+_WORDS = _load_words()
+
+
 def one_word(name: str) -> bool:
-    return len(re.sub(r'^the\s+', '', name.strip(), flags=re.I).split()) == 1
+    """A one-word name that's an ordinary word or very short ("Ember",
+    "Indigo", "Mars", "ABB"): Clearbit's guess for these is often another
+    company. Coined brand names ("Invenergy", "Nexamp") are safe."""
+    words = re.sub(r'^the\s+', '', name.strip(), flags=re.I).split()
+    if len(words) != 1:
+        return False
+    w = squash(words[0])
+    return len(w) <= 5 or w in _WORDS or not _WORDS
 
 
-def plan_orgs(cur, fetch: Fetcher, limit: int | None = None) -> tuple:
+def trusted_entity(org: dict, entities: list, note_domains, clearbit: str | None):
+    """The Wikidata entry that is this organisation, or None. Search finds
+    namesakes ("UxC" a railway section, "The Telegraph" the Indian paper), so:
+    one whose website agrees with the show notes or Clearbit is trusted;
+    otherwise only the sole exact-name entry, with a Wikipedia article, for a
+    name that isn't a short acronym."""
+    # The show notes, when they have a link, are the only thing to check
+    # against: Clearbit's guess can agree with a namesake ("Terra" -> the
+    # Brazilian portal, while the show linked terra.do).
+    ours = {registrable(d) for d in note_domains} if note_domains else \
+        ({registrable(clearbit)} if clearbit else set())
+
+    def sites(e):
+        return {registrable(h) for h in (host_of(v) for v in wd_claim_values(e, 'P856') if isinstance(v, str)) if h}
+
+    for e in entities:
+        if ours and sites(e) & ours:
+            return e
+    if len(entities) != 1:
+        return None
+    e = entities[0]
+    if ours and sites(e) and not (sites(e) & ours):
+        return None                             # a different organisation's website
+    acronym = len(squash(org['name'])) <= 5 and org['name'].strip().upper() == org['name'].strip()
+    if acronym or 'enwiki' not in e.get('sitelinks', {}):
+        return None
+    return e
+
+
+def plan_orgs(cur, fetch: Fetcher, limit: int | None = None, manual: dict | None = None) -> tuple:
+    manual = manual or {}
     wd = Wikidata(fetch)
     cur.execute("""
         SELECT o.org_id, o.name, o.org_type, o.parent_org_id, o.website_domain, o.website_source, o.wikidata_id,
@@ -342,7 +400,7 @@ def plan_orgs(cur, fetch: Fetcher, limit: int | None = None) -> tuple:
     # Labels for the things claims point at (country, HQ, parent, types).
     ref_ids = set()
     for e in ents.values():
-        for p in ('P17', 'P159', 'P31', 'P749', 'P127'):
+        for p in ('P17', 'P159', 'P31', 'P749'):
             ref_ids.update(wd_ids(e, p))
     refs = wd.entities(list(ref_ids))
 
@@ -355,7 +413,8 @@ def plan_orgs(cur, fetch: Fetcher, limit: int | None = None) -> tuple:
     for i, o in enumerate(orgs):
         if i and i % 250 == 0:
             log.info('clearbit %d/%d (%d requests)', i, len(orgs), fetch.requests)
-        entity = next((ents[q] for q in cands[o['org_id']] if q in ents and is_org(ents[q])), None)
+        entity = trusted_entity(o, [ents[q] for q in cands[o['org_id']] if q in ents and is_org(ents[q])],
+                                notes.get(o['org_id']), clearbit_domain(fetch, o['name']))
         facts = {}
         wd_site = None
         if entity:
@@ -390,7 +449,9 @@ def plan_orgs(cur, fetch: Fetcher, limit: int | None = None) -> tuple:
                 'bluesky_handle': bs[0] if bs else None,
                 'commons_logo_url': commons_url(logo[0]) if logo else None,
                 'wd_description': desc,
-                'wd_parents': wd_ids(entity, 'P749') + wd_ids(entity, 'P127'),
+                # "parent organisation" only: "owned by" lists shareholders
+                # (BlackRock "owns" Walmart), which is not a parent.
+                'wd_parents': wd_ids(entity, 'P749', current_only=True),
             }
             if not o['org_type']:
                 t = type_from_description(desc)
@@ -432,10 +493,29 @@ def plan_orgs(cur, fetch: Fetcher, limit: int | None = None) -> tuple:
         plan.append({'org_id': o['org_id'], 'name': o['name'], 'people': o['people'], 'org_type': o['org_type'],
                      'parent_org_id': o['parent_org_id'], 'website': website, 'website_source': source,
                      'current_website': o['website_domain'], **facts})
+    # Decisions made by hand after a dry run (--manual), by organisation name:
+    #   websites     {name: domain or full link}
+    #   no_parent    [name, …]   Wikidata's parent is wrong or out of date
+    #   no_wikidata  [name, …]   the Wikidata match is another organisation
+    for p in plan:
+        if p['name'] in manual.get('no_wikidata', []):
+            for f in ('wikidata_id', 'country', 'hq_city', 'hq_lat', 'hq_lon', 'founded_year', 'wikipedia_url', 'linkedin_url',
+                      'twitter_handle', 'bluesky_handle', 'commons_logo_url', 'wd_parents', 'wd_description'):
+                p.pop(f, None)
+            # …and so is a type read from its description: keep the one it had.
+            p['org_type'] = next((o['org_type'] for o in orgs if o['org_id'] == p['org_id']), None)
+        site = manual.get('websites', {}).get(p['name'])
+        if site:
+            full = site if re.match(r'^https?://', site) else None
+            p.update(website=host_of(site) if full else site.lower(), website_url=full if full and urllib.parse.urlsplit(full).path.strip('/') else None,
+                     website_source='manual')
+            review[:] = [r for r in review if r['org_id'] != p['org_id']]
     # 3. Parent links where Wikidata names a parent we also matched.
     by_q = {p['wikidata_id']: p for p in plan if p.get('wikidata_id')}
     for p in plan:
         if p['parent_org_id'] or not p.get('wd_parents'):
+            continue
+        if p['name'] in manual.get('no_parent', []):
             continue
         parent = next((by_q[q] for q in p['wd_parents'] if q in by_q and by_q[q]['org_id'] != p['org_id']), None)
         if parent:
@@ -452,8 +532,9 @@ def apply_orgs(conn, plan: list) -> Counter:
     for p in plan:
         sets, params = [], {'id': p['org_id']}
         if p.get('website') and not p.get('current_website'):
-            sets += ['website_domain = %(website)s', 'website_source = %(website_source)s']
-            params.update(website=p['website'], website_source=p['website_source'])
+            sets += ['website_domain = %(website)s', 'website_source = %(website_source)s',
+                     'website_url = %(website_url)s']
+            params.update(website=p['website'], website_source=p['website_source'], website_url=p.get('website_url'))
             stats['website'] += 1
             stats['website_' + p['website_source']] += 1
         if p.get('wikidata_id') and p['wikidata_id'] not in taken:
@@ -617,6 +698,7 @@ def plan_people_wiki(cur, fetch: Fetcher, limit: int | None = None) -> tuple:
     people = cur.fetchall()
     if limit:
         people = people[:limit]
+    fetch.many([Wikidata.search_url(f"{p['first_name']} {p['last_name']}") for p in people])
     cands = {}
     for i, p in enumerate(people):
         if i and i % 250 == 0:
@@ -625,6 +707,7 @@ def plan_people_wiki(cur, fetch: Fetcher, limit: int | None = None) -> tuple:
         cands[p['host_id']] = [h['id'] for h in wd.search(name)
                                if squash(h.get('label')) == squash(name)
                                or any(squash(a) == squash(name) for a in h.get('aliases', []))]
+    wd.prefetch_entities([q for qs in cands.values() for q in qs])
     ents = wd.entities([q for qs in cands.values() for q in qs])
     refs = wd.entities(list({q for e in ents.values() for prop in ('P108', 'P39', 'P463', 'P1416', 'P102')
                              for q in wd_ids(e, prop)}))
@@ -689,13 +772,15 @@ def main():
     ap.add_argument('--cache', default=os.path.join(os.path.dirname(os.path.abspath(__file__)), '.enrich_cache'))
     ap.add_argument('--limit', type=int, help='only the first N (most-booked) — for trying it out')
     ap.add_argument('--apply', action='store_true', help='write the plan to the database')
+    ap.add_argument('--manual', help='orgs: JSON of hand decisions (websites / no_parent / no_wikidata)')
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
     conn = psycopg2.connect(DB, cursor_factory=RealDictCursor)
     cur = conn.cursor()
     fetch = Fetcher(args.cache)
     if args.command == 'orgs':
-        plan, review = plan_orgs(cur, fetch, args.limit)
+        manual = json.load(open(args.manual)) if args.manual else {}
+        plan, review = plan_orgs(cur, fetch, args.limit, manual)
     elif args.command == 'people-links':
         plan, review = plan_people_links(cur)
     else:

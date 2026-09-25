@@ -329,8 +329,22 @@ class TestCompanyEndpoints:
         cur = self._setup(org_db)
         acme = _org_id(cur, 'Acme')
         _run(org_db, monkeypatch, 'update_company', acme, main_body(website_domain='https://www.acme.com/about'))
-        cur.execute("SELECT website_domain FROM organizations WHERE org_id = %s", (acme,))
-        assert cur.fetchone()[0] == 'acme.com'
+        cur.execute("SELECT website_domain, website_url, website_source FROM organizations WHERE org_id = %s", (acme,))
+        # The domain for the logo; the full link because it points at a page.
+        assert cur.fetchone() == ('acme.com', 'https://www.acme.com/about', 'admin')
+        _run(org_db, monkeypatch, 'update_company', acme, main_body(website_domain='acme.com'))
+        cur.execute("SELECT website_domain, website_url FROM organizations WHERE org_id = %s", (acme,))
+        assert cur.fetchone() == ('acme.com', None)
+
+    def test_saving_other_fields_keeps_an_enriched_website_unmarked(self, org_db, monkeypatch):
+        cur = self._setup(org_db)
+        acme = _org_id(cur, 'Acme')
+        cur.execute("UPDATE organizations SET website_domain = 'acme.com', website_source = 'wikidata' WHERE org_id = %s", (acme,))
+        org_db.commit()
+        # The form resends the unchanged website with every save.
+        _run(org_db, monkeypatch, 'update_company', acme, main_body(website_domain='acme.com', org_type='company'))
+        cur.execute("SELECT website_source FROM organizations WHERE org_id = %s", (acme,))
+        assert cur.fetchone()[0] == 'wikidata'
 
     def _refresh(self, org_db):
         from org_suggestions import refresh_suggestions

@@ -47,7 +47,8 @@ def test_type_from_description(desc, kind):
 
 
 def test_one_word():
-    assert one_word('Terra') and one_word('The Guardian') and not one_word('Fervo Energy')
+    assert one_word('Terra') and one_word('The Guardian') and one_word('Ember')
+    assert not one_word('Fervo Energy') and not one_word('Invenergy') and not one_word('Nexamp')
 
 
 class FakeCursor:
