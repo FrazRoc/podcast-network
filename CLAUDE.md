@@ -595,6 +595,13 @@ everyone's current role (~6 s):
   `process_all_pending` used to fill with the scrape time). Diagnostics
   uses it: **"missing new episodes"** = Apple has newer (scanner problem);
   **"quiet"** = overdue by rhythm and Apple has nothing newer (show paused).
+- **Retitled episodes (fixed Sep 25 2026)**: `insert_episode` upserts on
+  (podcast_id, title), so an episode the show had retitled clashed on the
+  unique `apple_episode_id` — and since every episode shared one
+  transaction, that one error aborted it and the run saved *none* of the
+  show's new episodes, every run (Climate CEOs, Reversing Climate Change).
+  It now updates the row with that Apple id first (title included), and
+  each episode runs in its own SAVEPOINT.
 - **Overdue shows**: `_add_publishing_rhythm()` takes the median gap of each
   show's last 20 episodes; overdue past 3 gaps (min 21 days), "ended?" past
   15 gaps (min 180 days). Also a sortable "Last ep." column on the coverage

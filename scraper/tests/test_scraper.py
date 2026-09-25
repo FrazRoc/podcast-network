@@ -153,3 +153,24 @@ class TestComputeMatchGate:
         key_of = pick_title_key(feed + stored)
         _, _, _, skip = compute_match_gate(stored, feed, key_of)
         assert skip is False
+
+
+class TestInsertEpisodeRetitled:
+    """A retitled episode (same Apple id, new title) updates its row instead
+    of failing — and a failure can't take later episodes down with it."""
+
+    def _scraper(self, db_conn):
+        from scraper import PodcastScraper
+        s = PodcastScraper.__new__(PodcastScraper)
+        s.conn, s.cursor = db_conn, db_conn.cursor()
+        return s
+
+    def test_retitled_episode_updates_the_same_row(self, db_conn):
+        s = self._scraper(db_conn)
+        s.cursor.execute("INSERT INTO podcasts (title, apple_podcast_id) VALUES ('Climate CEOs', '1') RETURNING podcast_id")
+        pid = s.cursor.fetchone()[0]
+        first = s.insert_episode({'trackName': 'How CEOs Hire A-Players', 'trackId': 1000784736587}, pid)
+        again = s.insert_episode({'trackName': 'How CEOs Hire A-Players (#326)', 'trackId': 1000784736587}, pid)
+        assert again == first
+        s.cursor.execute("SELECT title FROM episodes WHERE episode_id = %s", (first,))
+        assert s.cursor.fetchone()[0] == 'How CEOs Hire A-Players (#326)'

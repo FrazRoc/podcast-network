@@ -370,6 +370,31 @@ class PodcastScraper:
         duration = compute_duration_seconds(episode_data, rss_data)
         published_date = compute_published_date(episode_data)
 
+        # A show that retitles an episode ("How CEOs Hire A-Players" ->
+        # "How CEOs Hire A-Players (#326)") would clash on apple_episode_id,
+        # which the (podcast_id, title) upsert below can't absorb. Apple's id
+        # is the stable one, so update that row, title included.
+        track_id = str(episode_data['trackId']) if episode_data.get('trackId') else None   # a VARCHAR column
+        if track_id:
+            self.cursor.execute("""
+                UPDATE episodes SET
+                    title = %s,
+                    description = COALESCE(NULLIF(%s, ''), description),
+                    audio_url = COALESCE(%s, audio_url),
+                    duration_seconds = COALESCE(%s, duration_seconds),
+                    published_date = COALESCE(%s, published_date)
+                WHERE apple_episode_id = %s AND podcast_id = %s
+                  -- Leave it if the new title is already another row's.
+                  AND NOT EXISTS (SELECT 1 FROM episodes o WHERE o.podcast_id = %s AND o.title = %s
+                                  AND o.apple_episode_id IS DISTINCT FROM %s)
+                RETURNING episode_id
+            """, (episode_data.get('trackName') or episode_data.get('title'), episode_data.get('description', ''),
+                  episode_data.get('episodeUrl') or episode_data.get('link'), duration, published_date,
+                  track_id, podcast_id, podcast_id, episode_data.get('trackName') or episode_data.get('title'), track_id))
+            row = self.cursor.fetchone()
+            if row:
+                return row[0]
+
         values = (
             podcast_id,
             episode_data.get('trackName') or episode_data.get('title'),
@@ -551,13 +576,19 @@ class PodcastScraper:
                         None
                     )
                     
-                    # Insert episode
+                    # Insert episode. Each in its own savepoint: one bad row
+                    # used to abort the transaction, so every later episode
+                    # failed and the commit below saved none of them (Climate
+                    # CEOs, Sep 2026, lost 8 new episodes to one retitled one).
+                    self.cursor.execute("SAVEPOINT episode")
                     episode_id = self.insert_episode(itunes_episode, podcast_id, rss_episode)
-          
+                    self.cursor.execute("RELEASE SAVEPOINT episode")
+
                     processed += 1
                     logger.info(f"Processed episode: {itunes_episode['trackName']}")
-                    
+
                 except Exception as e:
+                    self.cursor.execute("ROLLBACK TO SAVEPOINT episode")
                     logger.error(f"Error processing episode {itunes_episode.get('trackName', 'Unknown')}: {str(e)}")
                     failed += 1
             
