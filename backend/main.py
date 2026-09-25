@@ -23,6 +23,7 @@ from description_cleaner import (
 )
 from role_selection import pick_current_role, format_for_display
 from org_names import normalize_org_name
+import org_stats
 from org_suggestions import refresh_suggestions
 
 load_dotenv()
@@ -560,6 +561,52 @@ async def get_podcasts():
     except Exception as e:
         print(str(e))
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ------------------------------------------------------------------
+# Stats from guests' roles and organisations (backend/org_stats.py)
+# ------------------------------------------------------------------
+
+def _org_stat(fn, *args, **kw):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        return fn(cur, *args, **kw)
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.get("/api/stats/show-guest-mix")
+async def stats_show_guest_mix():
+    """Who each show books: its guests by type of organisation."""
+    return _org_stat(org_stats.show_guest_mix)
+
+
+@app.get("/api/stats/revolving-door")
+async def stats_revolving_door():
+    """Guests whose former role was at one type of organisation and whose
+    current role is at another."""
+    return _org_stat(org_stats.revolving_door)
+
+
+@app.get("/api/stats/top-organizations")
+async def stats_top_organizations(by: str = "guests", exclude_in_house: bool = True):
+    """Most-booked organisations, sub-organisations counted under their parent."""
+    return _org_stat(org_stats.top_organisations, by="shows" if by == "shows" else "guests",
+                     exclude_in_house=exclude_in_house)
+
+
+@app.get("/api/stats/guest-mix-by-year")
+async def stats_guest_mix_by_year():
+    """Share of guest appearances by organisation type, per year."""
+    return _org_stat(org_stats.guest_mix_by_year)
+
+
+@app.get("/api/stats/guest-roles")
+async def stats_guest_roles():
+    """Guests by the kind of role they hold, overall and per show."""
+    return _org_stat(org_stats.guest_roles)
 
 
 @app.get("/api/stats/guest-appearances")

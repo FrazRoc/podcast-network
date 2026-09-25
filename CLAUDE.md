@@ -388,6 +388,15 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   titles are tidied, not verbatim, for these spellings), and display_title
   applies it too. ~1,350 stored titles were rewritten to match (Sep 2026).
   Chairman/Chairwoman were deliberately NOT changed to Chair.
+- **Stats page, "Who the guests are"** (Sep 2026, `backend/org_stats.py`,
+  `/api/stats/show-guest-mix|revolving-door|top-organizations|guest-mix-by-year|guest-roles`):
+  guests only (episode_host.is_guest), current roles unless the chart is
+  about former ones, an org's type falling back to its top parent's.
+  A show's "house" organisation (BNEF on Switched On, Aurora on Energy
+  Unplugged…) is inferred from who it books, since podcasts have no
+  publisher column; Most-Booked leaves those guests out by default.
+  Role kinds come from title wording (`org_stats.ROLE_KINDS`, first match
+  wins) — approximate by design.
 - Not yet: a public company view.
 
 ## Tests

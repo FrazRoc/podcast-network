@@ -490,3 +490,67 @@ class TestNotAnOrganisation:
         org_db.commit()
         apps = x.get_appearances_with_non_org_companies(org_db)
         assert [a['host_id'] for a in apps] == [ann]
+
+
+# ------------------------------------------------------------------
+# Stats from roles and organisations (backend/org_stats.py)
+# ------------------------------------------------------------------
+
+class TestOrgStats:
+    def _setup(self, org_db):
+        cur = org_db.cursor()
+        # Two BNEF analysts on one show, a Stanford professor, and Gia, who
+        # moved from government (DOE) to a company (Acme).
+        _role(cur, 'Ann', 'BNEF', 'Analyst')
+        _role(cur, 'Bob', 'BNEF', 'Senior Analyst')
+        _role(cur, 'Cat', 'Stanford University', 'Professor')
+        gia = _role(cur, 'Gia', 'Acme', 'co-founder and CEO', date(2025, 3, 1))
+        cur.execute("SELECT episode_id FROM host_affiliations WHERE host_id = %s", (gia,))
+        ep = cur.fetchone()[0]
+        cur.execute("INSERT INTO host_affiliations (episode_id, host_id, title, company, title_kind, is_former) "
+                    "VALUES (%s, %s, 'official', 'U.S. Department of Energy', 'position', true)", (ep, gia))
+        apply_sync(cur, plan_sync(cur))
+        for name, kind in [('BNEF', 'research'), ('Stanford University', 'academic'),
+                           ('Acme', 'company'), ('U.S. Department of Energy', 'government')]:
+            cur.execute("UPDATE organizations SET org_type = %s WHERE name = %s", (kind, name))
+        org_db.commit()
+        return org_db.cursor(cursor_factory=RealDictCursor)
+
+    def test_show_guest_mix(self, org_db):
+        import org_stats
+        cur = self._setup(org_db)
+        [show] = org_stats.show_guest_mix(cur, min_guests=1)['items']
+        assert show['counts'] == {'research': 2, 'academic': 1, 'company': 1} and show['typed'] == 4
+
+    def test_revolving_door(self, org_db, monkeypatch):
+        import org_stats
+        pytest.importorskip("fastapi")
+        import main   # revolving_door reads the displayed current role
+        cur = self._setup(org_db)
+        r = org_stats.revolving_door(cur)
+        assert [(f['from'], f['to'], f['count']) for f in r['flows']] == [('government', 'company', 1)]
+        assert r['flows'][0]['people'][0]['to_org'] == 'Acme'
+
+    def test_top_organisations_and_house_show(self, org_db):
+        import org_stats
+        cur = self._setup(org_db)
+        # Two of four guests from BNEF on the only show: not enough for a house (needs 5).
+        top = org_stats.top_organisations(cur)
+        assert top['items'][0]['name'] == 'BNEF' and top['items'][0]['guests'] == 2
+        assert top['house_shows'] == []
+
+    def test_guest_mix_by_year(self, org_db):
+        import org_stats
+        cur = self._setup(org_db)
+        items = {i['year']: i for i in org_stats.guest_mix_by_year(cur)['items']}
+        assert items[2025]['counts'] == {'research': 2, 'academic': 1, 'company': 1}   # all dated 2025
+
+    @pytest.mark.parametrize('title, kind', [
+        ('co-founder and CEO', 'founder'), ('CEO', 'ceo'), ('Senior Analyst', 'analyst'),
+        ('Professor of Law', 'academic'), ('VP of Policy', 'executive'), ('Senator', 'official'),
+        ('climate activist', 'activist'), ('Senior Advisor', 'advisor'), ('reporter', 'journalist'),
+        ('general partner', 'investor'), ('ecologist', 'other'),
+    ])
+    def test_role_kind(self, title, kind):
+        from org_stats import role_kind
+        assert role_kind(title) == kind
