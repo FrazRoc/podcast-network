@@ -43,6 +43,25 @@ function SortHeader({ label, field, sort, setSort, align = 'right' }) {
   );
 }
 
+const WEEK_FMT = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
+
+// "12d ago" in the show tables, red once the show has missed about three of
+// its usual releases (see _add_publishing_rhythm in the backend).
+function LastEpisode({ show }) {
+  if (show.days_since == null) return <span className="text-gray-300">—</span>;
+  const cls = show.freshness === 'overdue' ? 'text-red-600 font-medium'
+    : show.freshness === 'ended' ? 'text-gray-400' : 'text-gray-500';
+  const tip = `Last episode ${show.last_episode}` +
+    (show.typical_gap ? ` · usually every ${show.typical_gap} day${show.typical_gap === 1 ? '' : 's'}` : '') +
+    (show.freshness === 'overdue' ? ' · overdue: check the scanner is still picking it up'
+      : show.freshness === 'ended' ? ' · silent long enough that it has probably ended' : '');
+  return (
+    <span className={cls} title={tip}>
+      {show.days_since}d{show.freshness === 'ended' ? ' · ended?' : ''}
+    </span>
+  );
+}
+
 // What "coverage" means in the main table — which of these an episode needs
 // at least one of to count as covered, and how to talk about it.
 const COVERAGE_METRICS = {
@@ -60,6 +79,10 @@ export default function AdminDiagnostics() {
   const [sort, setSort] = useState({ field: 'coverage', dir: 'asc' });
   const [minEpisodes, setMinEpisodes] = useState(20);
   const [metric, setMetric] = useState('any');
+  const [pipeline, setPipeline] = useState(null);
+  const [pipelineError, setPipelineError] = useState(null);
+  const [repairing, setRepairing] = useState(null);
+  const [repairNote, setRepairNote] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -72,6 +95,32 @@ export default function AdminDiagnostics() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Slower (it works out everyone's current role), so it loads on its own
+  // and the show tables don't wait for it.
+  useEffect(() => {
+    adminFetch(`${API}/diagnostics/pipeline`)
+      .then(r => { if (!r.ok) throw new Error(`API error ${r.status}`); return r.json(); })
+      .then(setPipeline)
+      .catch(e => setPipelineError(e.message || 'Failed to load'));
+  }, []);
+
+  // Keeps every credit (unlike a rename in People Admin, which unlinks the
+  // inferred ones and re-scans), then credits episodes that use the real spelling.
+  const repairName = async (m) => {
+    setRepairing(m.host_id); setRepairNote('');
+    try {
+      const r = await adminFetch(`${API}/people/${m.host_id}/repair-name`, { method: 'POST' });
+      const body = await r.json();
+      if (!r.ok) throw new Error(body.detail || `API error ${r.status}`);
+      setRepairNote(`Fixed “${body.name}” — ${body.episodes_linked} more episode${body.episodes_linked === 1 ? '' : 's'} credited`);
+      await load();
+    } catch (e) {
+      setRepairNote(`Couldn't fix ${m.repaired}: ${e.message}`);
+    } finally {
+      setRepairing(null);
+    }
+  };
 
   const shows = useMemo(() => {
     if (!data) return [];
@@ -86,6 +135,8 @@ export default function AdminDiagnostics() {
         coverageDenom: s[denomKey],
         pctGuest: pct(s.guest_credits, s.credits),
         pctApple: pct(s.apple_credits, s.credits),
+        // Sorts overdue shows by how many releases they've missed.
+        lateness: s.days_since != null && s.typical_gap ? s.days_since / s.typical_gap : -1,
       }));
     const dir = sort.dir === 'asc' ? 1 : -1;
     return rows.sort((a, b) => {
@@ -106,6 +157,8 @@ export default function AdminDiagnostics() {
   // Shows whose descriptions we deliberately don't read are expected to be
   // thin, so they belong outside the list of things to look into.
   const uncovered = shows.filter(s => s.coverage <= 20 && s.scan_descriptions !== false);
+  const overdue = (data?.shows || []).filter(s => s.freshness === 'overdue')
+    .sort((a, b) => b.days_since / b.typical_gap - a.days_since / a.typical_gap);
 
   return (
     <div className="min-h-screen bg-gray-100 font-sans">
@@ -141,6 +194,7 @@ export default function AdminDiagnostics() {
                       <th className="pb-1 font-medium">Stored as</th>
                       <th className="pb-1 font-medium">Should be</th>
                       <th className="pb-1 font-medium text-right">Credits</th>
+                      <th className="pb-1" />
                     </tr>
                   </thead>
                   <tbody>
@@ -154,12 +208,21 @@ export default function AdminDiagnostics() {
                           </a>
                         </td>
                         <td className="py-1.5 text-right text-gray-500">{m.credits}</td>
+                        <td className="py-1.5 text-right">
+                          <button onClick={() => repairName(m)} disabled={repairing !== null}
+                            className="text-xs px-2 py-0.5 rounded border border-teal-600 text-teal-700 hover:bg-teal-50 disabled:opacity-50">
+                            {repairing === m.host_id ? 'Fixing…' : 'Fix'}
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
             )}
+            {repairNote && <p className="text-sm text-gray-600">{repairNote}</p>}
+
+            <ScannerHealth weeks={pipeline?.weeks} overdue={overdue} error={pipelineError} />
 
             {(uncovered.length > 0 || missingHosts.length > 0) && (
               <div className="bg-white rounded-2xl border border-gray-200 p-4 sm:p-5">
@@ -240,6 +303,7 @@ export default function AdminDiagnostics() {
                       <th className="px-2 py-2 text-left font-medium text-gray-400 w-40">From Apple</th>
                       <SortHeader label="%" field="pctApple" sort={sort} setSort={setSort} />
                       <SortHeader label="Credits" field="credits" sort={sort} setSort={setSort} />
+                      <SortHeader label="Last ep." field="lateness" sort={sort} setSort={setSort} />
                     </tr>
                   </thead>
                   <tbody>
@@ -275,12 +339,15 @@ export default function AdminDiagnostics() {
                         </td>
                         <td className="px-2 py-1.5 text-right text-gray-600 tabular-nums">{s.pctApple}%</td>
                         <td className="px-2 py-1.5 text-right text-gray-500 tabular-nums">{s.credits.toLocaleString()}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap"><LastEpisode show={s} /></td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
             </div>
+
+            <RoleExtraction pipeline={pipeline} error={pipelineError} />
 
             <div className="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6">
               <h2 className="text-base font-semibold text-gray-900 mb-1">Host and guest balance</h2>
@@ -333,11 +400,15 @@ export default function AdminDiagnostics() {
               <h2 className="text-base font-semibold text-gray-900 mb-1">People credited per episode</h2>
               <p className="text-sm text-gray-500 mb-4">
                 The zero column is the backlog. A long tail is the other failure: a list of
-                names in the show notes read as though everyone appeared.
+                names in the show notes read as though everyone appeared. Click a bar to list
+                those episodes.
               </p>
               <div className="flex items-end gap-1.5 h-40">
                 {perEpisode.map(b => (
-                  <div key={b.credits} className="flex-1 flex flex-col items-center justify-end group" title={`${b.episodes.toLocaleString()} episodes with ${b.credits}`}>
+                  <a key={b.credits}
+                     href={`/admin/episodes?credit_filter=${b.credits === 0 ? 'no_credit' : `count_${b.credits}`}`}
+                     className="flex-1 h-full flex flex-col items-center justify-end group"
+                     title={`${b.episodes.toLocaleString()} episodes with ${b.credits} — click to list them`}>
                     <span className="text-[10px] text-gray-400 mb-1 opacity-0 group-hover:opacity-100">
                       {b.episodes.toLocaleString()}
                     </span>
@@ -348,8 +419,8 @@ export default function AdminDiagnostics() {
                         background: b.credits === 0 ? '#ef4444' : teal(Math.min(1, b.credits / 6)),
                       }}
                     />
-                    <span className="text-[10px] text-gray-500 mt-1">{b.credits}</span>
-                  </div>
+                    <span className="text-[10px] text-gray-500 mt-1 group-hover:text-teal-700">{b.credits}</span>
+                  </a>
                 ))}
               </div>
               <p className="text-xs text-gray-400 mt-3">
@@ -361,5 +432,218 @@ export default function AdminDiagnostics() {
         )}
       </div>
     </div>
+  );
+}
+
+
+function Card({ title, children, description }) {
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6">
+      <h2 className="text-base font-semibold text-gray-900 mb-1">{title}</h2>
+      {description && <p className="text-sm text-gray-500 mb-4">{description}</p>}
+      {children}
+    </div>
+  );
+}
+
+// Episodes by the week they were published, which should be roughly flat: a
+// dip in recent weeks means the scanner is falling behind. The number under
+// each bar is how many episodes were added to the database that week, which
+// spikes on back-catalogue imports and is shown for context only.
+function ScannerHealth({ weeks, overdue, error }) {
+  const [showAll, setShowAll] = useState(false);
+  if (error) return <Card title="Scanner health"><p className="text-sm text-red-500">Couldn't load: {error}</p></Card>;
+  if (!weeks) return <Card title="Scanner health"><p className="text-sm text-gray-400">Loading…</p></Card>;
+  const full = weeks.slice(0, -1);   // the current week is still filling up
+  const typical = [...full.map(w => w.published)].sort((a, b) => a - b)[Math.floor(full.length / 2)] || 0;
+  const max = Math.max(1, ...weeks.map(w => w.published));
+  const listed = showAll ? overdue : overdue.slice(0, 8);
+  return (
+    <Card title="Scanner health"
+      description="New episodes by the week they were published. It should stay roughly level; recent weeks falling short means new episodes aren't being picked up.">
+      <div className="flex items-end gap-1.5 h-32">
+        {weeks.map((w, i) => {
+          const current = i === weeks.length - 1;
+          const low = !current && typical > 0 && w.published < 0.75 * typical;
+          return (
+            <div key={w.week} className="flex-1 h-full flex flex-col items-center justify-end group"
+                 title={`Week of ${w.week}: ${w.published} published, ${w.added.toLocaleString()} added to the database${current ? ' (week in progress)' : ''}`}>
+              <span className={`text-[10px] mb-1 ${low ? 'text-red-600 font-medium' : 'text-gray-400'}`}>{w.published}</span>
+              <div className="w-full rounded-t-sm"
+                   style={{ height: `${Math.max(2, (100 * w.published) / max)}%`,
+                            background: low ? '#ef4444' : current ? '#99f6e4' : '#0d9488' }} />
+              <span className="text-[10px] text-gray-500 mt-1 whitespace-nowrap">{WEEK_FMT.format(new Date(w.week + 'T00:00:00'))}</span>
+              <span className="text-[9px] text-gray-300">+{w.added.toLocaleString()}</span>
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-xs text-gray-400 mt-2">
+        Typical week: {typical} episodes. Red: under three-quarters of that. Palest bar: this week, still in progress.
+      </p>
+
+      <h3 className="text-sm font-semibold text-gray-900 mt-5 mb-1">
+        {overdue.length} show{overdue.length === 1 ? '' : 's'} overdue
+      </h3>
+      <p className="text-sm text-gray-500 mb-2">
+        Silent for more than three of their usual gaps between episodes. Either the show paused or the
+        scanner stopped picking it up; the show's page on Apple Podcasts will say which.
+      </p>
+      {overdue.length > 0 && (
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs uppercase tracking-wide text-gray-400">
+              <th className="pb-1 font-medium">Show</th>
+              <th className="pb-1 font-medium text-right">Last episode</th>
+              <th className="pb-1 font-medium text-right">Usually every</th>
+              <th className="pb-1 font-medium text-right">Missed</th>
+            </tr>
+          </thead>
+          <tbody>
+            {listed.map(s => (
+              <tr key={s.podcast_id} className="border-t border-gray-100">
+                <td className="py-1.5"><ShowLink show={s}>{s.title}</ShowLink></td>
+                <td className="py-1.5 text-right text-gray-500 tabular-nums">{s.last_episode} ({s.days_since}d)</td>
+                <td className="py-1.5 text-right text-gray-500 tabular-nums">{s.typical_gap}d</td>
+                <td className="py-1.5 text-right text-red-600 font-medium tabular-nums">~{Math.floor(s.days_since / s.typical_gap)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {overdue.length > 8 && (
+        <button onClick={() => setShowAll(v => !v)} className="mt-2 text-xs text-teal-700 hover:underline">
+          {showAll ? 'Show fewer' : `Show all ${overdue.length}`}
+        </button>
+      )}
+    </Card>
+  );
+}
+
+const QUALITY = [
+  { key: 'full',         label: 'Title and company', filter: 'role_title_company', color: '#0d9488' },
+  { key: 'title_only',   label: 'Title only',        filter: 'role_title_only',    color: '#f59e0b' },
+  { key: 'company_only', label: 'Company only',      filter: 'role_company_only',  color: '#fcd34d' },
+  { key: 'none',         label: 'Nothing',           filter: 'role_none',          color: '#ef4444' },
+];
+
+const STATUS_LABELS = {
+  done: 'Read', waiting: 'Waiting to be read', no_mention: 'Not named in the text',
+  host: 'Turned out to be a host', retry: 'To retry', failed: 'Failed',
+};
+
+// The role pipeline: guest appearances waiting for extraction, what the
+// extraction found per show, and how complete the role people actually see is.
+function RoleExtraction({ pipeline, error }) {
+  const [sort, setSort] = useState({ field: 'pctRole', dir: 'asc' });
+  const [showAll, setShowAll] = useState(false);
+  const rows = useMemo(() => {
+    if (!pipeline) return [];
+    const dir = sort.dir === 'asc' ? 1 : -1;
+    return pipeline.role_by_show
+      .map(r => ({ ...r, pctRole: r.done ? pct(r.with_role, r.done) : -1, pctWaiting: pct(r.waiting, r.appearances) }))
+      .sort((a, b) => {
+        // Shows not read yet have no share to rank, so they stay at the bottom.
+        if (sort.field === 'pctRole' && (!a.done || !b.done)) return (!a.done) - (!b.done) || b.appearances - a.appearances;
+        const av = a[sort.field], bv = b[sort.field];
+        return typeof av === 'string' ? dir * av.localeCompare(bv) : dir * (av - bv) || b.appearances - a.appearances;
+      });
+  }, [pipeline, sort]);
+  if (error) return <Card title="Roles"><p className="text-sm text-red-500">Couldn't load: {error}</p></Card>;
+  if (!pipeline) return <Card title="Roles"><p className="text-sm text-gray-400">Loading…</p></Card>;
+
+  const q = pipeline.role_quality;
+  const qTotal = QUALITY.reduce((n, b) => n + q[b.key], 0);
+  const statusTotal = pipeline.extraction.reduce((n, r) => n + r.n, 0);
+  const waiting = pipeline.extraction.filter(r => r.status === 'waiting' || r.status === 'retry').reduce((n, r) => n + r.n, 0);
+  const listed = showAll ? rows : rows.slice(0, 15);
+  return (
+    <Card title="Roles"
+      description="What each guest does and where, read from the episode text, and how complete the role shown on their card is.">
+      <div className="grid gap-6 sm:grid-cols-2">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-900 mb-2">Current role shown for guests</h3>
+          <div className="flex h-3 rounded-sm overflow-hidden bg-gray-100 mb-2">
+            {QUALITY.map(b => (
+              <a key={b.key} href={`/admin/people?filter=${b.filter}`} title={`${b.label}: ${q[b.key].toLocaleString()}`}
+                 style={{ width: `${(100 * q[b.key]) / Math.max(1, qTotal)}%`, background: b.color }} />
+            ))}
+          </div>
+          <ul className="text-sm space-y-0.5">
+            {QUALITY.map(b => (
+              <li key={b.key} className="flex items-center gap-2">
+                <span className="w-3 h-2 rounded-sm inline-block" style={{ background: b.color }} />
+                <a href={`/admin/people?filter=${b.filter}`} className="text-gray-700 hover:text-teal-700 hover:underline">{b.label}</a>
+                <span className="ml-auto tabular-nums text-gray-500">{q[b.key].toLocaleString()} · {pct(q[b.key], qTotal)}%</span>
+              </li>
+            ))}
+          </ul>
+          <p className="text-xs text-gray-400 mt-2">
+            {qTotal.toLocaleString()} people credited as a guest at least once. Each line opens People Admin on
+            that filter (which also counts hosts).
+          </p>
+        </div>
+        <div>
+          <h3 className="text-sm font-semibold text-gray-900 mb-2">Guest appearances</h3>
+          <ul className="text-sm space-y-0.5">
+            {pipeline.extraction.map(r => (
+              <li key={r.status} className="flex">
+                <span className={r.status === 'waiting' || r.status === 'retry' ? 'text-amber-700' : 'text-gray-700'}>
+                  {STATUS_LABELS[r.status] || r.status}
+                </span>
+                <span className="ml-auto tabular-nums text-gray-500">{r.n.toLocaleString()} · {pct(r.n, statusTotal)}%</span>
+              </li>
+            ))}
+          </ul>
+          <p className="text-xs text-gray-400 mt-2">
+            {waiting.toLocaleString()} waiting for the next extraction run.{' '}
+            {pipeline.guests_without_role.toLocaleString()} guests have no role on record from any appearance.
+          </p>
+        </div>
+      </div>
+
+      <h3 className="text-sm font-semibold text-gray-900 mt-6 mb-1">By show</h3>
+      <p className="text-sm text-gray-500 mb-2">
+        Of the guest appearances already read, how many gave a role. A low share means the show's notes rarely
+        say what guests do, or the text sent for reading misses it. Shows with 10+ guest appearances.
+      </p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="border-b border-gray-200 text-xs">
+              <SortHeader label="Show" field="title" sort={sort} setSort={setSort} align="left" />
+              <SortHeader label="Guest appearances" field="appearances" sort={sort} setSort={setSort} />
+              <SortHeader label="Waiting" field="pctWaiting" sort={sort} setSort={setSort} />
+              <th className="px-2 py-2 text-left font-medium text-gray-400 w-40">Read with a role</th>
+              <SortHeader label="%" field="pctRole" sort={sort} setSort={setSort} />
+            </tr>
+          </thead>
+          <tbody>
+            {listed.map(r => (
+              <tr key={r.podcast_id} className="border-b border-gray-100 hover:bg-gray-50">
+                <td className="px-2 py-1.5 text-gray-900"><ShowLink show={r}>{r.title}</ShowLink></td>
+                <td className="px-2 py-1.5 text-right text-gray-500 tabular-nums">{r.appearances.toLocaleString()}</td>
+                <td className={`px-2 py-1.5 text-right tabular-nums ${r.waiting ? 'text-amber-700' : 'text-gray-300'}`}>
+                  {r.waiting ? r.waiting.toLocaleString() : '—'}
+                </td>
+                <td className="px-2 py-1.5">
+                  {r.done > 0
+                    ? <Bar value={r.pctRole} max={100} color={teal(r.pctRole / 100)} title={`${r.with_role} of ${r.done} read appearances gave a role`} />
+                    : <span className="text-xs text-gray-400">not read yet</span>}
+                </td>
+                <td className={`px-2 py-1.5 text-right tabular-nums ${r.done && r.pctRole <= 30 ? 'text-red-600 font-medium' : 'text-gray-600'}`}>
+                  {r.done ? `${r.pctRole}%` : ''}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {rows.length > 15 && (
+        <button onClick={() => setShowAll(v => !v)} className="mt-2 text-xs text-teal-700 hover:underline">
+          {showAll ? 'Show fewer' : `Show all ${rows.length}`}
+        </button>
+      )}
+    </Card>
   );
 }

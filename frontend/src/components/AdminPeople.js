@@ -716,7 +716,10 @@ export default function AdminPeople() {
   const [loading, setLoading]       = useState(false);
   const [listError, setListError]   = useState(null);
   const [searchQ, setSearchQ]       = useState('');
-  const [filter, setFilter]         = useState('all');
+  // Deep-link support: /admin/people?filter=role_title_only (Diagnostics).
+  const [filter, setFilter]         = useState(() => {
+    try { return new URLSearchParams(window.location.search).get('filter') || 'all'; } catch { return 'all'; }
+  });
   const [sort, setSort]             = useState('appearances_desc');
   const [selected, setSelected]     = useState(null);  // person being edited
   const [deleteConfirm, setDeleteConfirm] = useState(null);

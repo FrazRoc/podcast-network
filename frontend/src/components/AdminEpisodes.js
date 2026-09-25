@@ -494,6 +494,10 @@ export default function AdminEpisodes() {
                 className={`text-xs border rounded px-2 py-1 focus:outline-none focus:border-teal-400 ${
                   creditFilter ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-gray-200'}`}>
                 {CREDIT_FILTERS.map(cf => <option key={cf.id} value={cf.id}>{cf.label}</option>)}
+                {/* From Diagnostics' credits-per-episode bars. */}
+                {/^count_\d+$/.test(creditFilter) && (
+                  <option value={creditFilter}>Exactly {creditFilter.slice(6)} credited</option>
+                )}
               </select>
               <span className="text-xs text-gray-400">Sort:</span>
               <select value={sort} onChange={e => handleSort(e.target.value)}

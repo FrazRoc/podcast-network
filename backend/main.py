@@ -15,6 +15,7 @@ from psycopg2.extras import RealDictCursor
 import os
 import json
 from collections import OrderedDict
+from datetime import date
 import urllib.parse
 import httpx
 from urllib.parse import urlparse
@@ -2261,6 +2262,7 @@ async def get_diagnostics():
             ORDER BY p.title
         """)
         shows = cur.fetchall()
+        _add_publishing_rhythm(cur, shows)
 
         # How many people each episode is credited with. The zero bar is the
         # backlog; a long tail means a list of names was read as a cast.
@@ -2293,6 +2295,8 @@ async def get_diagnostics():
                    first_name || ' ' || last_name AS stored,
                    convert_from(convert_to(first_name, 'LATIN1'), 'UTF8') || ' ' ||
                    convert_from(convert_to(last_name,  'LATIN1'), 'UTF8') AS repaired,
+                   convert_from(convert_to(first_name, 'LATIN1'), 'UTF8') AS repaired_first,
+                   convert_from(convert_to(last_name,  'LATIN1'), 'UTF8') AS repaired_last,
                    (SELECT COUNT(*) FROM episode_host eh WHERE eh.host_id = h.host_id) AS credits
             FROM hosts h
             WHERE first_name || ' ' || last_name ~ 'Ã|Â|â€|ï¿½'
@@ -2324,6 +2328,156 @@ async def get_diagnostics():
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# How late a show is, judged against its own rhythm: the median gap between
+# its last 20 episodes. Overdue once it's missed about three releases (and at
+# least three weeks) — the scanner may have stopped picking it up; silent for
+# fifteen releases (and at least six months), it has most likely ended.
+OVERDUE_GAPS, OVERDUE_MIN_DAYS, ENDED_GAPS, ENDED_MIN_DAYS = 3, 21, 15, 180
+
+
+def _add_publishing_rhythm(cur, shows: list) -> None:
+    cur.execute("""
+        SELECT podcast_id, published_date FROM (
+            SELECT podcast_id, published_date,
+                   ROW_NUMBER() OVER (PARTITION BY podcast_id ORDER BY published_date DESC) AS rn
+            FROM episodes WHERE published_date IS NOT NULL
+        ) x WHERE rn <= 21
+        ORDER BY podcast_id, published_date DESC
+    """)
+    dates = {}
+    for r in cur.fetchall():
+        d = r['published_date']
+        dates.setdefault(r['podcast_id'], []).append(d.date() if hasattr(d, 'date') else d)
+    today = date.today()
+    for s in shows:
+        ds = dates.get(s['podcast_id'], [])
+        s['last_episode'] = ds[0].isoformat() if ds else None
+        s['days_since'] = (today - ds[0]).days if ds else None
+        gaps = sorted((a - b).days for a, b in zip(ds, ds[1:]))
+        s['typical_gap'] = gaps[len(gaps) // 2] if len(gaps) >= 4 else None
+        status = None
+        if s['days_since'] is not None and s['typical_gap']:
+            if s['days_since'] > max(ENDED_GAPS * s['typical_gap'], ENDED_MIN_DAYS):
+                status = 'ended'
+            elif s['days_since'] > max(OVERDUE_GAPS * s['typical_gap'], OVERDUE_MIN_DAYS):
+                status = 'overdue'
+        s['freshness'] = status
+
+
+@app.get("/api/admin/diagnostics/pipeline", dependencies=[Depends(verify_admin)])
+async def get_pipeline_diagnostics():
+    """Scanner and role-extraction health, loaded after the main page:
+    episodes by week (published, and added to the database), the role
+    extraction backlog and results per show, and how complete the displayed
+    current roles are."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            WITH weeks AS (
+                SELECT generate_series(date_trunc('week', now()) - interval '11 weeks',
+                                       date_trunc('week', now()), interval '1 week')::date AS week
+            )
+            SELECT w.week,
+                   (SELECT COUNT(*) FROM episodes e
+                     WHERE e.published_date >= w.week AND e.published_date < w.week + 7) AS published,
+                   (SELECT COUNT(*) FROM episodes e
+                     WHERE e.created_at >= w.week AND e.created_at < w.week + 7) AS added
+            FROM weeks w ORDER BY w.week
+        """)
+        weeks = cur.fetchall()
+
+        # Same rule as extract_affiliations.get_appearances_to_process: guest
+        # credits, not on a show the person hosts.
+        guest_appearances = """
+            FROM episode_host eh
+            JOIN episodes e ON e.episode_id = eh.episode_id
+            LEFT JOIN affiliation_extractions ax ON ax.episode_id = eh.episode_id AND ax.host_id = eh.host_id
+            WHERE eh.is_guest AND NOT EXISTS (
+                SELECT 1 FROM host_podcast hp WHERE hp.host_id = eh.host_id AND hp.podcast_id = e.podcast_id)
+        """
+        cur.execute(f"""
+            SELECT COALESCE(ax.status, 'waiting') AS status, COUNT(*) AS n {guest_appearances}
+            GROUP BY 1 ORDER BY 2 DESC
+        """)
+        extraction = cur.fetchall()
+        cur.execute(f"""
+            SELECT p.podcast_id, p.title, p.apple_podcast_id,
+                   COUNT(*) AS appearances,
+                   COUNT(*) FILTER (WHERE ax.status IS NULL OR ax.status = 'retry') AS waiting,
+                   COUNT(*) FILTER (WHERE ax.status = 'done') AS done,
+                   COUNT(*) FILTER (WHERE ax.status = 'done' AND EXISTS (
+                       SELECT 1 FROM host_affiliations ha
+                       WHERE ha.episode_id = eh.episode_id AND ha.host_id = eh.host_id)) AS with_role
+            {guest_appearances.replace('JOIN episodes e ON e.episode_id = eh.episode_id',
+                                       'JOIN episodes e ON e.episode_id = eh.episode_id JOIN podcasts p ON p.podcast_id = e.podcast_id')}
+            GROUP BY p.podcast_id, p.title, p.apple_podcast_id
+            HAVING COUNT(*) >= 10
+        """)
+        role_by_show = cur.fetchall()
+        cur.execute("""
+            SELECT COUNT(DISTINCT eh.host_id) AS n FROM episode_host eh
+            WHERE eh.is_guest AND NOT EXISTS (SELECT 1 FROM host_affiliations ha WHERE ha.host_id = eh.host_id)
+        """)
+        guests_without_role = cur.fetchone()['n']
+
+        # The displayed current role, for everyone ever credited as a guest —
+        # the same buckets as People Admin's role filters.
+        roles = _all_current_roles(cur)
+        cur.execute("SELECT DISTINCT host_id FROM episode_host WHERE is_guest")
+        quality = {'full': 0, 'title_only': 0, 'company_only': 0, 'none': 0}
+        for r in cur.fetchall():
+            title, company, _ = roles.get(r['host_id'], (None, None, None))
+            quality['full' if title and company else 'title_only' if title else
+                    'company_only' if company else 'none'] += 1
+        cur.close()
+        conn.close()
+        return {"weeks": weeks, "extraction": extraction, "role_by_show": role_by_show,
+                "guests_without_role": guests_without_role, "role_quality": quality}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/people/{host_id}/repair-name", dependencies=[Depends(verify_admin)])
+async def repair_mangled_name(host_id: int):
+    """Fix a name stored with its UTF-8 read as Latin-1 ("BalÃ¡zs" ->
+    "Balázs"), keeping every credit, then credit any episode that names the
+    person with the real spelling. Unlike a rename in People Admin, nothing
+    is unlinked first: the existing credits were right, only the stored
+    spelling was not."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(r"""
+            SELECT first_name, last_name,
+                   convert_from(convert_to(first_name, 'LATIN1'), 'UTF8') AS first_fixed,
+                   convert_from(convert_to(last_name,  'LATIN1'), 'UTF8') AS last_fixed
+            FROM hosts WHERE host_id = %s
+              AND first_name || ' ' || last_name ~ ('^[ -' || U&'\00FF' || ']+$')
+        """, (host_id,))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="No repairable name for this person")
+        if (row['first_fixed'], row['last_fixed']) == (row['first_name'], row['last_name']):
+            raise HTTPException(status_code=400, detail="Name is not mangled")
+        cur.execute("UPDATE hosts SET first_name = %s, last_name = %s WHERE host_id = %s",
+                    (row['first_fixed'], row['last_fixed'], host_id))
+        conn.commit()
+        full = f"{row['first_fixed']} {row['last_fixed']}"
+        links = link_matching_episodes(cur, full, host_id, exclude_episode_id=None)
+        conn.commit()
+        return {"success": True, "name": full, "episodes_linked": len(links)}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
 
 
 @app.get("/api/admin/people/duplicates", dependencies=[Depends(verify_admin)])
@@ -4011,8 +4165,13 @@ async def list_episodes(q: str = "", show: str = "", sort: str = "newest", limit
                     SELECT 1 FROM episode_host eh2 WHERE eh2.episode_id = e.episode_id AND NOT eh2.is_guest))
                 OR (%(credit_filter)s = 'no_credit' AND NOT EXISTS (
                     SELECT 1 FROM episode_host eh2 WHERE eh2.episode_id = e.episode_id))
+                -- count_N: exactly N people credited (Diagnostics' histogram bars).
+                OR (%(credit_count)s::int IS NOT NULL AND (
+                    SELECT COUNT(*) FROM episode_host eh2 WHERE eh2.episode_id = e.episode_id) = %(credit_count)s::int)
               )
         """
+        m = re.fullmatch(r'count_(\d+)', credit_filter or '')
+        credit_count = int(m.group(1)) if m else None
 
         cur.execute(f"""
             SELECT
@@ -4032,7 +4191,8 @@ async def list_episodes(q: str = "", show: str = "", sort: str = "newest", limit
             GROUP BY e.episode_id, e.title, e.published_date, e.no_guest_confirmed, p.podcast_id, p.title, p.cover_art_url, p.apple_podcast_id
             ORDER BY {order}
             LIMIT %(limit)s OFFSET %(offset)s;
-        """, {"q": q, "show": show, "limit": limit, "offset": offset, "credit_filter": credit_filter})
+        """, {"q": q, "show": show, "limit": limit, "offset": offset, "credit_filter": credit_filter,
+              "credit_count": credit_count})
         items = cur.fetchall()
 
         cur.execute(f"""
@@ -4042,7 +4202,7 @@ async def list_episodes(q: str = "", show: str = "", sort: str = "newest", limit
             WHERE (%(q)s = '' OR e.title ILIKE '%%' || %(q)s || '%%' OR p.title ILIKE '%%' || %(q)s || '%%')
               AND (%(show)s = '' OR p.title = %(show)s)
               {credit_filter_sql};
-        """, {"q": q, "show": show, "credit_filter": credit_filter})
+        """, {"q": q, "show": show, "credit_filter": credit_filter, "credit_count": credit_count})
         total = cur.fetchone()["total"]
         cur.execute("SELECT COUNT(*) AS all_total FROM episodes")
         all_total = cur.fetchone()["all_total"]

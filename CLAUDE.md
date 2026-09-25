@@ -574,6 +574,29 @@ production build at a domain root needs `PUBLIC_URL=/`.
 **Scheduled jobs:** `scrape.yml` at `17 */6 * * *`, `backup.yml` at
 `41 4 * * *`. Backups are verified restorable.
 
+### Diagnostics page (`/admin/diagnostics`)
+
+`GET /api/admin/diagnostics` (show coverage, host/guest balance, credits per
+episode, mangled names) plus, since Sep 25 2026, `GET
+/api/admin/diagnostics/pipeline`, loaded separately because it computes
+everyone's current role (~6 s):
+- **Scanner health**: episodes by week *published* (last 12 weeks; red when a
+  finished week is under 75% of the median). The small "+N added" figure is
+  by `created_at` and spikes on back-catalogue imports, so it is context only.
+- **Overdue shows**: `_add_publishing_rhythm()` takes the median gap of each
+  show's last 20 episodes; overdue past 3 gaps (min 21 days), "ended?" past
+  15 gaps (min 180 days). Also a sortable "Last ep." column on the coverage
+  table.
+- **Roles**: current-role completeness for everyone ever credited as a guest
+  (links to People Admin's `?filter=role_*`, which now deep-links), the
+  extraction backlog by status, and per show the share of read guest
+  appearances that gave a role (unread shows sort last).
+- Credits-per-episode bars link to Episodes `?credit_filter=count_N`
+  (`no_credit` for 0). Mangled names have a **Fix** button:
+  `POST /api/admin/people/{id}/repair-name` keeps every credit (unlike a
+  People Admin rename, which unlinks inferred credits and rescans), then
+  credits any episode that names the real spelling.
+
 ### Reaching the production database
 
 The scrapers read `DATABASE_URL` through `os.getenv` and **do not load a .env
