@@ -34,6 +34,18 @@ class TestLooksLikePersonChannel:
         # happened to contain the literal phrase ("Pakistan's Solar Surge").
         assert not looks_like_person_channel("Solar Surge")
 
+    def test_rejects_parent_news_outlet_as_host(self):
+        # Real incident (a batch of 29 shows added 2026-09-24): several had
+        # no real host on Apple, so the parent outlet/institution landed in
+        # itunes_artist instead of a person. "The New York Times" alone had
+        # matched as a "guest" on 110 unrelated episodes across 38 other
+        # shows by the time this was caught — the same collateral-damage
+        # shape as an org name anywhere else in this list, just discovered
+        # via a fresh batch of shows rather than one at a time.
+        assert not looks_like_person_channel("The New York Times")
+        assert not looks_like_person_channel("Chatham House")
+        assert not looks_like_person_channel("University of Toronto Press")
+
     def test_rejects_company_suffix(self):
         assert not looks_like_person_channel("Acme LLC")
 
