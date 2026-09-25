@@ -620,6 +620,22 @@ everyone's current role (~6 s):
   filters/views, both pages now read them from the address bar).
 - "Worth looking at" lists expand with Show all, and each show links to its
   episodes missing credits.
+- **Credits that aren't appearances** (Sep 25 2026). `scraper/credit_cleanup.py`
+  runs after every scrape (after extraction) and removes, with a
+  `credit_suppressions` row so the scanner can't re-add them, inferred
+  (`parsed_*`) guest credits that are either a **replay** (title says
+  REWIND / ENCORE / REPLAY / Best of / [re-published]…, or the same title
+  as an earlier credited episode — part numbers kept — of a person already
+  credited on that show; the earliest credit stays, so a rebroadcast is not
+  a second appearance) or a **reference to another episode** (extractor
+  `from_other_episode` and not `appears_on_episode`: "past episodes you'll
+  love" lists; replayed interviews kept). One-off pass: 507 other-episode +
+  206 replay credits removed, plus the Playbook's 25 bibliography credits.
+  The remaining **mention-only** credits (extractor says only talked about;
+  ~85% false in a sample of 80, the rest real guests the text introduces
+  loosely, or clips) are *not* auto-removed: Diagnostics' "Probably only
+  mentioned" list (`GET /api/admin/diagnostics/mentions`) has Keep (sets
+  `appears_on_episode = true`) / Remove (the usual suppressed removal).
 - Credits-per-episode bars link to Episodes `?credit_filter=count_N`
   (`no_credit` for 0). Mangled names have a **Fix** button:
   `POST /api/admin/people/{id}/repair-name` keeps every credit (unlike a

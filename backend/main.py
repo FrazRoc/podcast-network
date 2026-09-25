@@ -2525,6 +2525,63 @@ async def get_data_diagnostics():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# Inferred guest credits the role extractor read as a mention, not a part in
+# the episode (a politician discussed, a book's author, a thank-you). ~85% of
+# a hand-checked sample were false credits, so each is reviewed here rather
+# than removed in bulk. References to *other* episodes are removed
+# automatically by scraper/credit_cleanup.py and never reach this list.
+_MENTION_ONLY = """
+    FROM episode_host eh
+    JOIN affiliation_extractions ax ON ax.episode_id = eh.episode_id AND ax.host_id = eh.host_id
+    JOIN episodes e ON e.episode_id = eh.episode_id
+    JOIN podcasts p ON p.podcast_id = e.podcast_id
+    JOIN hosts h ON h.host_id = eh.host_id
+    WHERE eh.is_guest AND eh.data_source LIKE 'parsed%%' AND ax.appears_on_episode = false
+"""
+
+
+@app.get("/api/admin/diagnostics/mentions", dependencies=[Depends(verify_admin)])
+async def list_mention_only_credits(limit: int = 25, offset: int = 0):
+    """The review list: newest episodes first, with the text the extractor read."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(f"SELECT COUNT(*) AS n {_MENTION_ONLY}")
+        total = cur.fetchone()['n']
+        cur.execute(f"""
+            SELECT eh.episode_id, eh.host_id, h.first_name || ' ' || h.last_name AS name,
+                   e.title AS episode_title, e.published_date, p.title AS show, p.apple_podcast_id,
+                   ax.snippet,
+                   (SELECT COUNT(*) FROM episode_host x WHERE x.host_id = eh.host_id) AS credits
+            {_MENTION_ONLY}
+            ORDER BY e.published_date DESC NULLS LAST, eh.episode_id DESC, eh.host_id
+            LIMIT %(limit)s OFFSET %(offset)s
+        """, {"limit": max(1, min(limit, 100)), "offset": max(0, offset)})
+        items = cur.fetchall()
+        cur.close()
+        conn.close()
+        return {"items": items, "total": total}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/episodes/{episode_id}/credits/{host_id}/confirm-appears",
+          dependencies=[Depends(verify_admin)])
+async def confirm_credit_appears(episode_id: int, host_id: int):
+    """"Keep" on the review list: the person does take part (the extractor
+    was wrong), so the credit leaves the list."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""UPDATE affiliation_extractions SET appears_on_episode = true
+                       WHERE episode_id = %s AND host_id = %s""", (episode_id, host_id))
+        conn.commit()
+        return {"success": True, "updated": cur.rowcount}
+    finally:
+        cur.close()
+        conn.close()
+
+
 @app.post("/api/admin/people/{host_id}/repair-name", dependencies=[Depends(verify_admin)])
 async def repair_mangled_name(host_id: int):
     """Fix a name stored with its UTF-8 read as Latin-1 ("BalÃ¡zs" ->

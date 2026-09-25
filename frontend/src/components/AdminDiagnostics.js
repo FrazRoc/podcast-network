@@ -374,6 +374,7 @@ export default function AdminDiagnostics() {
             </div>
 
             <RoleExtraction pipeline={pipeline} error={pipelineError} />
+            <MentionReview />
             <CompanyData data={dataHealth} error={dataError} />
             <PeopleData data={dataHealth} error={dataError} />
 
@@ -783,6 +784,105 @@ function PeopleData({ data, error }) {
             </li>
           ))}
         </ul>
+      )}
+    </Card>
+  );
+}
+
+// The snippet with the person's name picked out, trimmed to the part around it.
+function Excerpt({ text, name }) {
+  const t = text || '';
+  const last = (name || '').split(' ').slice(-1)[0];
+  const i = last ? t.toLowerCase().indexOf(last.toLowerCase()) : -1;
+  const start = Math.max(0, i - 160), end = Math.min(t.length, (i < 0 ? 0 : i) + 220);
+  const piece = (start > 0 ? '…' : '') + t.slice(start, end) + (end < t.length ? '…' : '');
+  if (i < 0) return <span>{piece}</span>;
+  const parts = piece.split(new RegExp(`(${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}|${last.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'i'));
+  return <span>{parts.map((p, k) => k % 2 ? <mark key={k} className="bg-amber-100 text-gray-900 rounded px-0.5">{p}</mark> : p)}</span>;
+}
+
+// Inferred guest credits the extractor read as a mention rather than a part
+// in the episode. Remove drops the credit for good (it's suppressed, so the
+// scanner can't re-add it); Keep says the extractor was wrong.
+function MentionReview() {
+  const [items, setItems] = useState([]);
+  const [total, setTotal] = useState(null);
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  const fetchPage = useCallback(async (offset) => {
+    const r = await adminFetch(`${API}/diagnostics/mentions?limit=25&offset=${offset}`);
+    if (!r.ok) throw new Error(`API error ${r.status}`);
+    return r.json();
+  }, []);
+
+  useEffect(() => {
+    fetchPage(0).then(d => { setItems(d.items); setTotal(d.total); })
+      .catch(e => setError(e.message || 'Failed to load'));
+  }, [fetchPage]);
+
+  const decide = async (it, keep) => {
+    const key = `${it.episode_id}-${it.host_id}`;
+    setBusy(key);
+    try {
+      const r = keep
+        ? await adminFetch(`${API}/episodes/${it.episode_id}/credits/${it.host_id}/confirm-appears`, { method: 'POST' })
+        : await adminFetch(`${API}/episodes/${it.episode_id}/credits/${it.host_id}`, { method: 'DELETE' });
+      if (!r.ok) throw new Error(`API error ${r.status}`);
+      setItems(prev => prev.filter(x => `${x.episode_id}-${x.host_id}` !== key));
+      setTotal(t => Math.max(0, (t || 1) - 1));
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const more = async () => {
+    setLoadingMore(true);
+    try {
+      const d = await fetchPage(items.length);
+      setItems(prev => [...prev, ...d.items.filter(n => !prev.some(p => p.episode_id === n.episode_id && p.host_id === n.host_id))]);
+      setTotal(d.total);
+    } catch (e) { setError(e.message); } finally { setLoadingMore(false); }
+  };
+
+  return (
+    <Card title="Probably only mentioned"
+      description="Guest credits from the episode text where the person seems only to be talked about: quoted, thanked, an author, a politician in the news. About 85% of a checked sample were wrong, but some are real, like a guest the text introduces loosely or a recorded clip. Remove takes the credit off for good; Keep marks it as a real appearance.">
+      {error && <p className="text-sm text-red-500 mb-2">{error}</p>}
+      {total === null && !error && <p className="text-sm text-gray-400">Loading…</p>}
+      {total !== null && (
+        <p className="text-xs text-gray-500 mb-2">{total.toLocaleString()} to review, newest episodes first</p>
+      )}
+      <ul className="divide-y divide-gray-100">
+        {items.map(it => {
+          const key = `${it.episode_id}-${it.host_id}`;
+          return (
+            <li key={key} className="py-3">
+              <div className="flex flex-wrap items-baseline gap-x-2">
+                <a href={`/admin/people?host_id=${it.host_id}`} className="text-sm font-medium text-gray-900 hover:text-teal-700 hover:underline">{it.name}</a>
+                <span className="text-xs text-gray-400">{it.credits} credit{it.credits === 1 ? '' : 's'} in all</span>
+                <span className="text-xs text-gray-400">·</span>
+                <a href={`/admin/episodes?episode_id=${it.episode_id}`} className="text-xs text-gray-500 hover:text-teal-700 hover:underline truncate max-w-md"
+                   title={it.episode_title}>{it.show}: {it.episode_title}</a>
+                <div className="ml-auto flex gap-1.5">
+                  <button disabled={busy === key} onClick={() => decide(it, true)}
+                    className="text-xs px-2 py-0.5 rounded border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50">Keep</button>
+                  <button disabled={busy === key} onClick={() => decide(it, false)}
+                    className="text-xs px-2 py-0.5 rounded border border-red-300 text-red-700 hover:bg-red-50 disabled:opacity-50">Remove</button>
+                </div>
+              </div>
+              <p className="text-xs text-gray-500 mt-1 leading-relaxed"><Excerpt text={it.snippet} name={it.name} /></p>
+            </li>
+          );
+        })}
+      </ul>
+      {total !== null && items.length < total && (
+        <button onClick={more} disabled={loadingMore} className="mt-2 text-xs text-teal-700 hover:underline disabled:opacity-50">
+          {loadingMore ? 'Loading…' : 'Load more'}
+        </button>
       )}
     </Card>
   );

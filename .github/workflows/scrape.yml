@@ -96,6 +96,15 @@ jobs:
         continue-on-error: true
         run: python3 extract_affiliations.py run --model claude-sonnet-5 --limit 1000 --max-cost 2
 
+      # Replays of an appearance already credited on the same show, and
+      # credits that only refer to another episode (credit_cleanup.py).
+      # After extraction, which is what flags the second kind.
+      - name: Remove replay and other-episode credits
+        working-directory: scraper
+        if: ${{ !inputs.podcast_title }}
+        continue-on-error: true
+        run: python3 credit_cleanup.py run
+
       - name: Record successful run timestamp
         working-directory: scraper
         run: python3 mark_scrape_complete.py --db "$DATABASE_URL"
