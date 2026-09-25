@@ -378,6 +378,16 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   (`org_suggestions.GENERIC_WORDS`: "University of Bern" / "University of
   Oxford", "Energy UK" / "C12 Energy") — trigram similarity alone put ~290
   such pairs in the queue (1,657 → 1,375 after the fix, Sep 2026).
+- **Title spelling is standardised** by `role_selection.tidy_title()` —
+  co- roles hyphenated (cofounder -> co-founder), CEO/COO/CFO/CTO/CMO/CRO/
+  CPO/CLO for their "Chief … Officer" (ambiguous CSO / CCO / Chief
+  Investment stay spelled out, Evan's call), VP/SVP/EVP, a spaced "&" ->
+  "and", short forms written out (Sr./Prof./Assoc./Rep./Sen./Gov., Ph.D.
+  -> PhD), Director-General / Secretary-General / Editor-in-Chief
+  hyphenated. The extractor applies it after the verbatim check (so stored
+  titles are tidied, not verbatim, for these spellings), and display_title
+  applies it too. ~1,350 stored titles were rewritten to match (Sep 2026).
+  Chairman/Chairwoman were deliberately NOT changed to Chair.
 - Not yet: a public company view.
 
 ## Tests
