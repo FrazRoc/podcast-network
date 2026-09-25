@@ -2338,6 +2338,13 @@ OVERDUE_GAPS, OVERDUE_MIN_DAYS, ENDED_GAPS, ENDED_MIN_DAYS = 3, 21, 15, 180
 
 
 def _add_publishing_rhythm(cur, shows: list) -> None:
+    # Apple's newest-episode date per show, recorded by each scrape run's
+    # backfill step (manager.backfill_episodes).
+    cur.execute("""
+        SELECT p.podcast_id, pt.latest_episode_date
+        FROM podcasts p JOIN podcast_tracking pt ON pt.apple_podcast_id = p.apple_podcast_id
+    """)
+    apple_latest = {r['podcast_id']: r['latest_episode_date'] for r in cur.fetchall()}
     cur.execute("""
         SELECT podcast_id, published_date FROM (
             SELECT podcast_id, published_date,
@@ -2364,6 +2371,11 @@ def _add_publishing_rhythm(cur, shows: list) -> None:
             elif s['days_since'] > max(OVERDUE_GAPS * s['typical_gap'], OVERDUE_MIN_DAYS):
                 status = 'overdue'
         s['freshness'] = status
+        # Apple has a newer episode than we do: the scanner is behind, not the show.
+        al = apple_latest.get(s['podcast_id'])
+        al = al.date() if hasattr(al, 'date') else al
+        s['apple_latest'] = al.isoformat() if al else None
+        s['missing_newer'] = bool(al and ds and al > ds[0])
 
 
 @app.get("/api/admin/diagnostics/pipeline", dependencies=[Depends(verify_admin)])

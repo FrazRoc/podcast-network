@@ -583,6 +583,18 @@ everyone's current role (~6 s):
 - **Scanner health**: episodes by week *published* (last 12 weeks; red when a
   finished week is under 75% of the median). The small "+N added" figure is
   by `created_at` and spikes on back-catalogue imports, so it is context only.
+- **Scanner refresh bug (fixed Sep 25 2026)**: scheduled runs use `scrape
+  --new-only` (shows with no episodes), so existing shows only got new
+  episodes via `manager.backfill_episodes`, which fired on a 10+ episode
+  gap vs Apple's trackCount. After the RSS back-catalogue import made most
+  shows "complete", weekly shows went ~10 weeks without a refresh (90 recent
+  episodes across 38 shows, incl. Volts/Catalyst/Shift Key, were missing).
+  `refresh_limit()` now also fetches the latest 50 whenever Apple's show
+  `releaseDate` (its newest episode) is newer than ours, and the backfill
+  step stores that date in `podcast_tracking.latest_episode_date` (which
+  `process_all_pending` used to fill with the scrape time). Diagnostics
+  uses it: **"missing new episodes"** = Apple has newer (scanner problem);
+  **"quiet"** = overdue by rhythm and Apple has nothing newer (show paused).
 - **Overdue shows**: `_add_publishing_rhythm()` takes the median gap of each
   show's last 20 episodes; overdue past 3 gaps (min 21 days), "ended?" past
   15 gaps (min 180 days). Also a sortable "Last ep." column on the coverage

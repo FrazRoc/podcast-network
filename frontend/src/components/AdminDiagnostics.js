@@ -58,6 +58,7 @@ function LastEpisode({ show }) {
   return (
     <span className={cls} title={tip}>
       {show.days_since}d{show.freshness === 'ended' ? ' · ended?' : ''}
+      {show.missing_newer && <span className="ml-1 text-red-600" title={`Apple has an episode from ${show.apple_latest}`}>· behind</span>}
     </span>
   );
 }
@@ -166,7 +167,10 @@ export default function AdminDiagnostics() {
   // Shows whose descriptions we deliberately don't read are expected to be
   // thin, so they belong outside the list of things to look into.
   const uncovered = shows.filter(s => s.coverage <= 20 && s.scan_descriptions !== false);
-  const overdue = (data?.shows || []).filter(s => s.freshness === 'overdue')
+  // Apple lists a newer episode than we have: the scanner is behind.
+  const behind = (data?.shows || []).filter(s => s.missing_newer)
+    .sort((a, b) => (a.last_episode || '').localeCompare(b.last_episode || ''));
+  const overdue = (data?.shows || []).filter(s => s.freshness === 'overdue' && !s.missing_newer)
     .sort((a, b) => b.days_since / b.typical_gap - a.days_since / a.typical_gap);
 
   return (
@@ -231,7 +235,7 @@ export default function AdminDiagnostics() {
             )}
             {repairNote && <p className="text-sm text-gray-600">{repairNote}</p>}
 
-            <ScannerHealth weeks={pipeline?.weeks} overdue={overdue} error={pipelineError} />
+            <ScannerHealth weeks={pipeline?.weeks} overdue={overdue} behind={behind} error={pipelineError} />
 
             {(uncovered.length > 0 || missingHosts.length > 0) && (
               <div className="bg-white rounded-2xl border border-gray-200 p-4 sm:p-5">
@@ -474,7 +478,7 @@ function Card({ title, children, description }) {
 // dip in recent weeks means the scanner is falling behind. The number under
 // each bar is how many episodes were added to the database that week, which
 // spikes on back-catalogue imports and is shown for context only.
-function ScannerHealth({ weeks, overdue, error }) {
+function ScannerHealth({ weeks, overdue, behind = [], error }) {
   const [showAll, setShowAll] = useState(false);
   if (error) return <Card title="Scanner health"><p className="text-sm text-red-500">Couldn't load: {error}</p></Card>;
   if (!weeks) return <Card title="Scanner health"><p className="text-sm text-gray-400">Loading…</p></Card>;
@@ -507,11 +511,29 @@ function ScannerHealth({ weeks, overdue, error }) {
       </p>
 
       <h3 className="text-sm font-semibold text-gray-900 mt-5 mb-1">
-        {overdue.length} show{overdue.length === 1 ? '' : 's'} overdue
+        {behind.length} show{behind.length === 1 ? '' : 's'} missing new episodes
       </h3>
       <p className="text-sm text-gray-500 mb-2">
-        Silent for more than three of their usual gaps between episodes. Either the show paused or the
-        scanner stopped picking it up; the show's page on Apple Podcasts will say which.
+        Apple lists a newer episode than we have (checked on every scrape run). Each scrape run should
+        catch these up; any that stay here are a scanner problem.
+      </p>
+      {behind.length > 0 && (
+        <ul className="text-sm space-y-0.5 mb-2">
+          {behind.map(s => (
+            <li key={s.podcast_id}>
+              <ShowLink show={s}>{s.title}</ShowLink>
+              <span className="text-gray-400"> — ours {s.last_episode}, Apple {s.apple_latest}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <h3 className="text-sm font-semibold text-gray-900 mt-5 mb-1">
+        {overdue.length} show{overdue.length === 1 ? '' : 's'} quiet
+      </h3>
+      <p className="text-sm text-gray-500 mb-2">
+        Silent for more than three of their usual gaps between episodes, and Apple has nothing newer either:
+        the show has paused, not the scanner.
       </p>
       {overdue.length > 0 && (
         <table className="w-full text-sm">

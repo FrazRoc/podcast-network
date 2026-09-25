@@ -8,14 +8,15 @@ import main  # noqa: E402
 
 
 class FakeCursor:
-    def __init__(self, rows):
-        self.rows = rows
+    """Answers the two queries in order: Apple's latest dates, then episodes."""
+    def __init__(self, rows, apple=None):
+        self.results = [apple or [], rows]
 
     def execute(self, *a, **kw):
         pass
 
     def fetchall(self):
-        return self.rows
+        return self.results.pop(0)
 
 
 def weekly(podcast_id, last_days_ago, n=21, every=7):
@@ -39,3 +40,13 @@ def test_too_few_episodes_to_judge():
     shows = [{'podcast_id': 1}]
     main._add_publishing_rhythm(FakeCursor(weekly(1, 100, n=3)), shows)
     assert shows[0]['typical_gap'] is None and shows[0]['freshness'] is None
+
+
+def test_apple_has_newer_means_missing_not_paused():
+    shows = [{'podcast_id': 1}, {'podcast_id': 2}]
+    rows = weekly(1, 40) + weekly(2, 40)
+    apple = [{'podcast_id': 1, 'latest_episode_date': date.today() - timedelta(days=2)},
+             {'podcast_id': 2, 'latest_episode_date': date.today() - timedelta(days=40)}]
+    main._add_publishing_rhythm(FakeCursor(rows, apple), shows)
+    assert shows[0]['missing_newer'] is True       # the scanner is behind
+    assert shows[1]['missing_newer'] is False      # the show paused

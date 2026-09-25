@@ -10,6 +10,25 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+# A show we have in full still gets new episodes: when Apple's newest
+# episode is newer than ours, fetch the latest few. (Until Sep 2026 only a
+# 10-episode gap triggered a fetch, so once the RSS back-catalogue import made
+# most shows "complete", weekly shows went ~10 weeks between refreshes — 90
+# recent episodes across 38 shows were missing.)
+RECENT_REFRESH_LIMIT = 50
+
+
+def refresh_limit(itunes_count, db_count, itunes_latest, db_latest,
+                  min_gap: int = 10, limit: int = 200):
+    """How many episodes to fetch for a show, or None to leave it.
+    itunes_latest / db_latest: ISO dates (YYYY-MM-DD) or None."""
+    if itunes_count is not None and itunes_count - db_count >= min_gap:
+        return limit
+    if itunes_latest and (not db_latest or itunes_latest > db_latest):
+        return RECENT_REFRESH_LIMIT
+    return None
+
+
 class PodcastManager:
     def __init__(self, db_connection_string: str):
         self.db_connection_string = db_connection_string
@@ -223,7 +242,8 @@ class PodcastManager:
         # Get all successful shows with their DB episode counts
         cur.execute("""
             SELECT pt.apple_podcast_id, pt.podcast_title,
-                   COUNT(e.episode_id) as db_count
+                   COUNT(e.episode_id) as db_count,
+                   MAX(e.published_date) AS db_latest
             FROM podcast_tracking pt
             LEFT JOIN podcasts p ON p.apple_podcast_id = pt.apple_podcast_id
             LEFT JOIN episodes e ON e.podcast_id = p.podcast_id
@@ -239,7 +259,8 @@ class PodcastManager:
         logger.info(f"Checking {len(shows)} shows for episode gaps...")
 
         to_backfill = []
-        for apple_id, title, db_count in shows:
+        apple_latest = []   # (date, apple_id): recorded on podcast_tracking below
+        for apple_id, title, db_count, db_latest in shows:
             try:
                 resp = requests.get(
                     "https://itunes.apple.com/lookup",
@@ -250,26 +271,49 @@ class PodcastManager:
                 if data.get("resultCount", 0) == 0:
                     continue
                 itunes_count = data["results"][0].get("trackCount", 0)
+                # releaseDate on the show is its newest episode's date.
+                itunes_latest = (data["results"][0].get("releaseDate") or "")[:10] or None
+                ours = db_latest.isoformat()[:10] if db_latest else None
+                if itunes_latest:
+                    apple_latest.append((itunes_latest, apple_id))
                 gap = itunes_count - db_count
-                if gap >= min_gap:
-                    to_backfill.append((apple_id, title, db_count, itunes_count, gap))
-                    logger.info(f"  📋 {title}: {db_count}/{itunes_count} episodes (gap: {gap})")
+                fetch = refresh_limit(itunes_count, db_count, itunes_latest, ours, min_gap, limit)
+                if fetch:
+                    to_backfill.append((apple_id, title, db_count, itunes_count, fetch))
+                    why = f"gap: {gap}" if fetch == limit else f"new episode {itunes_latest}, ours {ours}"
+                    logger.info(f"  📋 {title}: {db_count}/{itunes_count} episodes ({why})")
                 else:
                     logger.info(f"  ✅ {title}: {db_count}/{itunes_count} episodes (ok)")
                 time.sleep(0.5)
             except Exception as e:
                 logger.error(f"  Error checking {title}: {e}")
 
+        # Apple's own newest-episode date, so Diagnostics can tell a show that
+        # paused (Apple has nothing newer either) from one we're missing
+        # episodes of. process_all_pending writes the scrape time here instead,
+        # which this overwrites on the next run.
+        if apple_latest:
+            conn = self._get_connection()
+            cur = conn.cursor()
+            try:
+                cur.executemany(
+                    "UPDATE podcast_tracking SET latest_episode_date = %s WHERE apple_podcast_id = %s",
+                    apple_latest)
+                conn.commit()
+            finally:
+                cur.close()
+                conn.close()
+
         if not to_backfill:
             logger.info("No shows need backfilling.")
             return
 
-        logger.info(f"\nBackfilling {len(to_backfill)} shows with limit={limit}...")
+        logger.info(f"\nFetching episodes for {len(to_backfill)} shows...")
 
-        for apple_id, title, db_count, itunes_count, gap in to_backfill:
+        for apple_id, title, db_count, itunes_count, fetch in to_backfill:
             try:
-                logger.info(f"\n🔄 {title} — fetching up to {limit} episodes (have {db_count}/{itunes_count})")
-                scraper = PodcastScraper(self.db_connection_string, episode_limit=limit)
+                logger.info(f"\n🔄 {title} — fetching up to {fetch} episodes (have {db_count}/{itunes_count})")
+                scraper = PodcastScraper(self.db_connection_string, episode_limit=fetch)
                 results = scraper.process_podcast(apple_id)
                 new_count = results.get("processed_episodes", 0)
                 logger.info(f"  ✅ Done — processed {new_count} episodes")
