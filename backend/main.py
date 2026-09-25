@@ -2457,8 +2457,8 @@ async def get_pipeline_diagnostics():
 # A worklist, not proof: surnames like Power or Cash are real, so those words
 # are left out. Used by Diagnostics and People Admin's org_like_name filter.
 ORG_LIKE_NAME_SQL = r"""
-    lower(h.first_name) IN ('the', 'your', 'our', 'my', 'team', 'staff')
-    OR (h.first_name || ' ' || h.last_name) ~* '\m(podcasts?|inc|llc|ltd|corp|corporation|company|institute|foundation|university|association|council|agency|network|media|news|show|team|staff|money|solar|energy|capital|partners|group|labs|ventures|coalition|alliance|project|radio|tv|studios?)\M'
+    lower(h.first_name) IN ('the', 'your', 'our', 'my', 'team')
+    OR (h.first_name || ' ' || h.last_name) ~* '\m(podcasts?|inc|llc|ltd|corp|corporation|company|institute|foundation|university|association|council|agency|network|media|news|show|team|money|solar|energy|capital|partners|group|labs|ventures|coalition|alliance|project|radio|tv|studios?)\M'
 """
 
 
