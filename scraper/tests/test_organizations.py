@@ -568,3 +568,50 @@ class TestOrgStats:
     def test_role_kind(self, title, kind):
         from org_stats import role_kind
         assert role_kind(title) == kind
+
+
+# ------------------------------------------------------------------
+# Company logos (/api/logo/{org_id})
+# ------------------------------------------------------------------
+
+class TestCompanyLogo:
+    def test_sources_in_order_then_the_parent(self, org_db, monkeypatch):
+        import main
+        cur = org_db.cursor()
+        cur.execute("INSERT INTO organizations (name, website_domain, commons_logo_url) VALUES "
+                    "('Harvard University', 'harvard.edu', 'https://commons.wikimedia.org/wiki/Special:FilePath/Harvard.svg') "
+                    "RETURNING org_id")
+        harvard = cur.fetchone()[0]
+        cur.execute("INSERT INTO organizations (name, parent_org_id) VALUES ('Harvard Kennedy School', %s) RETURNING org_id",
+                    (harvard,))
+        hks = cur.fetchone()[0]
+        org_db.commit()
+        monkeypatch.setattr(main, 'LOGO_DEV_TOKEN', 'pk_test')
+        dict_cur = psycopg2.connect(org_db.dsn, cursor_factory=RealDictCursor).cursor()
+        kinds = [k for k, _ in main._logo_sources(dict_cur, hks)]
+        assert kinds == ['logo.dev', 'commons']          # Harvard's, through the parent
+        urls = [u for _, u in main._logo_sources(dict_cur, harvard)]
+        assert 'img.logo.dev/harvard.edu' in urls[0] and 'fallback=404' in urls[0]
+
+    def test_logo_served_or_404(self, org_db, monkeypatch):
+        import main
+        cur = org_db.cursor()
+        cur.execute("INSERT INTO organizations (name, website_domain) VALUES ('Acme', 'acme.com'), ('Blank', NULL) RETURNING org_id")
+        acme, blank = [r[0] for r in cur.fetchall()]
+        org_db.commit()
+        monkeypatch.setattr(main, 'LOGO_DEV_TOKEN', 'pk_test')
+        main._LOGO_CACHE.clear()
+
+        async def fake_fetch(sources):
+            return (b'PNG', 'image/png') if sources else None
+        monkeypatch.setattr(main, '_fetch_logo', fake_fetch)
+        r = _run(org_db, monkeypatch, 'company_logo', acme)
+        assert r.status_code == 200 and r.body == b'PNG'
+        assert _run(org_db, monkeypatch, 'company_logo', blank).status_code == 404
+
+
+def test_wikimedia_photos_are_allowed_through_the_proxy():
+    import main
+    assert main.is_allowed_image_url('https://commons.wikimedia.org/wiki/Special:FilePath/Jane.jpg?width=400')
+    assert main.is_allowed_image_url('https://upload.wikimedia.org/wikipedia/commons/a/ab/Jane.jpg')
+    assert not main.is_allowed_image_url('https://example.com/x.png')

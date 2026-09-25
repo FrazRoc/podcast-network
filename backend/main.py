@@ -14,6 +14,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 import os
 import json
+from collections import OrderedDict
 import urllib.parse
 import httpx
 from urllib.parse import urlparse
@@ -54,7 +55,9 @@ def verify_admin(x_admin_password: str = Header(default=None)):
 # images actually come from (Apple's CDN, Twitter avatars via unavatar.io,
 # Bluesky avatars). Anything else is rejected to prevent the endpoint being
 # used as an open proxy / SSRF vector.
-ALLOWED_IMAGE_HOST_SUFFIXES = ('mzstatic.com', 'unavatar.io', 'bsky.app')
+# wikimedia.org: people's photos from Wikidata (commons.wikimedia.org's
+# Special:FilePath redirects to upload.wikimedia.org) — scraper/enrich.py.
+ALLOWED_IMAGE_HOST_SUFFIXES = ('mzstatic.com', 'unavatar.io', 'bsky.app', 'wikimedia.org')
 
 # Whether /api/host-connections returns {nodes, links} (about a quarter of the
 # size) or the legacy row-per-edge array. On since the deployed frontend was
@@ -1905,6 +1908,84 @@ async def skip_image(host_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ------------------------------------------------------------------
+# Company logos
+# ------------------------------------------------------------------
+#
+# logo.dev by the organisation's website (the same account and key as
+# Colorado Current; fallback=404 so an unknown domain is a plain miss, not a
+# generic monogram), else the freely licensed logo on Wikimedia Commons that
+# Wikidata names, else the same for its parent ("Harvard Kennedy School"
+# shows Harvard's). Served from here so the key never reaches a browser.
+# Kept in memory, and cached by browsers for a week; a miss is a 404 and
+# the page shows the organisation's initial instead.
+
+LOGO_DEV_TOKEN = os.getenv("LOGO_DEV_TOKEN")
+_LOGO_CACHE: "OrderedDict[tuple, tuple | None]" = OrderedDict()
+_LOGO_CACHE_MAX = 3000
+_LOGO_UA = 'PodcastNetwork/1.0 (https://github.com/FrazRoc/podcast-network) logo fetcher'
+
+
+def _logo_sources(cur, org_id: int) -> list:
+    """(kind, url) to try, in order, walking up to three parents."""
+    urls, seen = [], set()
+    while org_id and org_id not in seen and len(seen) < 4:
+        seen.add(org_id)
+        cur.execute("SELECT website_domain, commons_logo_url, parent_org_id FROM organizations "
+                    "WHERE org_id = %s AND NOT not_an_org", (org_id,))
+        row = cur.fetchone()
+        if not row:
+            break
+        if row['website_domain'] and LOGO_DEV_TOKEN:
+            urls.append(('logo.dev', f"https://img.logo.dev/{urllib.parse.quote(row['website_domain'])}"
+                                     f"?token={LOGO_DEV_TOKEN}&size=128&format=png&fallback=404"))
+        if row['commons_logo_url']:
+            urls.append(('commons', row['commons_logo_url'] + '?width=128'))
+        org_id = row['parent_org_id']
+    return urls
+
+
+async def _fetch_logo(sources: list):
+    import httpx
+    async with httpx.AsyncClient(follow_redirects=True, timeout=10, headers={'User-Agent': _LOGO_UA}) as client:
+        for _, url in sources:
+            try:
+                r = await client.get(url)
+            except Exception:
+                continue
+            ctype = r.headers.get('content-type', '')
+            if r.status_code == 200 and ctype.startswith('image/') and r.content:
+                return r.content, ctype
+    return None
+
+
+@app.get("/api/logo/{org_id}")
+async def company_logo(org_id: int):
+    from fastapi.responses import Response
+    key = (org_id,)
+    if key in _LOGO_CACHE:
+        _LOGO_CACHE.move_to_end(key)
+        hit = _LOGO_CACHE[key]
+    else:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        try:
+            sources = _logo_sources(cur, org_id)
+        finally:
+            cur.close()
+            conn.close()
+        hit = await _fetch_logo(sources) if sources else None
+        _LOGO_CACHE[key] = hit
+        if len(_LOGO_CACHE) > _LOGO_CACHE_MAX:
+            _LOGO_CACHE.popitem(last=False)
+    if not hit:
+        # Cached briefly by browsers too, so a page of initials doesn't re-ask.
+        return Response(status_code=404, headers={'Cache-Control': 'public, max-age=86400'})
+    content, ctype = hit
+    return Response(content=content, media_type=ctype,
+                    headers={'Cache-Control': 'public, max-age=604800', 'Access-Control-Allow-Origin': '*'})
+
+
 @app.get("/api/proxy/image")
 async def proxy_image(url: str):
     """
@@ -2507,6 +2588,7 @@ async def list_people(q: str = "", filter: str = "all", sort: str = "appearances
             "role_ids": role_ids,
             "role_titles": [roles[i][0] for i in role_ids],
             "role_companies": [roles[i][1] for i in role_ids],
+            "role_orgs": [roles[i][2] for i in role_ids],
         }
 
         cur.execute(f"""
@@ -2518,20 +2600,22 @@ async def list_people(q: str = "", filter: str = "all", sort: str = "appearances
                    h.data_source,
                    cr.title   AS current_title,
                    cr.company AS current_company,
+                   cr.org_id  AS current_org_id,
                    COUNT(DISTINCT eh.episode_id) AS appearances,
                    COUNT(DISTINCT e.podcast_id)  AS podcast_count,
                    -- Everyone matching the search and filters, before LIMIT.
                    COUNT(*) OVER () AS matching
             FROM hosts h
-            LEFT JOIN unnest(%(role_ids)s::int[], %(role_titles)s::text[], %(role_companies)s::text[])
-                 AS cr(host_id, title, company) ON cr.host_id = h.host_id
+            LEFT JOIN unnest(%(role_ids)s::int[], %(role_titles)s::text[], %(role_companies)s::text[],
+                             %(role_orgs)s::int[])
+                 AS cr(host_id, title, company, org_id) ON cr.host_id = h.host_id
             LEFT JOIN episode_host eh ON eh.host_id = h.host_id
             LEFT JOIN episodes e ON e.episode_id = eh.episode_id
             WHERE (%(q)s = '' OR (h.first_name || ' ' || h.last_name) ILIKE '%%' || %(q)s || '%%')
             {extra_where}
             GROUP BY h.host_id, h.first_name, h.last_name, h.profile_image_url,
                      h.twitter_handle, h.bluesky_handle, h.data_source, h.created_at,
-                     cr.title, cr.company
+                     cr.title, cr.company, cr.org_id
             {having_clause}
             ORDER BY {order}
             LIMIT %(limit)s OFFSET %(offset)s
@@ -2994,7 +3078,8 @@ def _all_current_roles(cur) -> dict:
 def _public_role(role):
     if not role:
         return None
-    return {k: role.get(k) for k in ('title', 'company', 'source', 'published_date')}
+    # org_id: the company's logo (/api/logo/{org_id}); none for a pin.
+    return {k: role.get(k) for k in ('title', 'company', 'org_id', 'source', 'published_date')}
 
 
 @app.get("/api/people/{host_id}/current-role")

@@ -6,6 +6,8 @@ import ForceGraph2D from 'react-force-graph-2d';
 import { forceX, forceY, forceCollide, forceManyBody } from 'd3-force';
 import { getAdminPassword } from '../adminAuth';
 import { API_BASE_URL } from '../config';
+import OrgLogo from './OrgLogo';
+import Credits from './Credits';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -416,8 +418,9 @@ const HostProfileCard = ({ host, connections, onClose, isAdmin }) => {
           <h3 className="text-xl font-bold text-center">{host.name}</h3>
         )}
         {role && (role.title || role.company) && (
-          <p className="text-sm text-gray-700 text-center mt-1">
-            {role.title}{role.title && role.company ? ' · ' : ''}{role.company}
+          <p className="text-sm text-gray-700 mt-1 flex items-center justify-center gap-1.5">
+            {role.org_id && <OrgLogo orgId={role.org_id} name={role.company} size={18} />}
+            <span>{role.title}{role.title && role.company ? ' · ' : ''}{role.company}</span>
           </p>
         )}
         <p className="text-gray-500 text-sm">{connections.length} connections</p>
@@ -1500,11 +1503,12 @@ const PodcastHostNetwork = () => {
           />
         )}
 
-        {lastUpdated && (
-          <p className="mt-auto pt-3 text-xs text-gray-400 text-center">
-            Data updated {formatRelativeTime(lastUpdated)}
-          </p>
-        )}
+        <div className="mt-auto pt-3 text-center space-y-1">
+          {lastUpdated && (
+            <p className="text-xs text-gray-400">Data updated {formatRelativeTime(lastUpdated)}</p>
+          )}
+          <Credits />
+        </div>
       </div>
 
       {/* Graph */}

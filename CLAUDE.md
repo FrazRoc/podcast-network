@@ -447,6 +447,15 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   logos), ~400 newly typed, 51 parent links; people — LinkedIn 8 → 914,
   X 186 → 407, photos 246 → 401, Wikipedia 0 → 193. Undo snapshots of
   every touched row were kept from that session.
+- **Company logos** (`/api/logo/{org_id}`, `OrgLogo.js`): logo.dev by the
+  organisation's website with `LOGO_DEV_TOKEN` (the same logo.dev account as
+  Colorado Current; set it on the Render backend), else its Wikimedia
+  Commons logo, else its parent's; cached in memory and by browsers for a
+  week; a miss shows the initial. Shown in Company Admin rows / panel /
+  merge cards, People list and the public card's role line, and Most-Booked
+  Organisations. `Credits.js` (sidebar and Stats) credits Logo.dev and
+  Wikimedia Commons, as their free terms ask. The image proxy allows
+  wikimedia.org for people's Commons photos.
 - Not yet: a public company view.
 
 ## Tests

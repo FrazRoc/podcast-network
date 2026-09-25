@@ -4,6 +4,7 @@ import { adminFetch } from '../adminAuth';
 import AdminHeader from './AdminHeader';
 import AdminSubTabs from './AdminSubTabs';
 import AdminListCount from './AdminListCount';
+import OrgLogo from './OrgLogo';
 
 const API = `${API_BASE_URL}/api/admin`;
 const PAGE_SIZE = 100;
@@ -901,10 +902,13 @@ export default function AdminPeople() {
                           </span>
                         </div>
                         {(person.current_title || person.current_company) && (
-                          <p className="text-xs text-gray-600 truncate">
-                            {person.current_title}
-                            {person.current_title && person.current_company ? ' · ' : ''}
-                            {person.current_company}
+                          <p className="text-xs text-gray-600 truncate flex items-center gap-1">
+                            {person.current_org_id && <OrgLogo orgId={person.current_org_id} name={person.current_company} size={14} />}
+                            <span className="truncate">
+                              {person.current_title}
+                              {person.current_title && person.current_company ? ' · ' : ''}
+                              {person.current_company}
+                            </span>
                           </p>
                         )}
                         <p className="text-xs text-gray-400">

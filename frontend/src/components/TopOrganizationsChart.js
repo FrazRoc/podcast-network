@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { API_BASE_URL } from '../config';
 import { ORG_TYPE_COLORS, ORG_TYPE_LABELS } from '../chartUtils';
+import OrgLogo from './OrgLogo';
 
 // The organisations whose people are booked most, counted by distinct
 // guests or by distinct shows, with sub-organisations under their parent.
@@ -49,7 +50,10 @@ export default function TopOrganizationsChart() {
             {data.items.map((o, i) => (
               <div key={o.org_id} className="flex items-center gap-2">
                 <span className="w-5 text-right text-[11px] text-gray-400 tabular-nums">{i + 1}</span>
-                <span className="w-40 sm:w-56 flex-shrink-0 text-xs text-gray-800 truncate" title={o.name}>{o.name}</span>
+                <span className="w-40 sm:w-56 flex-shrink-0 text-xs text-gray-800 truncate flex items-center gap-1.5" title={o.name}>
+                  <OrgLogo orgId={o.org_id} name={o.name} size={16} />
+                  <span className="truncate">{o.name}</span>
+                </span>
                 <div className="flex-1 h-4">
                   <div className="h-full rounded" title={o.org_type ? ORG_TYPE_LABELS[o.org_type] : 'No type'}
                     style={{ width: `${(100 * value(o)) / peak}%`, background: ORG_TYPE_COLORS[o.org_type] || '#d1d5db' }} />

@@ -4,6 +4,7 @@ import { adminFetch } from '../adminAuth';
 import AdminHeader from './AdminHeader';
 import AdminSubTabs from './AdminSubTabs';
 import AdminListCount from './AdminListCount';
+import OrgLogo from './OrgLogo';
 
 // Company Admin. Organisations are created automatically from the company
 // names extracted for guests (scraper/organizations.py sync); this page is
@@ -235,7 +236,10 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
   return (
     <div className="bg-white rounded-2xl border border-gray-200 p-6 overflow-y-auto md:sticky md:top-6 md:max-h-[calc(100vh-80px)] space-y-5">
       <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold text-gray-900">Edit Company</h2>
+        <div className="flex items-center gap-2 min-w-0">
+          <OrgLogo orgId={org.org_id} name={org.name} size={32} />
+          <h2 className="text-base font-semibold text-gray-900">Edit Company</h2>
+        </div>
         <button onClick={onClose} className="text-xs text-gray-400 hover:text-gray-600">✕ Close</button>
       </div>
       {org.not_an_org && (
@@ -447,7 +451,10 @@ function SuggestionCard({ s, onAction, onSkip }) {
 
   const side = (o) => (
     <div className="min-w-0">
-      <p className="text-sm font-medium text-gray-900 truncate" title={o.name}>{o.name}</p>
+      <div className="flex items-center gap-2 min-w-0">
+        <OrgLogo orgId={o.org_id} name={o.name} size={24} />
+        <p className="text-sm font-medium text-gray-900 truncate" title={o.name}>{o.name}</p>
+      </div>
       <p className="text-xs text-gray-400">{o.people} people{o.org_type ? ` · ${o.org_type}` : ''}</p>
       {o.alias_names?.length > 1 && (
         <p className="text-xs text-gray-400 truncate" title={o.alias_names.filter(n => n !== o.name).join(', ')}>also: {o.alias_names.filter(n => n !== o.name).join(', ')}</p>
@@ -661,6 +668,7 @@ export default function AdminCompanies() {
                         <div key={o.org_id} onClick={() => setSelected(o.org_id === selected ? null : o.org_id)}
                           className={`px-4 py-3 cursor-pointer hover:bg-gray-50 ${o.org_id === selected ? 'bg-blue-50 border-l-2 border-blue-500' : ''}`}>
                           <div className="flex items-center gap-2">
+                            <OrgLogo orgId={o.org_id} name={o.name} size={20} />
                             <p className="text-sm font-medium text-gray-900 truncate" title={o.name}>{o.name}</p>
                             <TypeBadge type={o.org_type} />
                           </div>

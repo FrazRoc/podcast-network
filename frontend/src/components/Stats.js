@@ -12,6 +12,7 @@ import RevolvingDoorChart from './RevolvingDoorChart';
 import TopOrganizationsChart from './TopOrganizationsChart';
 import GuestMixByYearChart from './GuestMixByYearChart';
 import GuestRolesChart from './GuestRolesChart';
+import Credits from './Credits';
 
 function Section({ title, children, description }) {
   return (
@@ -137,6 +138,7 @@ export default function Stats() {
             </Section>
           </>
         )}
+        <Credits className="text-center pt-2" />
       </div>
     </div>
   );
