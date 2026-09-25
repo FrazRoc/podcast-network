@@ -53,6 +53,14 @@ NOT_A_PERSON = {
     'the new york times', 'chatham house', 'university of toronto press',
     'mit climate project', 'pine forest media', 'npr network',
     'la times studios', 'northern california public media',
+    # Second batch of newly-added shows (2026-09-25), same failure mode:
+    # itunes_artist / description-parsed "host" that is actually the show's
+    # own producing org, sponsor, or platform, not a named person.
+    'modo energy', 'the energy revolution', 'ashoka podcast',
+    'renewable watch', 'ted speaker', 'climate investor',
+    'radian generation', 'biostar renewables', 'on renewables',
+    'energy futures lab', 'nc sustainable energy association',
+    'ey canada', 'the electricity hub',
 
     # Companies
     'aurora energy research', 'h2tech', 'synapse', 'decarbonizing commerce',

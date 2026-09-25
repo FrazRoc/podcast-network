@@ -46,6 +46,15 @@ class TestLooksLikePersonChannel:
         assert not looks_like_person_channel("Chatham House")
         assert not looks_like_person_channel("University of Toronto Press")
 
+    def test_rejects_producing_org_as_host_second_batch(self):
+        # Same failure mode, second batch of shows added 2026-09-25: the
+        # itunes_artist field held the sponsor, platform, or producing org
+        # instead of a named host.
+        assert not looks_like_person_channel("Modo Energy")
+        assert not looks_like_person_channel("The Energy Revolution")
+        assert not looks_like_person_channel("Climate Investor")
+        assert not looks_like_person_channel("The Electricity Hub")
+
     def test_rejects_company_suffix(self):
         assert not looks_like_person_channel("Acme LLC")
 
