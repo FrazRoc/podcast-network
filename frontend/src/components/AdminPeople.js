@@ -65,13 +65,16 @@ function AliasEditor({ hostId }) {
   const [busy, setBusy]   = useState(false);
   const [error, setError] = useState('');
 
+  const latest = useRef(0);  // newest request wins; see PersonPanel
   const load = useCallback(() => {
+    const token = ++latest.current;
     adminFetch(`${API}/people/${hostId}/aliases`)
       .then(r => r.json())
-      .then(d => setItems(d.items || []))
+      .then(d => { if (token === latest.current) setItems(d.items || []); })
       .catch(console.error);
   }, [hostId]);
 
+  useEffect(() => { setItems([]); }, [hostId]);
   useEffect(() => { load(); }, [load]);
 
   const add = async () => {
@@ -157,13 +160,16 @@ function RoleEditor({ hostId }) {
   const [error, setError]     = useState('');
   const [showAll, setShowAll] = useState(false);
 
+  const latest = useRef(0);  // newest request wins; see PersonPanel
   const load = useCallback(() => {
+    const token = ++latest.current;
     adminFetch(`${API}/people/${hostId}/roles`)
       .then(r => r.json())
-      .then(setData)
+      .then(d => { if (token === latest.current) setData(d); })
       .catch(console.error);
   }, [hostId]);
 
+  useEffect(() => { setData(null); }, [hostId]);
   useEffect(() => { load(); setEditing(false); setShowAll(false); setError(''); }, [load]);
 
   const startEdit = () => {
@@ -201,7 +207,7 @@ function RoleEditor({ hostId }) {
     finally { setBusy(false); }
   };
 
-  if (!data) return null;
+  if (!data) return <p className="text-xs text-gray-400 mb-4">Loading role…</p>;
   const { current, derived, history = [] } = data;
   const pinned = current?.source === 'pinned';
   const shown = showAll ? history : history.slice(0, 5);
@@ -301,15 +307,21 @@ function PersonPanel({ selected, onSaved, onCancel }) {
   const [creditActionId, setCreditActionId] = useState(null); // episode_id currently being acted on
   const isEdit = !!selected;
 
+  // Only the newest request may fill the panel, so a slow response for a
+  // row clicked earlier can't overwrite the one clicked since.
+  const latest = useRef(0);
   const loadEpisodes = useCallback(() => {
+    const token = ++latest.current;
     if (!selected) { setEpisodes([]); return; }
     adminFetch(`${API}/people/${selected.host_id}/episodes`)
       .then(r => r.json())
-      .then(setEpisodes)
+      .then(e => { if (token === latest.current) setEpisodes(e); })
       .catch(console.error);
   }, [selected]);
 
   useEffect(() => {
+    // A different person: show Loading at once rather than the previous one's.
+    setEpisodes(null);
     loadEpisodes();
   // Keyed on the id rather than the object, which is a new reference each render.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -614,7 +626,10 @@ function PersonPanel({ selected, onSaved, onCancel }) {
         </div>
       )}
       {/* Episodes list */}
-      {isEdit && episodes.length > 0 && (
+      {isEdit && episodes === null && (
+        <p className="mt-5 border-t border-gray-100 pt-4 text-sm text-gray-400">Loading appearances…</p>
+      )}
+      {isEdit && episodes?.length > 0 && (
         <div className="mt-5 border-t border-gray-100 pt-4">
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
             Episode Appearances ({episodes.reduce((s, p) => s + p.count, 0)} total)

@@ -44,20 +44,28 @@ function EpisodePanel({ episodeId, onChanged }) {
   const [actioningSuggestionId, setActioningSuggestionId] = useState(null);
   const [suggestionError, setSuggestionError] = useState(null);
 
+  // Only the newest request may fill the panel, so a slow response for a
+  // row clicked earlier can't overwrite the one clicked since.
+  const latest = useRef(0);
   const fetchEpisode = useCallback(async () => {
+    const token = ++latest.current;
     if (!episodeId) { setEpisode(null); return; }
     setLoading(true);
     setError('');
     try {
       const res = await adminFetch(`${API}/episodes/${episodeId}`);
       if (!res.ok) throw new Error(`API error ${res.status}`);
-      setEpisode(await res.json());
+      const data = await res.json();
+      if (token === latest.current) setEpisode(data);
     } catch (e) {
-      setError(e.message || 'Failed to load episode');
+      if (token === latest.current) setError(e.message || 'Failed to load episode');
     } finally {
-      setLoading(false);
+      if (token === latest.current) setLoading(false);
     }
   }, [episodeId]);
+
+  // A different episode: show Loading at once rather than the previous one.
+  useEffect(() => { setEpisode(null); }, [episodeId]);
 
   useEffect(() => {
     fetchEpisode();

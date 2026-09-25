@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { API_BASE_URL } from '../config';
 import { adminFetch } from '../adminAuth';
 import AdminHeader from './AdminHeader';
@@ -112,18 +112,25 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
   // 'in': the one picked folds into this company.
   const [mergeDir, setMergeDir] = useState('into');
 
+  // Only the newest request may fill the panel, so a slow response for a
+  // row clicked earlier can't overwrite the one clicked since.
+  const latest = useRef(0);
   const load = useCallback(() => {
+    const token = ++latest.current;
     call(`${API}/companies/${orgId}?include_sub=${includeSub}`)
       .then(d => {
+        if (token !== latest.current) return;
         setData(d);
         setForm({
           name: d.org.name, org_type: d.org.org_type || '', website_domain: d.org.website_domain || '',
           parent: d.org.parent_org_id ? { org_id: d.org.parent_org_id, name: d.org.parent_name } : null,
         });
       })
-      .catch(e => setError(e.message));
+      .catch(e => { if (token === latest.current) setError(e.message); });
   }, [orgId, includeSub]);
 
+  // A different company: show Loading at once rather than the previous one.
+  useEffect(() => { setData(null); setForm(null); }, [orgId]);
   useEffect(() => { setError(''); setNotice(''); setMergeTarget(null); setMergeDir('into'); load(); }, [load]);
 
   const save = async (extra = {}) => {

@@ -54,7 +54,11 @@ function ShowPanel({ selected, onDone, onCancel }) {
   const [error, setError] = useState('');
   const [episodes, setEpisodes] = useState([]);
   const [episodesTotal, setEpisodesTotal] = useState(0);
-  const [hosts, setHosts] = useState([]);
+  const [hosts, setHosts] = useState([]);           // null while a new show's hosts load
+  const [episodesLoading, setEpisodesLoading] = useState(false);
+  // Only the newest request may fill the panel, so a slow response for a
+  // row clicked earlier can't overwrite the one clicked since.
+  const latest = useRef(0);
   const [hostQ, setHostQ] = useState('');
   const [hostResults, setHostResults] = useState([]);
   const [addingHostId, setAddingHostId] = useState(null);
@@ -63,13 +67,15 @@ function ShowPanel({ selected, onDone, onCancel }) {
 
   const fetchHosts = useCallback(() => {
     if (!selected) { setHosts([]); return; }
+    const token = latest.current;
     adminFetch(`${API}/shows/${selected.apple_podcast_id}/hosts`)
       .then(r => r.json())
-      .then(setHosts)
+      .then(h => { if (token === latest.current) setHosts(h); })
       .catch(() => {});
   }, [selected]);
 
   useEffect(() => {
+    const token = ++latest.current;
     setNewShowInput('');
     setResult(null);
     setError('');
@@ -77,12 +83,19 @@ function ShowPanel({ selected, onDone, onCancel }) {
     setEpisodesTotal(0);
     setHostQ('');
     setHostResults([]);
+    // A different show: show Loading at once rather than the previous one's hosts.
+    setHosts(selected ? null : []);
     fetchHosts();
     if (!selected) return;
+    setEpisodesLoading(true);
     adminFetch(`${API}/episodes?show=${encodeURIComponent(selected.podcast_title)}&sort=newest&limit=10`)
       .then(r => r.json())
-      .then(data => { setEpisodes(data.items || []); setEpisodesTotal(data.total || 0); })
-      .catch(() => {});
+      .then(data => {
+        if (token !== latest.current) return;
+        setEpisodes(data.items || []); setEpisodesTotal(data.total || 0);
+      })
+      .catch(() => {})
+      .finally(() => { if (token === latest.current) setEpisodesLoading(false); });
   }, [selected, fetchHosts]);
 
   useEffect(() => {
@@ -222,7 +235,7 @@ function ShowPanel({ selected, onDone, onCancel }) {
                 <p className="text-gray-400">eps</p>
               </div>
               <div className="bg-white rounded-lg p-2 text-center">
-                <p className="text-lg font-bold text-gray-900">{hosts.length}</p>
+                <p className="text-lg font-bold text-gray-900">{hosts ? hosts.length : '…'}</p>
                 <p className="text-gray-400">hosts</p>
               </div>
               <div className="bg-white rounded-lg p-2 text-center">
@@ -270,9 +283,11 @@ function ShowPanel({ selected, onDone, onCancel }) {
           {/* Show hosts */}
           <div className="mb-5">
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
-              Hosts ({hosts.length})
+              Hosts ({hosts ? hosts.length : '…'})
             </p>
-            {hosts.length === 0 ? (
+            {hosts === null ? (
+              <p className="text-sm text-gray-400 mb-2">Loading…</p>
+            ) : hosts.length === 0 ? (
               <p className="text-sm text-gray-400 italic mb-2">No hosts yet</p>
             ) : (
               <div className="space-y-1.5 mb-2">
@@ -336,6 +351,9 @@ function ShowPanel({ selected, onDone, onCancel }) {
           </button>
 
           {/* Recent episodes */}
+          {episodesLoading && episodes.length === 0 && (
+            <p className="mt-5 border-t border-gray-100 pt-4 text-sm text-gray-400">Loading episodes…</p>
+          )}
           {episodes.length > 0 && (
             <div className="mt-5 border-t border-gray-100 pt-4">
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
