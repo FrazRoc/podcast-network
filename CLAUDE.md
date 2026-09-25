@@ -615,7 +615,11 @@ everyone's current role (~6 s):
   people by default, or all), the live merge-queue size, guests' profile
   links, and person records whose name looks like an organisation
   (`ORG_LIKE_NAME_SQL` — a worklist; "Power"/"Cash" left out as real
-  surnames). Links go to Company Admin `?view=untyped|no_website|not_org`
+  surnames), plus **people whose whole name is an organisation's spelling**
+  (`normalize_org_name` against `organization_aliases`: companies from
+  episode titles read as guests — Freyr Battery, Nippon Steel… 17 deleted by
+  hand Sep 2026 — or a person filed as a company, e.g. an org "John Doerr").
+  Links go to Company Admin `?view=untyped|no_website|not_org` / `?org_id=`
   and People Admin `?filter=no_linkedin|no_image|org_like_name` (new
   filters/views, both pages now read them from the address bar).
 - "Worth looking at" lists expand with Show all, and each show links to its

@@ -785,6 +785,27 @@ function PeopleData({ data, error }) {
           ))}
         </ul>
       )}
+
+      <h3 className="text-sm font-semibold text-gray-900 mt-5 mb-1">
+        {(data.name_matches_org || []).length} {(data.name_matches_org || []).length === 1 ? 'person has' : 'people have'} the same name as an organisation
+      </h3>
+      <p className="text-sm text-gray-500 mb-2">
+        Usually a company from an episode title read as a guest ("…with Tom Jensen, CEO of Freyr Battery"): delete
+        the person. Sometimes the other way round, a person filed as a company: mark the company "not an organisation".
+      </p>
+      {(data.name_matches_org || []).length > 0 && (
+        <ul className="text-sm space-y-0.5">
+          {data.name_matches_org.map(m => (
+            <li key={m.host_id}>
+              <a href={`/admin/people?host_id=${m.host_id}`} className="text-gray-800 hover:text-teal-700 hover:underline">{m.name}</a>
+              <span className="text-gray-400"> — person, {m.credits} credit{m.credits === 1 ? '' : 's'} · </span>
+              <a href={`/admin/companies?org_id=${m.org_id}`} className="text-gray-500 hover:text-teal-700 hover:underline">
+                company{m.org_type ? ` (${m.org_type})` : ', no type'}
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
     </Card>
   );
 }

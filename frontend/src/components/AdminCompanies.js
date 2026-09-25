@@ -682,7 +682,10 @@ export default function AdminCompanies() {
   });
   const [orgType, setOrgType] = useState('');
   const [sort, setSort] = useState('people_desc');
-  const [selected, setSelected] = useState(null);
+  // Deep-link support: /admin/companies?org_id=123 opens that company.
+  const [selected, setSelected] = useState(() => {
+    try { return Number(new URLSearchParams(window.location.search).get('org_id')) || null; } catch { return null; }
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 

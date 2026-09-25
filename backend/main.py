@@ -2458,6 +2458,12 @@ async def get_pipeline_diagnostics():
 # are left out. Used by Diagnostics and People Admin's org_like_name filter.
 ORG_LIKE_NAME_SQL = r"""
     lower(h.first_name) IN ('the', 'your', 'our', 'my', 'team')
+    -- The whole name is a known organisation's spelling (normalize_org_name,
+    -- approximated: lower case, punctuation to spaces).
+    OR EXISTS (SELECT 1 FROM organization_aliases a JOIN organizations o ON o.org_id = a.org_id
+               WHERE NOT o.not_an_org
+                 AND a.normalized_name = btrim(regexp_replace(regexp_replace(lower(h.first_name || ' ' || h.last_name),
+                                                  '[^[:alnum:][:space:]]', ' ', 'g'), '\s+', ' ', 'g')))
     OR (h.first_name || ' ' || h.last_name) ~* '\m(podcasts?|inc|llc|ltd|corp|corporation|company|institute|foundation|university|association|council|agency|network|media|news|show|team|money|solar|energy|capital|partners|group|labs|ventures|coalition|alliance|project|radio|tv|studios?)\M'
 """
 
@@ -2517,10 +2523,33 @@ async def get_data_diagnostics():
             ORDER BY credits DESC, name
         """)
         org_like = cur.fetchall()
+
+        # A person whose whole name is a known organisation's spelling: a
+        # company from an episode title read as a guest ("Freyr Battery",
+        # "Nippon Steel" — 17 found by hand, Sep 2026), or the reverse, a
+        # person filed as an organisation ("John Doerr").
+        cur.execute("""
+            SELECT a.normalized_name, o.org_id, o.name, o.org_type
+            FROM organization_aliases a JOIN organizations o ON o.org_id = a.org_id
+            WHERE NOT o.not_an_org
+        """)
+        by_key = {r['normalized_name']: r for r in cur.fetchall()}
+        cur.execute("""
+            SELECT h.host_id, h.first_name || ' ' || h.last_name AS name,
+                   (SELECT COUNT(*) FROM episode_host eh WHERE eh.host_id = h.host_id) AS credits
+            FROM hosts h
+        """)
+        name_matches_org = []
+        for r in cur.fetchall():
+            org = by_key.get(normalize_org_name(r['name']))
+            if org:
+                name_matches_org.append({**r, 'org_id': org['org_id'], 'org_name': org['name'],
+                                         'org_type': org['org_type']})
+        name_matches_org.sort(key=lambda r: -r['credits'])
         cur.close()
         conn.close()
         return {"orgs": orgs, "merge_queue": merge_queue, "not_orgs": not_orgs,
-                "people": people, "org_like_names": org_like}
+                "people": people, "org_like_names": org_like, "name_matches_org": name_matches_org}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
