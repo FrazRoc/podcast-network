@@ -92,7 +92,7 @@ class TestDisplayTitle:
          'Head of Policy at the Office of the Governor'),
         ("director of DOE's loan programs", 'position', "Director of DOE's Loan Programs"),
         ('VP of Grid', 'position', 'VP of Grid'),
-        ('Founder & CTO', 'position', 'Founder & CTO'),
+        ('Founder & CTO', 'position', 'Founder and CTO'),
         ('Cofounder and CEO', 'position', 'Co-Founder and CEO'),
         ('guest cohost', 'position', 'Guest Co-Host'),
         ('ecologist, writer, and Greenpeace cofounder', 'description',
@@ -130,6 +130,29 @@ class TestDisplayTitle:
     def test_chief_titles_abbreviated(self, stored, fixed):
         from role_selection import abbreviate_chiefs
         assert abbreviate_chiefs(stored) == fixed
+
+    @pytest.mark.parametrize('stored, fixed', [
+        # 1. vice presidents
+        ('Vice President of Policy', 'VP of Policy'), ('Vice-President', 'VP'), ('vice presidents', 'VPs'),
+        ('Senior Vice President', 'SVP'), ('Executive Vice President and COO', 'EVP and COO'),
+        ('Sr VP of Business Development', 'SVP of Business Development'),
+        ('Vice Presidential candidate', 'Vice Presidential candidate'),
+        # 2. a spaced ampersand
+        ('Founder & CEO', 'Founder and CEO'), ('Head of R&D', 'Head of R&D'), ('M&A lead', 'M&A lead'),
+        # 3. short forms
+        ('Sr. Director of Marketing', 'Senior Director of Marketing'), ('sr analyst', 'senior analyst'),
+        ('HBS Prof.', 'HBS Professor'), ('Assoc. Professor', 'Associate Professor'),
+        ('Non-exec director', 'Non-executive director'), ('Dept. Manager', 'Department Manager'),
+        ('Ph.D. candidate', 'PhD candidate'), ('direct report', 'direct report'),
+        # 4. hyphenated compounds
+        ('Secretary General', 'Secretary-General'), ('deputy director general', 'deputy director-general'),
+        ('Editor in Chief', 'Editor-in-Chief'),
+        # 5. political short forms
+        ('Rep. for Ohio', 'Representative for Ohio'), ('Sen. aide', 'Senator aide'), ('Senate aide', 'Senate aide'),
+    ])
+    def test_title_words_standardised(self, stored, fixed):
+        from role_selection import tidy_title
+        assert tidy_title(stored) == fixed
 
     def test_both_tidy_ups_reach_the_display(self):
         assert display_title('cofounder and chief executive officer', 'position') == 'Co-Founder and CEO'

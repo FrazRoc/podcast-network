@@ -13,6 +13,9 @@ from fastapi.middleware.cors import CORSMiddleware
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import os
+import json
+from collections import OrderedDict
+import urllib.parse
 import httpx
 from urllib.parse import urlparse
 from dotenv import load_dotenv
@@ -22,7 +25,8 @@ from description_cleaner import (
     coarse_source, strip_html,
 )
 from role_selection import pick_current_role, format_for_display
-from org_names import normalize_org_name
+from org_names import normalize_org_name, ambiguous_spelling
+import org_stats
 from org_suggestions import refresh_suggestions
 
 load_dotenv()
@@ -51,7 +55,9 @@ def verify_admin(x_admin_password: str = Header(default=None)):
 # images actually come from (Apple's CDN, Twitter avatars via unavatar.io,
 # Bluesky avatars). Anything else is rejected to prevent the endpoint being
 # used as an open proxy / SSRF vector.
-ALLOWED_IMAGE_HOST_SUFFIXES = ('mzstatic.com', 'unavatar.io', 'bsky.app')
+# wikimedia.org: people's photos from Wikidata (commons.wikimedia.org's
+# Special:FilePath redirects to upload.wikimedia.org) — scraper/enrich.py.
+ALLOWED_IMAGE_HOST_SUFFIXES = ('mzstatic.com', 'unavatar.io', 'bsky.app', 'wikimedia.org')
 
 # Whether /api/host-connections returns {nodes, links} (about a quarter of the
 # size) or the legacy row-per-edge array. On since the deployed frontend was
@@ -560,6 +566,52 @@ async def get_podcasts():
     except Exception as e:
         print(str(e))
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ------------------------------------------------------------------
+# Stats from guests' roles and organisations (backend/org_stats.py)
+# ------------------------------------------------------------------
+
+def _org_stat(fn, *args, **kw):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        return fn(cur, *args, **kw)
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.get("/api/stats/show-guest-mix")
+async def stats_show_guest_mix():
+    """Who each show books: its guests by type of organisation."""
+    return _org_stat(org_stats.show_guest_mix)
+
+
+@app.get("/api/stats/revolving-door")
+async def stats_revolving_door():
+    """Guests whose former role was at one type of organisation and whose
+    current role is at another."""
+    return _org_stat(org_stats.revolving_door)
+
+
+@app.get("/api/stats/top-organizations")
+async def stats_top_organizations(by: str = "guests", exclude_in_house: bool = True):
+    """Most-booked organisations, sub-organisations counted under their parent."""
+    return _org_stat(org_stats.top_organisations, by="shows" if by == "shows" else "guests",
+                     exclude_in_house=exclude_in_house)
+
+
+@app.get("/api/stats/guest-mix-by-year")
+async def stats_guest_mix_by_year():
+    """Share of guest appearances by organisation type, per year."""
+    return _org_stat(org_stats.guest_mix_by_year)
+
+
+@app.get("/api/stats/guest-roles")
+async def stats_guest_roles():
+    """Guests by the kind of role they hold, overall and per show."""
+    return _org_stat(org_stats.guest_roles)
 
 
 @app.get("/api/stats/guest-appearances")
@@ -1856,6 +1908,84 @@ async def skip_image(host_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ------------------------------------------------------------------
+# Company logos
+# ------------------------------------------------------------------
+#
+# logo.dev by the organisation's website (the same account and key as
+# Colorado Current; fallback=404 so an unknown domain is a plain miss, not a
+# generic monogram), else the freely licensed logo on Wikimedia Commons that
+# Wikidata names, else the same for its parent ("Harvard Kennedy School"
+# shows Harvard's). Served from here so the key never reaches a browser.
+# Kept in memory, and cached by browsers for a week; a miss is a 404 and
+# the page shows the organisation's initial instead.
+
+LOGO_DEV_TOKEN = os.getenv("LOGO_DEV_TOKEN")
+_LOGO_CACHE: "OrderedDict[tuple, tuple | None]" = OrderedDict()
+_LOGO_CACHE_MAX = 3000
+_LOGO_UA = 'PodcastNetwork/1.0 (https://github.com/FrazRoc/podcast-network) logo fetcher'
+
+
+def _logo_sources(cur, org_id: int) -> list:
+    """(kind, url) to try, in order, walking up to three parents."""
+    urls, seen = [], set()
+    while org_id and org_id not in seen and len(seen) < 4:
+        seen.add(org_id)
+        cur.execute("SELECT website_domain, commons_logo_url, parent_org_id FROM organizations "
+                    "WHERE org_id = %s AND NOT not_an_org", (org_id,))
+        row = cur.fetchone()
+        if not row:
+            break
+        if row['website_domain'] and LOGO_DEV_TOKEN:
+            urls.append(('logo.dev', f"https://img.logo.dev/{urllib.parse.quote(row['website_domain'])}"
+                                     f"?token={LOGO_DEV_TOKEN}&size=128&format=png&fallback=404"))
+        if row['commons_logo_url']:
+            urls.append(('commons', row['commons_logo_url'] + '?width=128'))
+        org_id = row['parent_org_id']
+    return urls
+
+
+async def _fetch_logo(sources: list):
+    import httpx
+    async with httpx.AsyncClient(follow_redirects=True, timeout=10, headers={'User-Agent': _LOGO_UA}) as client:
+        for _, url in sources:
+            try:
+                r = await client.get(url)
+            except Exception:
+                continue
+            ctype = r.headers.get('content-type', '')
+            if r.status_code == 200 and ctype.startswith('image/') and r.content:
+                return r.content, ctype
+    return None
+
+
+@app.get("/api/logo/{org_id}")
+async def company_logo(org_id: int):
+    from fastapi.responses import Response
+    key = (org_id,)
+    if key in _LOGO_CACHE:
+        _LOGO_CACHE.move_to_end(key)
+        hit = _LOGO_CACHE[key]
+    else:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        try:
+            sources = _logo_sources(cur, org_id)
+        finally:
+            cur.close()
+            conn.close()
+        hit = await _fetch_logo(sources) if sources else None
+        _LOGO_CACHE[key] = hit
+        if len(_LOGO_CACHE) > _LOGO_CACHE_MAX:
+            _LOGO_CACHE.popitem(last=False)
+    if not hit:
+        # Cached briefly by browsers too, so a page of initials doesn't re-ask.
+        return Response(status_code=404, headers={'Cache-Control': 'public, max-age=86400'})
+    content, ctype = hit
+    return Response(content=content, media_type=ctype,
+                    headers={'Cache-Control': 'public, max-age=604800', 'Access-Control-Allow-Origin': '*'})
+
+
 @app.get("/api/proxy/image")
 async def proxy_image(url: str):
     """
@@ -2458,6 +2588,7 @@ async def list_people(q: str = "", filter: str = "all", sort: str = "appearances
             "role_ids": role_ids,
             "role_titles": [roles[i][0] for i in role_ids],
             "role_companies": [roles[i][1] for i in role_ids],
+            "role_orgs": [roles[i][2] for i in role_ids],
         }
 
         cur.execute(f"""
@@ -2469,20 +2600,22 @@ async def list_people(q: str = "", filter: str = "all", sort: str = "appearances
                    h.data_source,
                    cr.title   AS current_title,
                    cr.company AS current_company,
+                   cr.org_id  AS current_org_id,
                    COUNT(DISTINCT eh.episode_id) AS appearances,
                    COUNT(DISTINCT e.podcast_id)  AS podcast_count,
                    -- Everyone matching the search and filters, before LIMIT.
                    COUNT(*) OVER () AS matching
             FROM hosts h
-            LEFT JOIN unnest(%(role_ids)s::int[], %(role_titles)s::text[], %(role_companies)s::text[])
-                 AS cr(host_id, title, company) ON cr.host_id = h.host_id
+            LEFT JOIN unnest(%(role_ids)s::int[], %(role_titles)s::text[], %(role_companies)s::text[],
+                             %(role_orgs)s::int[])
+                 AS cr(host_id, title, company, org_id) ON cr.host_id = h.host_id
             LEFT JOIN episode_host eh ON eh.host_id = h.host_id
             LEFT JOIN episodes e ON e.episode_id = eh.episode_id
             WHERE (%(q)s = '' OR (h.first_name || ' ' || h.last_name) ILIKE '%%' || %(q)s || '%%')
             {extra_where}
             GROUP BY h.host_id, h.first_name, h.last_name, h.profile_image_url,
                      h.twitter_handle, h.bluesky_handle, h.data_source, h.created_at,
-                     cr.title, cr.company
+                     cr.title, cr.company, cr.org_id
             {having_clause}
             ORDER BY {order}
             LIMIT %(limit)s OFFSET %(offset)s
@@ -2564,6 +2697,12 @@ async def update_person(host_id: int, body: CreatePersonRequest):
                 profile_image_url = COALESCE(%s, profile_image_url)
             WHERE host_id = %s
         """, (first_name, last_name, twitter_handle, bluesky_handle, linkedin_url, image_url, host_id))
+        # Typed here, so scraper/enrich.py never overwrites them.
+        typed = [f for f, v in (('twitter_handle', twitter_handle), ('bluesky_handle', bluesky_handle),
+                                ('linkedin_url', linkedin_url)) if v]
+        if typed:
+            cur.execute("UPDATE hosts SET field_sources = field_sources || %s::jsonb WHERE host_id = %s",
+                        (json.dumps({f: 'admin' for f in typed}), host_id))
 
         # If name changed: clear parsed links, then re-scan with new name
         if name_changed:
@@ -2939,7 +3078,8 @@ def _all_current_roles(cur) -> dict:
 def _public_role(role):
     if not role:
         return None
-    return {k: role.get(k) for k in ('title', 'company', 'source', 'published_date')}
+    # org_id: the company's logo (/api/logo/{org_id}); none for a pin.
+    return {k: role.get(k) for k in ('title', 'company', 'org_id', 'source', 'published_date')}
 
 
 @app.get("/api/people/{host_id}/current-role")
@@ -3203,9 +3343,23 @@ async def update_company(org_id: int, body: CompanyUpdateRequest):
             raise HTTPException(status_code=400, detail=f"org_type must be one of {', '.join(ORG_TYPES)}")
         sets.append("org_type = %(org_type)s"); params['org_type'] = t
     if 'website_domain' in fields:
-        d = (fields['website_domain'] or '').strip().lower()
-        d = re.sub(r'^https?://', '', d).split('/')[0].removeprefix('www.') or None
+        # A bare domain ("wartsila.com") or a full link to the organisation's
+        # own page ("https://www.wartsila.com/energy"): the domain is kept for
+        # the logo, the link only when it has a path.
+        raw = (fields['website_domain'] or '').strip()
+        with_scheme = raw if re.match(r'^https?://', raw, re.I) else f'https://{raw}'
+        parts = urllib.parse.urlsplit(with_scheme) if raw else None
+        d = (parts.hostname or '').lower().removeprefix('www.') or None if parts else None
+        url = with_scheme if parts and parts.path.strip('/') else None
         sets.append("website_domain = %(website_domain)s"); params['website_domain'] = d
+        sets.append("website_url = %(website_url)s"); params['website_url'] = url
+        # Changed here, so scraper/enrich.py never overwrites it (the form sends
+        # the website on every save, so only a changed value counts; cleared =
+        # open to enrichment again). SET sees the row as it was before.
+        sets.append("""website_source = CASE WHEN website_domain IS NOT DISTINCT FROM %(website_domain)s
+                                                AND website_url IS NOT DISTINCT FROM %(website_url)s
+                                           THEN website_source
+                                           WHEN %(website_domain)s IS NULL THEN NULL ELSE 'admin' END""")
     if 'not_an_org' in fields:
         sets.append("not_an_org = %(not_an_org)s"); params['not_an_org'] = bool(fields['not_an_org'])
 
@@ -3236,10 +3390,78 @@ async def update_company(org_id: int, body: CompanyUpdateRequest):
         conn.close()
 
 
+class MergeCompaniesRequest(BaseModel):
+    # Spellings of the dropped company NOT to carry across: each becomes its
+    # own company instead (see ambiguous_spelling).
+    split_alias_ids: Optional[list[int]] = None
+
+
+def _spellings_moving(cur, keep: dict, drop_id: int) -> list:
+    """The dropped company's spellings, each flagged when it's ambiguous as a
+    spelling of the company it would join."""
+    cur.execute("""
+        SELECT a.alias_id, a.alias_name,
+               (SELECT COUNT(*) FROM host_affiliations ha WHERE ha.company_key = a.normalized_name) AS roles
+        FROM organization_aliases a WHERE a.org_id = %s ORDER BY roles DESC, a.alias_name
+    """, (drop_id,))
+    return [{**r, 'ambiguous': ambiguous_spelling(r['alias_name'], keep['name'])} for r in cur.fetchall()]
+
+
+def _split_alias(cur, alias_id: int) -> int:
+    """Move one spelling (and every role using it) into a new company of its own."""
+    cur.execute("SELECT alias_name, org_id FROM organization_aliases WHERE alias_id = %s", (alias_id,))
+    a = cur.fetchone()
+    if not a:
+        raise HTTPException(status_code=404, detail="Spelling not found")
+    cur.execute("INSERT INTO organizations (name) VALUES (%s) RETURNING org_id", (a['alias_name'],))
+    new_id = cur.fetchone()['org_id']
+    cur.execute("UPDATE organization_aliases SET org_id = %s, source = 'manual' WHERE alias_id = %s", (new_id, alias_id))
+    return new_id
+
+
+@app.get("/api/admin/companies/{keep_id}/merge/{drop_id}/preview", dependencies=[Depends(verify_admin)])
+async def merge_companies_preview(keep_id: int, drop_id: int):
+    """What a merge would carry across, with ambiguous spellings flagged, so
+    the page can ask before "Aurora" becomes a spelling of Aurora Solar."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT org_id, name FROM organizations WHERE org_id = %s", (keep_id,))
+        keep = cur.fetchone()
+        if not keep:
+            raise HTTPException(status_code=404, detail="Company not found")
+        return {"keep": keep, "spellings": _spellings_moving(cur, keep, drop_id)}
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.post("/api/admin/companies/{org_id}/aliases/{alias_id}/split", dependencies=[Depends(verify_admin)])
+async def split_company_alias(org_id: int, alias_id: int):
+    """Split one spelling off into a company of its own — the fix when a
+    merge carried across a word that means another organisation too."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT COUNT(*) AS n FROM organization_aliases WHERE org_id = %s", (org_id,))
+        if cur.fetchone()['n'] < 2:
+            raise HTTPException(status_code=400, detail="A company's only spelling can't be split off")
+        cur.execute("SELECT 1 FROM organization_aliases WHERE alias_id = %s AND org_id = %s", (alias_id, org_id))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Spelling not found on this company")
+        new_id = _split_alias(cur, alias_id)
+        conn.commit()
+        return {"success": True, "org_id": new_id}
+    finally:
+        cur.close()
+        conn.close()
+
+
 @app.post("/api/admin/companies/{keep_id}/merge/{drop_id}", dependencies=[Depends(verify_admin)])
-async def merge_companies(keep_id: int, drop_id: int):
+async def merge_companies(keep_id: int, drop_id: int, body: Optional[MergeCompaniesRequest] = None):
     """Fold one organisation into another. Every spelling of the dropped one
-    becomes an alias of the survivor, so all its roles re-link at once."""
+    becomes an alias of the survivor, so all its roles re-link at once —
+    except any listed in split_alias_ids, which become companies of their own."""
     if keep_id == drop_id:
         raise HTTPException(status_code=400, detail="Cannot merge a company into itself")
     conn = get_db_connection()
@@ -3251,6 +3473,11 @@ async def merge_companies(keep_id: int, drop_id: int):
             raise HTTPException(status_code=404, detail="One or both companies not found")
         keep, drop = rows[keep_id], rows[drop_id]
         keep_family = set(_org_family(cur, keep_id))
+
+        split = set((body.split_alias_ids if body else None) or [])
+        cur.execute("SELECT alias_id FROM organization_aliases WHERE org_id = %s", (drop_id,))
+        for alias_id in [r['alias_id'] for r in cur.fetchall() if r['alias_id'] in split]:
+            _split_alias(cur, alias_id)
 
         cur.execute("UPDATE organization_aliases SET org_id = %s, "
                     "source = CASE WHEN source = 'auto' THEN 'merge' ELSE source END "

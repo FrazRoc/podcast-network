@@ -151,3 +151,20 @@ def is_fragment(name: str | None) -> bool:
 
 def not_an_organisation(name: str | None) -> bool:
     return is_place(name) or is_fragment(name)
+
+
+def ambiguous_spelling(alias_name: str | None, org_name: str | None) -> bool:
+    """A spelling that could just as well mean another organisation: one word,
+    not an acronym, that is only the first word of a longer name. "Aurora"
+    for Aurora Solar (Aurora Energy Research is also "Aurora"), "Ceres" for
+    Ceres Power (Ceres the nonprofit), "Shell" for Shell Oil Company.
+    Merging carries every spelling across, so these are worth a second look."""
+    alias = (alias_name or '').strip()
+    words = re.sub(r'^the\s+', '', alias, flags=re.I).split()
+    if len(words) != 1:
+        return False
+    word = words[0].rstrip('.,')
+    if word.isupper() or any(ch.isdigit() for ch in word) or len(word) < 3:
+        return False                        # MIT, SEIA, 2150: acronyms and codes
+    name_words = normalize_org_name(org_name or '').split()
+    return len(name_words) > 1 and name_words[0] == normalize_org_name(word)

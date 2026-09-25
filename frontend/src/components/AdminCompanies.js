@@ -4,6 +4,7 @@ import { adminFetch } from '../adminAuth';
 import AdminHeader from './AdminHeader';
 import AdminSubTabs from './AdminSubTabs';
 import AdminListCount from './AdminListCount';
+import OrgLogo from './OrgLogo';
 
 // Company Admin. Organisations are created automatically from the company
 // names extracted for guests (scraper/organizations.py sync); this page is
@@ -101,6 +102,103 @@ function CompanyPicker({ placeholder, excludeId, onPick }) {
   );
 }
 
+// Every merge goes through this: it asks the backend which spellings would
+// move, and if any is ambiguous — one word that is only the start of a longer
+// name ("Aurora" joining Aurora Solar, when Aurora Energy Research is "Aurora"
+// too) — asks before carrying it across. An unticked spelling becomes its own
+// company instead. Resolves to the merge result, or CANCELLED.
+const CANCELLED = Symbol('cancelled');
+
+function useMergeCheck() {
+  const [pending, setPending] = useState(null);   // { keepName, flagged, resolve }
+  const run = async (keepId, dropId) => {
+    const pre = await call(`${API}/companies/${keepId}/merge/${dropId}/preview`);
+    const flagged = pre.spellings.filter(sp => sp.ambiguous);
+    let split = [];
+    if (flagged.length) {
+      split = await new Promise(resolve => setPending({ keepName: pre.keep.name, flagged, resolve }));
+      if (split === null) return CANCELLED;
+    }
+    return call(`${API}/companies/${keepId}/merge/${dropId}`, jsonBody('POST', { split_alias_ids: split }));
+  };
+  const dialog = pending && (
+    <SpellingCheckDialog {...pending} onDone={split => { pending.resolve(split); setPending(null); }} />
+  );
+  return [run, dialog];
+}
+
+function SpellingCheckDialog({ keepName, flagged, onDone }) {
+  const [keep, setKeep] = useState(() => new Set());   // alias_ids to carry across (none by default)
+  const toggle = id => setKeep(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  return (
+    <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4" onClick={() => onDone(null)}>
+      <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-5 space-y-3" onClick={e => e.stopPropagation()}>
+        <h3 className="text-base font-semibold text-gray-900">Check these spellings</h3>
+        <p className="text-sm text-gray-600">
+          These could mean another organisation too. Tick the ones that really are <strong>{keepName}</strong>;
+          the rest become companies of their own, so their roles don't join {keepName} by mistake.
+        </p>
+        <ul className="space-y-1.5">
+          {flagged.map(sp => (
+            <li key={sp.alias_id}>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={keep.has(sp.alias_id)} onChange={() => toggle(sp.alias_id)} />
+                <span className="font-medium text-gray-900">“{sp.alias_name}”</span>
+                <span className="text-xs text-gray-400">{sp.roles} role{sp.roles !== 1 ? 's' : ''}</span>
+              </label>
+            </li>
+          ))}
+        </ul>
+        <div className="flex justify-end gap-2 pt-1">
+          <button onClick={() => onDone(null)} className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50">Cancel</button>
+          <button onClick={() => onDone(flagged.filter(sp => !keep.has(sp.alias_id)).map(sp => sp.alias_id))}
+            className="px-3 py-1.5 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700">Merge</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Where each website came from (scraper/enrich.py); 'admin' = typed here.
+const WEBSITE_SOURCE = {
+  show_notes: 'from show notes', clearbit: 'from Clearbit', wikidata: 'from Wikidata',
+  manual: 'added by hand', admin: 'set here',
+};
+
+// Facts found outside the episode text: links, where it's based, when founded.
+function OrgFacts({ org }) {
+  const links = [
+    org.website_domain && { href: org.website_url || `https://${org.website_domain}`,
+      label: (org.website_url || org.website_domain).replace(/^https?:\/\/(www\.)?/, ''),
+      note: WEBSITE_SOURCE[org.website_source] },
+    org.wikipedia_url && { href: org.wikipedia_url, label: 'Wikipedia' },
+    org.linkedin_url && { href: org.linkedin_url, label: 'LinkedIn' },
+    org.twitter_handle && { href: `https://x.com/${org.twitter_handle}`, label: `@${org.twitter_handle}` },
+    org.bluesky_handle && { href: `https://bsky.app/profile/${org.bluesky_handle}`, label: org.bluesky_handle },
+    org.wikidata_id && { href: `https://www.wikidata.org/wiki/${org.wikidata_id}`, label: 'Wikidata' },
+  ].filter(Boolean);
+  const place = [org.hq_city, org.country].filter(Boolean).join(', ');
+  if (!links.length && !place && !org.founded_year) return null;
+  return (
+    <div>
+      <p className="text-xs font-medium text-gray-500 mb-1">About</p>
+      <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm">
+        {links.map(l => (
+          <a key={l.href} href={l.href} target="_blank" rel="noopener noreferrer"
+            className="text-blue-600 hover:underline truncate max-w-full" title={l.href}>
+            {l.label}{l.note && <span className="text-xs text-gray-400"> · {l.note}</span>}
+          </a>
+        ))}
+      </div>
+      {(place || org.founded_year) && (
+        <p className="text-xs text-gray-500 mt-1">
+          {place}{place && org.founded_year ? ' · ' : ''}{org.founded_year ? `founded ${org.founded_year}` : ''}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
   const [data, setData] = useState(null);
   const [form, setForm] = useState(null);
@@ -112,6 +210,7 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
   // 'into': this company folds into the one picked (the usual case);
   // 'in': the one picked folds into this company.
   const [mergeDir, setMergeDir] = useState('into');
+  const [mergeChecked, mergeDialog] = useMergeCheck();
 
   // Only the newest request may fill the panel, so a slow response for a
   // row clicked earlier can't overwrite the one clicked since.
@@ -123,7 +222,7 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
         if (token !== latest.current) return;
         setData(d);
         setForm({
-          name: d.org.name, org_type: d.org.org_type || '', website_domain: d.org.website_domain || '',
+          name: d.org.name, org_type: d.org.org_type || '', website_domain: d.org.website_url || d.org.website_domain || '',
           parent: d.org.parent_org_id ? { org_id: d.org.parent_org_id, name: d.org.parent_name } : null,
         });
       })
@@ -152,16 +251,29 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
     try {
       if (mergeDir === 'into') {
         // This company is merged away, so show the one it became part of.
-        await call(`${API}/companies/${mergeTarget.org_id}/merge/${orgId}`, { method: 'POST' });
+        if (await mergeChecked(mergeTarget.org_id, orgId) === CANCELLED) return;
         setMergeTarget(null);
         onChanged?.();
         onSelect?.(mergeTarget.org_id);
       } else {
-        const r = await call(`${API}/companies/${orgId}/merge/${mergeTarget.org_id}`, { method: 'POST' });
+        const r = await mergeChecked(orgId, mergeTarget.org_id);
+        if (r === CANCELLED) return;
         setNotice(`Merged “${r.merged}” into this company`);
         setMergeTarget(null);
         load(); onChanged?.();
       }
+    } catch (e) { setError(e.message); } finally { setBusy(false); }
+  };
+
+  // Give one spelling (and its roles) a company of its own — for a spelling
+  // that was merged in but means a different organisation.
+  const splitOff = async (a) => {
+    if (!window.confirm(`Split “${a.alias_name}” off into its own company? Its ${a.roles} role${a.roles !== 1 ? 's' : ''} go with it.`)) return;
+    setBusy(true); setError(''); setNotice('');
+    try {
+      await call(`${API}/companies/${orgId}/aliases/${a.alias_id}/split`, { method: 'POST' });
+      setNotice(`Split “${a.alias_name}” off into its own company`);
+      load(); onChanged?.();
     } catch (e) { setError(e.message); } finally { setBusy(false); }
   };
 
@@ -170,12 +282,13 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
     setBusy(true); setError(''); setNotice('');
     try {
       if (action === 'into') {
-        await call(`${API}/companies/${other.org_id}/merge/${orgId}`, { method: 'POST' });
+        if (await mergeChecked(other.org_id, orgId) === CANCELLED) return;
         onChanged?.(); onSelect?.(other.org_id);
         return;
       }
       if (action === 'in') {
-        const r = await call(`${API}/companies/${orgId}/merge/${other.org_id}`, { method: 'POST' });
+        const r = await mergeChecked(orgId, other.org_id);
+        if (r === CANCELLED) return;
         setNotice(`Merged “${r.merged}” into this company`);
       } else {
         await call(`${API}/companies/not-same`, jsonBody('POST', { org_a: orgId, org_b: other.org_id }));
@@ -194,8 +307,12 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
 
   return (
     <div className="bg-white rounded-2xl border border-gray-200 p-6 overflow-y-auto md:sticky md:top-6 md:max-h-[calc(100vh-80px)] space-y-5">
+      {mergeDialog}
       <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold text-gray-900">Edit Company</h2>
+        <div className="flex items-center gap-2 min-w-0">
+          <OrgLogo orgId={org.org_id} name={org.name} size={32} />
+          <h2 className="text-base font-semibold text-gray-900">Edit Company</h2>
+        </div>
         <button onClick={onClose} className="text-xs text-gray-400 hover:text-gray-600">✕ Close</button>
       </div>
       {org.not_an_org && (
@@ -221,7 +338,7 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Website</label>
-            <input type="text" value={form.website_domain} placeholder="example.com"
+            <input type="text" value={form.website_domain} placeholder="example.com or a full link"
               onChange={e => setForm(f => ({ ...f, website_domain: e.target.value }))}
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none" />
           </div>
@@ -255,6 +372,8 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
         {error && <p className="text-xs text-red-500">{error}</p>}
       </div>
 
+      <OrgFacts org={org} />
+
       {suggestions.length > 0 && (
         <div className="bg-amber-50 rounded-lg p-3">
           <p className="text-xs font-medium text-amber-800 mb-2">
@@ -284,12 +403,18 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
 
       <div>
         <p className="text-xs font-medium text-gray-500 mb-1">Spellings ({aliases.length})</p>
-        <p className="text-xs text-gray-400 mb-2">Every way this organisation was written in episode text.</p>
+        <p className="text-xs text-gray-400 mb-2">
+          Every way this organisation was written in episode text.{aliases.length > 1 && ' ✕ splits one off into its own company.'}
+        </p>
         <div className="flex flex-wrap gap-1.5">
           {aliases.map(a => (
             <span key={a.alias_id} className="text-xs bg-gray-100 text-gray-700 rounded-full px-2.5 py-1"
               title={`${a.roles} role${a.roles !== 1 ? 's' : ''} · ${a.source}`}>
               {a.alias_name} <span className="text-gray-400">{a.roles}</span>
+              {aliases.length > 1 && (
+                <button disabled={busy} onClick={() => splitOff(a)} title={`Split “${a.alias_name}” off into its own company`}
+                  className="ml-1 text-gray-400 hover:text-red-600 disabled:opacity-50">✕</button>
+              )}
             </span>
           ))}
         </div>
@@ -380,6 +505,7 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
 }
 
 function SuggestionCard({ s, onAction, onSkip }) {
+  const [mergeChecked, mergeDialog] = useMergeCheck();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const reason = REASONS[s.reason] || REASONS.similar;
@@ -389,7 +515,7 @@ function SuggestionCard({ s, onAction, onSkip }) {
   const act = async (fn, droppedId = null) => {
     setBusy(true); setError('');
     try {
-      await fn();
+      if (await fn() === CANCELLED) { setBusy(false); return; }
       onAction(s, droppedId);
     } catch (e) {
       // Already merged away (by an earlier card or another tab): this card is
@@ -399,13 +525,16 @@ function SuggestionCard({ s, onAction, onSkip }) {
     }
   };
   const merge = (keep, drop) => act(
-    () => call(`${API}/companies/${keep.org_id}/merge/${drop.org_id}`, { method: 'POST' }), drop.org_id);
+    () => mergeChecked(keep.org_id, drop.org_id), drop.org_id);
   const parent = (par, child) => act(() => call(`${API}/companies/${child.org_id}`, jsonBody('PUT', { parent_org_id: par.org_id })));
   const different = () => act(() => call(`${API}/companies/not-same`, jsonBody('POST', { org_a: s.a.org_id, org_b: s.b.org_id })));
 
   const side = (o) => (
     <div className="min-w-0">
-      <p className="text-sm font-medium text-gray-900 truncate" title={o.name}>{o.name}</p>
+      <div className="flex items-center gap-2 min-w-0">
+        <OrgLogo orgId={o.org_id} name={o.name} size={24} />
+        <p className="text-sm font-medium text-gray-900 truncate" title={o.name}>{o.name}</p>
+      </div>
       <p className="text-xs text-gray-400">{o.people} people{o.org_type ? ` · ${o.org_type}` : ''}</p>
       {o.alias_names?.length > 1 && (
         <p className="text-xs text-gray-400 truncate" title={o.alias_names.filter(n => n !== o.name).join(', ')}>also: {o.alias_names.filter(n => n !== o.name).join(', ')}</p>
@@ -416,6 +545,7 @@ function SuggestionCard({ s, onAction, onSkip }) {
   const btn = 'px-2.5 py-1 text-xs rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50';
   return (
     <div className="bg-white rounded-2xl border border-gray-200 p-4 space-y-3">
+      {mergeDialog}
       <div className="flex items-center gap-2">
         <span className={`text-xs px-1.5 py-0.5 rounded ${reason.bg}`}>{reason.label}</span>
         {s.reason === 'similar' && <span className="text-xs text-gray-400">similarity {s.score}</span>}
@@ -619,6 +749,7 @@ export default function AdminCompanies() {
                         <div key={o.org_id} onClick={() => setSelected(o.org_id === selected ? null : o.org_id)}
                           className={`px-4 py-3 cursor-pointer hover:bg-gray-50 ${o.org_id === selected ? 'bg-blue-50 border-l-2 border-blue-500' : ''}`}>
                           <div className="flex items-center gap-2">
+                            <OrgLogo orgId={o.org_id} name={o.name} size={20} />
                             <p className="text-sm font-medium text-gray-900 truncate" title={o.name}>{o.name}</p>
                             <TypeBadge type={o.org_type} />
                           </div>

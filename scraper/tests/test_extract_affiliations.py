@@ -230,10 +230,26 @@ class TestVerifiedAffiliations:
 
     @pytest.mark.parametrize('company', ['California', 'UK', 'the University of', 'Dun &'])
     def test_places_and_fragments_are_not_stored_as_companies(self, company):
-        kept, dropped = verified_affiliations([{'title': 'Senator', 'company': company}],
-                                              f"Senator Jane Doe of {company} joins")
-        assert pairs(kept) == [{'title': 'Senator', 'company': None}]
+        kept, dropped = verified_affiliations([{'title': 'Director', 'company': company}],
+                                              f"Director Jane Doe of {company} joins")
+        assert pairs(kept) == [{'title': 'Director', 'company': None}]
         assert ('company', company) in dropped
+
+    @pytest.mark.parametrize('title, company, text, expected', [
+        ('Senator', 'Massachusetts', 'Senator Ed Markey of Massachusetts', [('Senator', 'U.S. Senate')]),
+        ('Rep.', None, 'Rep. Kathy Castor (D-FL) joins', [('Representative', 'U.S. House')]),
+        ('California State Senator', None, 'California State Senator Scott Wiener',
+         [('State Senator', 'State of California')]),
+        ('Mayor', 'Boise, Idaho', 'Mayor Lauren McLean of Boise, Idaho', [('Mayor', 'City of Boise')]),
+        ('Governor', 'Bank of England', 'Governor of the Bank of England', [('Governor', 'Bank of England')]),
+    ])
+    def test_politicians_are_normalised(self, title, company, text, expected):
+        kept, _ = verified_affiliations([{'title': title, 'company': company}], text)
+        assert [(k['title'], k['company']) for k in kept] == expected
+
+    def test_former_moves_from_the_title_to_the_flag(self):
+        kept, _ = verified_affiliations([{'title': 'former CEO', 'company': 'Acme'}], 'former CEO of Acme')
+        assert (kept[0]['title'], kept[0]['is_former']) == ('CEO', True)
 
     def test_possessive_is_stripped_from_company(self):
         # Real case: "BloombergNEF's Ash Wang" on Switched On.

@@ -151,10 +151,69 @@ def abbreviate_chiefs(title: str | None) -> str | None:
     return _CHIEF_RE.sub(repl, title)
 
 
+def _same_case(template: str, word: str) -> str:
+    """word in template's case: "sr." -> "senior", "Sr." -> "Senior"."""
+    return word if template[:1].isupper() else word.lower()
+
+
+# Senior/Executive first, so "Senior Vice President" becomes SVP, not
+# "Senior VP". "presidents?\b" keeps "Vice Presidential" untouched.
+_VP_RES = [
+    (re.compile(r'\bsenior\s+vice[\s-]+president(s)?\b', re.I), 'SVP'),
+    (re.compile(r'\bexecutive\s+vice[\s-]+president(s)?\b', re.I), 'EVP'),
+    (re.compile(r'\bvice[\s-]+president(s)?\b', re.I), 'VP'),
+]
+
+# Short forms written out. Each needs its dot or a following space, so a
+# word merely starting with the letters ("Direct", "Senate") is untouched.
+_SHORT_FORMS = [
+    (re.compile(r'\bsr\b\.?(?=\s)', re.I), 'Senior'),
+    (re.compile(r'\bprof\b\.?(?=\s|$)', re.I), 'Professor'),
+    (re.compile(r'\basst\b\.?(?=\s|$)', re.I), 'Assistant'),
+    (re.compile(r'\bassoc\b\.?(?=\s|$)', re.I), 'Associate'),
+    (re.compile(r'\bexec\b\.?(?=\s)', re.I), 'Executive'),
+    (re.compile(r'\bdir\b\.?(?=\s|$)', re.I), 'Director'),
+    (re.compile(r'\bmgr\b\.?(?=\s|$)', re.I), 'Manager'),
+    (re.compile(r'\bdept\b\.?(?=\s|$)', re.I), 'Department'),
+    (re.compile(r'\bRep\.(?=\s)'), 'Representative'),
+    (re.compile(r'\bSen\.(?=\s)'), 'Senator'),
+    (re.compile(r'\bGov\.(?=\s)'), 'Governor'),
+]
+_SENIOR_EXEC_VP_RE = re.compile(r'\b(senior|executive)\s+VP(s)?\b', re.I)
+_PHD_RE = re.compile(r'\bph\.\s?d\b\.?', re.I)
+
+# Compound titles written both ways, standardised on the hyphenated form.
+_HYPHENATED_RE = re.compile(r'\b(director|secretary)[\s-]+(general)\b|\b(editor)[\s-]+(in)[\s-]+(chief)\b', re.I)
+
+# "Founder & CEO" -> "Founder and CEO"; "R&D", "M&A" (no spaces) untouched.
+_SPACED_AMPERSAND_RE = re.compile(r'\s+&\s+')
+
+
+def standardise_title_words(title: str | None) -> str | None:
+    """VP/SVP/EVP for vice presidents, "and" for a spaced "&", short forms
+    written out (Sr. -> Senior, Prof. -> Professor, Rep. -> Representative,
+    Ph.D. -> PhD), and Director-General / Secretary-General /
+    Editor-in-Chief always hyphenated."""
+    if not title:
+        return title
+    text = title
+    for rx, abbr in _VP_RES:
+        text = rx.sub(lambda m, a=abbr: a + ('s' if m.group(1) else ''), text)
+    text = _SPACED_AMPERSAND_RE.sub(' and ', text)
+    for rx, word in _SHORT_FORMS:
+        text = rx.sub(lambda m, w=word: _same_case(m.group(0), w), text)
+    # "Sr VP" became "Senior VP" just above; it and "Executive VP" are SVP / EVP.
+    text = _SENIOR_EXEC_VP_RE.sub(lambda m: ('SVP' if m.group(1).lower() == 'senior' else 'EVP') + (m.group(2) or ''), text)
+    text = _PHD_RE.sub('PhD', text)
+    text = _HYPHENATED_RE.sub(lambda m: '-'.join(g for g in m.groups() if g), text)
+    return text
+
+
 def tidy_title(title: str | None) -> str | None:
     """The spelling fixes every stored title gets: co- roles hyphenated,
-    common chief titles abbreviated."""
-    return abbreviate_chiefs(hyphenate_co(title))
+    common chief titles and vice presidents abbreviated, and the other
+    standardisations in standardise_title_words()."""
+    return standardise_title_words(abbreviate_chiefs(hyphenate_co(title)))
 
 
 def display_title(title: str | None, title_kind: str | None = None) -> str | None:

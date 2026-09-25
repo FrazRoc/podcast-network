@@ -354,6 +354,16 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   merged away and reloads the queue; skipped cards stay hidden until
   Refresh. (First version left those cards in place, and acting on them
   failed with "Company not found".)
+- **Ambiguous spellings are checked before a merge** (Sep 25 2026, after
+  "aurora" had been merged into Aurora Solar and pulled 21 Aurora Energy
+  Research people with it; Ceres and EDF were the same shape). Every merge
+  in Company Admin first calls `GET .../{keep}/merge/{drop}/preview`; any
+  spelling `org_names.ambiguous_spelling()` flags — one non-acronym word
+  that is only the first word of a longer name — is listed in a dialog,
+  unticked by default. Unticked spellings are sent as `split_alias_ids` and
+  become their own companies instead of moving. It flags Harvard/Fervo-style
+  names too; tick those. A spelling already merged wrongly can be split off
+  with the ✕ on its chip (`POST .../{org_id}/aliases/{alias_id}/split`).
 - **Role lines show the organisation's name** (`organizations.name`), not
   the episode's wording, on the public card, People list and Company Admin —
   so a merge or rename reaches every role line at once. People Admin's role
@@ -378,6 +388,84 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   (`org_suggestions.GENERIC_WORDS`: "University of Bern" / "University of
   Oxford", "Energy UK" / "C12 Energy") — trigram similarity alone put ~290
   such pairs in the queue (1,657 → 1,375 after the fix, Sep 2026).
+- **Title spelling is standardised** by `role_selection.tidy_title()` —
+  co- roles hyphenated (cofounder -> co-founder), CEO/COO/CFO/CTO/CMO/CRO/
+  CPO/CLO for their "Chief … Officer" (ambiguous CSO / CCO / Chief
+  Investment stay spelled out, Evan's call), VP/SVP/EVP, a spaced "&" ->
+  "and", short forms written out (Sr./Prof./Assoc./Rep./Sen./Gov., Ph.D.
+  -> PhD), Director-General / Secretary-General / Editor-in-Chief
+  hyphenated. The extractor applies it after the verbatim check (so stored
+  titles are tidied, not verbatim, for these spellings), and display_title
+  applies it too. ~1,350 stored titles were rewritten to match (Sep 2026).
+  Chairman/Chairwoman were deliberately NOT changed to Chair.
+- **Stats page, "Who the guests are"** (Sep 2026, `backend/org_stats.py`,
+  `/api/stats/show-guest-mix|revolving-door|top-organizations|guest-mix-by-year|guest-roles`):
+  guests only (episode_host.is_guest), current roles unless the chart is
+  about former ones, an org's type falling back to its top parent's.
+  A show's "house" organisation (BNEF on Switched On, Aurora on Energy
+  Unplugged…) is inferred from who it books, since podcasts have no
+  publisher column; Most-Booked leaves those guests out by default.
+  Role kinds come from title wording (`org_stats.ROLE_KINDS`, first match
+  wins) — approximate by design.
+- **Politicians are one title at one organisation** (Evan, Sep 2026,
+  `backend/politicians.py`): Representative @ U.S. House, Senator @ U.S.
+  Senate, state roles @ "State of X", city roles @ "City of X" (London's
+  mayor @ Greater London Authority), U.S. cabinet @ their department
+  (deputy/under/assistant secretaries keep their own title), EPA
+  Administrator, FERC Commissioner/Chair. The state comes from the title,
+  the company, or the text around the name; unresolvable ones are left
+  alone. Party labels are dropped from titles. The extractor applies it
+  (even when the company was a place it would otherwise drop), and 309
+  stored roles were rewritten (Sep 2026). "State of X" and "City of X" are
+  government organisations, cities under their state.
+  Pass 2 (`normalize_government_role`, same module; the extractor calls
+  both via `normalize_any_government_role`): other countries' heads of
+  government and ministers @ "Government of <Country>" (Scottish / Welsh /
+  Victorian Government, Government of Alberta for sub-national), MPs @ UK
+  House of Commons / Australian House of Representatives (constituency
+  names like "Kingswood" are not organisations), U.S. envoys @ U.S.
+  Department of State, UN / EU envoys @ United Nations / European Union,
+  U.S. President and VP @ White House, and politicians' staff @ the body
+  their politician is in (White House, State of X, U.S. Senate/House,
+  Government of X). 227 roles rewritten; "Chilean government"-style
+  variants merged into "Government of X"; White House councils sit under
+  White House. Company presidents/VPs whose company wasn't named, and COP
+  presidencies, are deliberately left alone.
+- **"former" lives in the flag, not the title**: a leading "former"/"ex-"
+  is stripped and the role marked former, at extraction and in the data
+  (216 titles, Sep 2026).
+- **Enrichment from outside the episode text** (`scraper/enrich.py`, Sep
+  2026; migration `migrate_add_enrichment.sql`): `orgs` fills websites (a
+  show-note link whose domain *is* the name, then Clearbit's still-live
+  undocumented autocomplete or Wikidata depending on the kind of
+  organisation; one-word names need agreement or review) and Wikidata
+  facts (type when unset, country, HQ city + coordinates, founding year,
+  Wikipedia/LinkedIn/X/Bluesky, Commons logo, parent links); `people-links`
+  fills LinkedIn/X/Bluesky only from show-note links that carry the
+  person's own name (nearness alone picked up co-guests' and hosts'
+  accounts); `people-wiki` fills photo/Wikipedia/links from Wikidata only
+  when the entry names an organisation we have for them (namesakes).
+  Dry run by default (plan JSON + review CSV); `--apply` writes. Web
+  responses cache in `scraper/.enrich_cache/` (gitignored). Values typed in
+  Company/People Admin are marked `admin` (website_source / field_sources)
+  and never overwritten. Wikidata people who died before 2010 or were born
+  before 1900 are never matched (the naturalist John Muir is a Sierra Club
+  member). Hand decisions after a dry run go in a `--manual` JSON
+  (websites incl. full links, no_parent, no_wikidata).
+  First run (Sep 25 2026): companies — 3,738 websites, 1,491 Wikidata
+  matches (country, HQ, founding year, Wikipedia/LinkedIn/X, 660 Commons
+  logos), ~400 newly typed, 51 parent links; people — LinkedIn 8 → 914,
+  X 186 → 407, photos 246 → 401, Wikipedia 0 → 193. Undo snapshots of
+  every touched row were kept from that session.
+- **Company logos** (`/api/logo/{org_id}`, `OrgLogo.js`): logo.dev by the
+  organisation's website with `LOGO_DEV_TOKEN` (the same logo.dev account as
+  Colorado Current; set it on the Render backend), else its Wikimedia
+  Commons logo, else its parent's; cached in memory and by browsers for a
+  week; a miss shows the initial. Shown in Company Admin rows / panel /
+  merge cards, People list and the public card's role line, and Most-Booked
+  Organisations. `Credits.js` (sidebar and Stats) credits Logo.dev and
+  Wikimedia Commons, as their free terms ask. The image proxy allows
+  wikimedia.org for people's Commons photos.
 - Not yet: a public company view.
 
 ## Tests
