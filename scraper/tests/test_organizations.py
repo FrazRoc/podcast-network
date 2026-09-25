@@ -122,6 +122,28 @@ class TestSuggestionPairs:
         pairs = {(p['org_a'], p['org_b']) for p in self._pairs(orgs, not_same=[(1, 3)])}
         assert pairs == set()
 
+    @pytest.mark.parametrize('a, b', [
+        ('University of Oxford', 'University of Bern'),
+        ('Energy UK', 'C12 Energy'),
+        ('ClimateWorks Foundation', 'Quadrature Climate Foundation'),
+    ])
+    def test_similar_on_generic_words_alone_is_not_suggested(self, a, b):
+        orgs = {1: {'org_id': 1, 'name': a, 'parent_org_id': None, 'not_an_org': False, 'people': 1},
+                2: {'org_id': 2, 'name': b, 'parent_org_id': None, 'not_an_org': False, 'people': 1}}
+        assert self._pairs(orgs, similar=[(1, 2, 0.6)]) == []
+
+    @pytest.mark.parametrize('a, b', [
+        ('Bloomberg NEF', 'BloombergNEF'),
+        ('Solar Recycle', 'SolarRecycle.org'),
+        ("California Governor's Office of Planning and Research", 'Office of Planning and Research for California'),
+        ('Presidential Climate Commission, South Africa', 'South African Presidential'),
+        ('Clean Energy Ventures', 'Clean Energy Venture'),  # nothing distinctive either side: keep
+    ])
+    def test_similar_with_a_shared_distinctive_word_is_kept(self, a, b):
+        orgs = {1: {'org_id': 1, 'name': a, 'parent_org_id': None, 'not_an_org': False, 'people': 1},
+                2: {'org_id': 2, 'name': b, 'parent_org_id': None, 'not_an_org': False, 'people': 1}}
+        assert [p['reason'] for p in self._pairs(orgs, similar=[(1, 2, 0.6)])] in (['similar'], ['contains'])
+
     def test_ranked_by_people_affected(self):
         orgs = {1: {'org_id': 1, 'name': 'Tesla', 'parent_org_id': None, 'not_an_org': False, 'people': 1},
                 2: {'org_id': 2, 'name': 'Tesla Energy', 'parent_org_id': None, 'not_an_org': False, 'people': 1},

@@ -374,6 +374,10 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   into it / Merge it into this / Different, and its Merge section defaults to
   merging the viewed company into another. "Open" = `_LIVE_SUGGESTIONS` in
   main.py, shared with the queue.
+- "Similar" suggestions skip pairs whose only overlap is generic words
+  (`org_suggestions.GENERIC_WORDS`: "University of Bern" / "University of
+  Oxford", "Energy UK" / "C12 Energy") — trigram similarity alone put ~290
+  such pairs in the queue (1,657 → 1,375 after the fix, Sep 2026).
 - Not yet: a public company view.
 
 ## Tests

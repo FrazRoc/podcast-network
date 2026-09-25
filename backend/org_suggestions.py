@@ -13,6 +13,40 @@ from psycopg2.extras import RealDictCursor, execute_values
 
 from org_names import normalize_org_name, looks_like_acronym_of, initials
 
+# Words that say what kind of organisation something is, not which one.
+# Two names that share only these ("University of Bern" / "University of
+# Oxford", "Energy UK" / "C12 Energy") look alike to trigram similarity but
+# are different organisations.
+GENERIC_WORDS = frozenset("""
+    university universidad universite universitat college school institute institution department dept
+    center centre laboratory laboratories lab labs national international association society foundation
+    fund council commission committee agency office ministry bureau program programme project initiative
+    network alliance coalition group company partners of the for and at in on de la du des der und
+    energy power solar climate capital ventures technologies technology systems solutions research policy
+    studies science sciences environment environmental sustainability sustainable global american us
+    united states new city state county government services clean green
+""".split())
+
+
+def _distinctive_words(name: str) -> set:
+    return {w for w in (normalize_org_name(name) or '').split() if w not in GENERIC_WORDS and len(w) > 1}
+
+
+def only_generic_overlap(a: str, b: str) -> bool:
+    """True when two names have distinctive words and none of them are shared,
+    so any resemblance comes from generic words alone. Near-spellings count
+    as shared ("Africa" / "African"), as does the same name written with or
+    without spaces ("Solar Recycle" / "SolarRecycle.org")."""
+    wa, wb = _distinctive_words(a), _distinctive_words(b)
+    if not wa or not wb:
+        return False
+    ca, cb = (''.join((normalize_org_name(n) or '').split()) for n in (a, b))
+    if ca in cb or cb in ca:
+        return False
+    def share(x, y):
+        return x == y or (min(len(x), len(y)) >= 4 and (x.startswith(y) or y.startswith(x)))
+    return not any(share(x, y) for x in wa for y in wb)
+
 
 def suggestion_pairs(orgs: dict, similar: list, not_same: set) -> list:
     """Merge candidates from three signals, strongest reason kept per pair:
@@ -39,6 +73,8 @@ def suggestion_pairs(orgs: dict, similar: list, not_same: set) -> list:
             found[(a, b)] = {'org_a': a, 'org_b': b, 'reason': reason, 'score': round(score, 2)}
 
     for a, b, sim in similar:
+        if a in orgs and b in orgs and only_generic_overlap(orgs[a]['name'], orgs[b]['name']):
+            continue
         add(a, b, 'similar', sim)
 
     keys = {oid: normalize_org_name(o['name']) or '' for oid, o in orgs.items()}
