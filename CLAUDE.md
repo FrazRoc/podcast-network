@@ -424,6 +424,21 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
 - **"former" lives in the flag, not the title**: a leading "former"/"ex-"
   is stripped and the role marked former, at extraction and in the data
   (216 titles, Sep 2026).
+- **Enrichment from outside the episode text** (`scraper/enrich.py`, Sep
+  2026; migration `migrate_add_enrichment.sql`): `orgs` fills websites (a
+  show-note link whose domain *is* the name, then Clearbit's still-live
+  undocumented autocomplete or Wikidata depending on the kind of
+  organisation; one-word names need agreement or review) and Wikidata
+  facts (type when unset, country, HQ city + coordinates, founding year,
+  Wikipedia/LinkedIn/X/Bluesky, Commons logo, parent links); `people-links`
+  fills LinkedIn/X/Bluesky only from show-note links that carry the
+  person's own name (nearness alone picked up co-guests' and hosts'
+  accounts); `people-wiki` fills photo/Wikipedia/links from Wikidata only
+  when the entry names an organisation we have for them (namesakes).
+  Dry run by default (plan JSON + review CSV); `--apply` writes. Web
+  responses cache in `scraper/.enrich_cache/` (gitignored). Values typed in
+  Company/People Admin are marked `admin` (website_source / field_sources)
+  and never overwritten.
 - Not yet: a public company view.
 
 ## Tests

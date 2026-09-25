@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import os
+import json
 import httpx
 from urllib.parse import urlparse
 from dotenv import load_dotenv
@@ -2611,6 +2612,12 @@ async def update_person(host_id: int, body: CreatePersonRequest):
                 profile_image_url = COALESCE(%s, profile_image_url)
             WHERE host_id = %s
         """, (first_name, last_name, twitter_handle, bluesky_handle, linkedin_url, image_url, host_id))
+        # Typed here, so scraper/enrich.py never overwrites them.
+        typed = [f for f, v in (('twitter_handle', twitter_handle), ('bluesky_handle', bluesky_handle),
+                                ('linkedin_url', linkedin_url)) if v]
+        if typed:
+            cur.execute("UPDATE hosts SET field_sources = field_sources || %s::jsonb WHERE host_id = %s",
+                        (json.dumps({f: 'admin' for f in typed}), host_id))
 
         # If name changed: clear parsed links, then re-scan with new name
         if name_changed:
@@ -3253,6 +3260,12 @@ async def update_company(org_id: int, body: CompanyUpdateRequest):
         d = (fields['website_domain'] or '').strip().lower()
         d = re.sub(r'^https?://', '', d).split('/')[0].removeprefix('www.') or None
         sets.append("website_domain = %(website_domain)s"); params['website_domain'] = d
+        # Changed here, so scraper/enrich.py never overwrites it (the form sends
+        # the website on every save, so only a changed value counts; cleared =
+        # open to enrichment again).
+        sets.append("""website_source = CASE WHEN website_domain IS NOT DISTINCT FROM %(website_domain)s
+                                           THEN website_source
+                                           WHEN %(website_domain)s IS NULL THEN NULL ELSE 'admin' END""")
     if 'not_an_org' in fields:
         sets.append("not_an_org = %(not_an_org)s"); params['not_an_org'] = bool(fields['not_an_org'])
 

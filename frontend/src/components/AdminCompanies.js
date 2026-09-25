@@ -101,6 +101,45 @@ function CompanyPicker({ placeholder, excludeId, onPick }) {
   );
 }
 
+// Where each website came from (scraper/enrich.py); 'admin' = typed here.
+const WEBSITE_SOURCE = {
+  show_notes: 'from show notes', clearbit: 'from Clearbit', wikidata: 'from Wikidata',
+  manual: 'added by hand', admin: 'set here',
+};
+
+// Facts found outside the episode text: links, where it's based, when founded.
+function OrgFacts({ org }) {
+  const links = [
+    org.website_domain && { href: `https://${org.website_domain}`, label: org.website_domain,
+      note: WEBSITE_SOURCE[org.website_source] },
+    org.wikipedia_url && { href: org.wikipedia_url, label: 'Wikipedia' },
+    org.linkedin_url && { href: org.linkedin_url, label: 'LinkedIn' },
+    org.twitter_handle && { href: `https://x.com/${org.twitter_handle}`, label: `@${org.twitter_handle}` },
+    org.bluesky_handle && { href: `https://bsky.app/profile/${org.bluesky_handle}`, label: org.bluesky_handle },
+    org.wikidata_id && { href: `https://www.wikidata.org/wiki/${org.wikidata_id}`, label: 'Wikidata' },
+  ].filter(Boolean);
+  const place = [org.hq_city, org.country].filter(Boolean).join(', ');
+  if (!links.length && !place && !org.founded_year) return null;
+  return (
+    <div>
+      <p className="text-xs font-medium text-gray-500 mb-1">About</p>
+      <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm">
+        {links.map(l => (
+          <a key={l.href} href={l.href} target="_blank" rel="noopener noreferrer"
+            className="text-blue-600 hover:underline truncate max-w-full" title={l.href}>
+            {l.label}{l.note && <span className="text-xs text-gray-400"> · {l.note}</span>}
+          </a>
+        ))}
+      </div>
+      {(place || org.founded_year) && (
+        <p className="text-xs text-gray-500 mt-1">
+          {place}{place && org.founded_year ? ' · ' : ''}{org.founded_year ? `founded ${org.founded_year}` : ''}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
   const [data, setData] = useState(null);
   const [form, setForm] = useState(null);
@@ -254,6 +293,8 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
         </div>
         {error && <p className="text-xs text-red-500">{error}</p>}
       </div>
+
+      <OrgFacts org={org} />
 
       {suggestions.length > 0 && (
         <div className="bg-amber-50 rounded-lg p-3">
