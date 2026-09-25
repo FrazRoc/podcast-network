@@ -45,9 +45,9 @@ export default function GuestRolesChart() {
       <StackedShareBars rows={rows} keys={data.kinds} colors={ROLE_COLORS} labels={data.labels} />
       <p className="text-xs text-gray-400 mt-3">
         Sorted from the wording of each guest's current title, so it's approximate: "co-founder and CEO" counts
-        as a founder, "VP" or "Head of" as an executive. A guest with several titles counts once, under the first
-        kind in this order: founder, CEO, official, investor, academic, analyst, journalist, activist, advisor,
-        executive.
+        as a founder, "VP" or "Head of" as an executive, "senior associate" as an analyst, an attorney under
+        advisor / lawyer. A guest with several titles counts once, under the first kind in this order: founder,
+        CEO, official, investor, academic, analyst, journalist, activist, advisor, executive, engineer.
       </p>
     </div>
   );

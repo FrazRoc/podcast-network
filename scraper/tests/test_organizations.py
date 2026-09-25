@@ -563,7 +563,15 @@ class TestOrgStats:
         ('co-founder and CEO', 'founder'), ('CEO', 'ceo'), ('Senior Analyst', 'analyst'),
         ('Professor of Law', 'academic'), ('VP of Policy', 'executive'), ('Senator', 'official'),
         ('climate activist', 'activist'), ('Senior Advisor', 'advisor'), ('reporter', 'journalist'),
-        ('general partner', 'investor'), ('ecologist', 'other'),
+        ('general partner', 'investor'), ('ecologist', 'academic'),
+        # Sep 2026: titles that used to fall into "other".
+        ('senior associate', 'analyst'), ('Associate Director', 'executive'), ('Associate VP', 'executive'),
+        ('environmental lawyer', 'advisor'), ('attorney general', 'official'), ('PhD candidate', 'academic'),
+        ('congressional candidate NJ07', 'official'), ('seasoned angel investors', 'investor'),
+        ('filmmaker', 'journalist'), ('conservationist', 'activist'), ('plaintiff', 'activist'),
+        ('chief legal counsel for plaintiffs', 'advisor'), ('senior process engineer', 'engineer'),
+        ('general manager and chief engineer', 'executive'), ('Chief Technologist', 'executive'),
+        ('chef', 'other'),
     ])
     def test_role_kind(self, title, kind):
         from org_stats import role_kind

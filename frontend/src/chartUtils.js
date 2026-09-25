@@ -18,5 +18,5 @@ export const ORG_TYPE_LABELS = {
 export const ROLE_COLORS = {
   founder: '#f28e2b', ceo: '#e15759', executive: '#4e79a7', investor: '#59a14f',
   advisor: '#edc948', analyst: '#76b7b2', academic: '#b07aa1', journalist: '#ff9da7',
-  activist: '#8cd17d', official: '#9c755f', other: '#bab0ac',
+  activist: '#8cd17d', official: '#9c755f', engineer: '#499894', other: '#bab0ac',
 };

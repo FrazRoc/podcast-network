@@ -222,28 +222,41 @@ def guest_mix_by_year(cur, first_year: int = 2019) -> dict:
 # ------------------------------------------------------------------
 
 ROLE_KINDS = [
-    ('founder',    re.compile(r'\b((co-)?found(er|ers|ed|ing)|entrepreneur)\b', re.I)),
+    ('founder',    re.compile(r'\b((co-)?found(er|ers|ed|ing)?|entrepreneur)\b', re.I)),
     ('ceo',        re.compile(r'\b(CEO|president|managing director|executive director|chief executive)\b', re.I)),
-    ('official',   re.compile(r'\b(senator|representative|congress(man|woman)|governor|minister|secretary|'
-                              r'commissioner|mayor|ambassador|envoy|assembly ?member|council ?member|'
-                              r'legislator|regulator|administrator)\b', re.I)),
-    ('investor',   re.compile(r'\b(general partner|managing partner|venture partner|investor|investing|'
-                              r'investment|portfolio|fund manager)\b', re.I)),
-    ('academic',   re.compile(r'\b(professor|lecturer|dean|researcher|research fellow|scientist|'
-                              r'postdoc|phd|scholar|fellow)\b', re.I)),
-    ('analyst',    re.compile(r'\b(analysts?|economists?|strategist|modeler|modeller|research)\b', re.I)),
-    ('journalist', re.compile(r'\b(reporter|journalist|editor|correspondent|columnist|writer|author|'
-                              r'producer|host|anchor)\b', re.I)),
-    ('activist',   re.compile(r'\b(activists?|advocates?|campaigner|organi[sz]er|organi[sz]ing)\b', re.I)),
-    ('advisor',    re.compile(r'\b(advis[oe]rs?|consultants?|consulting|experts?|specialists?|counsel)\b', re.I)),
-    ('executive',  re.compile(r'\b(C[A-Z]O|VP|SVP|EVP|chief|director|directors|head|manager|lead|leads|leader|'
-                              r'partner|principal|chair|chairman|chairwoman|officer|GM|general manager|'
-                              r'executive|board|owner)\b', re.I)),
+    ('official',   re.compile(r'\b(senator|representative|congress(man|woman)|governor|minister|ministerial|'
+                              r'secretary|commissioner|mayor|ambassador|envoy|assembly ?member|council ?member|'
+                              r'legislator|regulator|administrator|attorney general|rapporteur|'
+                              r'(congressional|presidential|party|mayoral|senate|gubernatorial|parliamentary|'
+                              r'democratic|republican)\b[\w\s-]{0,20}candidate|'
+                              r'high[- ]level champion|presidential coordinator)\b', re.I)),
+    ('investor',   re.compile(r'\b(general partner|managing partner|venture partner|investors?|investing|'
+                              r'investment|portfolio|fund manager|venture capital|VC|solo GP|syndicate partners?)\b',
+                              re.I)),
+    ('academic',   re.compile(r'\b(professor|lecturer|dean|researcher|research fellow|scientist|geoscientist|'
+                              r'postdoc|phd|scholar|fellow|academic|students?|teacher|instructor|historians?|'
+                              r'philosopher|ethicist|ethnobotanist|psychologist|(eco|bio|geo|climato|meteoro|cnidario)logists?|'
+                              r'MBA class)\b', re.I)),
+    ('analyst',    re.compile(r'\b(analysts?|economists?|strategist|modeler|modeller|research|statistician|'
+                              r'associates?(?!\s+(director|vice|vp|partner|dean|professor|general|editor|producer|counsel|principal|manager)))\b', re.I)),
+    ('journalist', re.compile(r'\b(reporter|journalist|editor|correspondent|columnist|writer|author|co-authors?|'
+                              r'producer|host|anchor|presenter|filmmaker|cinematographer|documentarian|blogger|'
+                              r'covers|media maker|creators?|co-creators?|storyteller|content (creator|architect))\b', re.I)),
+    ('activist',   re.compile(r'\b(activists?|advocates?|campaigner|organi[sz]er|organi[sz]ing|environmentalist|'
+                              r'conservationist|^(youth )?plaintiffs?$|influencer)\b', re.I)),
+    ('advisor',    re.compile(r'\b(advis[oe]rs?|consultants?|consulting|experts?|specialists?|counsel|'
+                              r'attorneys?|lawyers?|broker)\b', re.I)),
+    ('executive',  re.compile(r'\b(C[A-Z]O|VP|AVP|SVP|EVP|chief|director|directors|head|manager|lead|leads|leader|'
+                              r'partners?|principals?|chair|chairman|chairwoman|officer|GM|general manager|'
+                              r'executive|board|owner|coordinator|supervisor)\b', re.I)),
+    ('engineer',   re.compile(r'\b(engineers?|technicians?|electrician|mechanic|P\.E\.|project developer|'
+                              r'evaluator|facilities management)\b', re.I)),
 ]
 ROLE_LABELS = {'founder': 'Founder', 'ceo': 'CEO / president', 'executive': 'Executive',
-               'investor': 'Investor', 'advisor': 'Advisor / consultant', 'analyst': 'Analyst / economist',
+               'investor': 'Investor', 'advisor': 'Advisor / lawyer', 'analyst': 'Analyst / economist',
                'academic': 'Academic / scientist', 'journalist': 'Journalist / author',
-               'activist': 'Activist / advocate', 'official': 'Official', 'other': 'Other'}
+               'activist': 'Activist / advocate', 'official': 'Official',
+               'engineer': 'Engineer / technician', 'other': 'Other'}
 
 
 def role_kind(title: str | None) -> str | None:
@@ -286,7 +299,7 @@ def guest_roles(cur, min_guests: int = 30) -> dict:
     titles = {r['podcast_id']: r['title'] for r in cur.fetchall()}
     # Display order, not matching order.
     kinds = ['founder', 'ceo', 'executive', 'investor', 'advisor', 'analyst', 'academic',
-             'journalist', 'activist', 'official', 'other']
+             'engineer', 'journalist', 'activist', 'official', 'other']
     shows = [{'podcast_id': p, 'title': titles.get(p), 'counts': dict(c), 'total': sum(c.values())}
              for p, c in per_show.items() if sum(c.values()) >= min_guests]
     shows.sort(key=lambda s: -s['total'])
