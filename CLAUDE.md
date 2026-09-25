@@ -438,7 +438,15 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   Dry run by default (plan JSON + review CSV); `--apply` writes. Web
   responses cache in `scraper/.enrich_cache/` (gitignored). Values typed in
   Company/People Admin are marked `admin` (website_source / field_sources)
-  and never overwritten.
+  and never overwritten. Wikidata people who died before 2010 or were born
+  before 1900 are never matched (the naturalist John Muir is a Sierra Club
+  member). Hand decisions after a dry run go in a `--manual` JSON
+  (websites incl. full links, no_parent, no_wikidata).
+  First run (Sep 25 2026): companies — 3,738 websites, 1,491 Wikidata
+  matches (country, HQ, founding year, Wikipedia/LinkedIn/X, 660 Commons
+  logos), ~400 newly typed, 51 parent links; people — LinkedIn 8 → 914,
+  X 186 → 407, photos 246 → 401, Wikipedia 0 → 193. Undo snapshots of
+  every touched row were kept from that session.
 - Not yet: a public company view.
 
 ## Tests

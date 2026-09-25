@@ -439,7 +439,8 @@ def plan_orgs(cur, fetch: Fetcher, limit: int | None = None, manual: dict | None
             facts = {
                 'wikidata_id': q,
                 'country': country[0] if country else None,
-                'hq_city': Wikidata.label(hq[0]) if hq else None,
+                # Not when it only repeats the country ("United States" for the Senate).
+                'hq_city': (Wikidata.label(hq[0]) if hq and Wikidata.label(hq[0]) not in country else None),
                 'hq_lat': coords[0].get('latitude') if coords else None,
                 'hq_lon': coords[0].get('longitude') if coords else None,
                 'founded_year': year,
@@ -677,6 +678,21 @@ def apply_people(conn, plan: list, source: str) -> Counter:
 # People: Wikidata
 # ------------------------------------------------------------------
 
+def _year(entity: dict, prop: str) -> int | None:
+    for v in wd_claim_values(entity, prop):
+        m = re.match(r'[+-](\d{4})', v.get('time', '') if isinstance(v, dict) else '')
+        if m:
+            return int(m.group(1))
+    return None
+
+
+def _historical(entity: dict) -> bool:
+    """Guests are living or recent people: the naturalist John Muir (died
+    1914) is a Sierra Club member on Wikidata, not our Sierra Club guest."""
+    died, born = _year(entity, 'P570'), _year(entity, 'P569')
+    return (died is not None and died < 2010) or (born is not None and born < 1900)
+
+
 def plan_people_wiki(cur, fetch: Fetcher, limit: int | None = None) -> tuple:
     """A person's Wikidata entry, trusted only when its employer, position
     held, membership or description names an organisation we already have
@@ -713,7 +729,8 @@ def plan_people_wiki(cur, fetch: Fetcher, limit: int | None = None) -> tuple:
                              for q in wd_ids(e, prop)}))
     plan, review = [], []
     for p in people:
-        humans = [ents[q] for q in cands[p['host_id']] if q in ents and _HUMAN in wd_ids(ents[q], 'P31')]
+        humans = [ents[q] for q in cands[p['host_id']]
+                  if q in ents and _HUMAN in wd_ids(ents[q], 'P31') and not _historical(ents[q])]
         if not humans:
             continue
         ours = {squash(n) for n in (p['orgs'] or []) if n}
