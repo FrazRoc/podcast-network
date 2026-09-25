@@ -43,6 +43,16 @@ NOT_A_PERSON = {
     # Organizations / institutions
     'harvard business school', 'harvard business school business & environment initiative',
     'der task force', 'climate one from the commonwealth club',
+    # A batch of newly-added shows (2026-09-24) whose itunes_artist field is
+    # the parent news outlet, university press, think tank, or public-media
+    # station rather than a named host — same failure as the org names
+    # above, just from shows added in bulk rather than one at a time. Each
+    # had real collateral damage: "The New York Times" alone had matched as
+    # a "guest" on 110 unrelated episodes across 38 other shows before this
+    # was caught.
+    'the new york times', 'chatham house', 'university of toronto press',
+    'mit climate project', 'pine forest media', 'npr network',
+    'la times studios', 'northern california public media',
 
     # Companies
     'aurora energy research', 'h2tech', 'synapse', 'decarbonizing commerce',
@@ -51,7 +61,8 @@ NOT_A_PERSON = {
     'political climate',
 
     # Shows whose channel name matches their own title
-    'cleantech talk', 'drilled', 'solar surge',
+    'cleantech talk', 'drilled', 'solar surge', 'how to stop climate change',
+    'the climate pod', 'climate decoded', 'climate town',
 
     # Generic descriptions
     'the founders and futurists building the hard-tech frontier.',
