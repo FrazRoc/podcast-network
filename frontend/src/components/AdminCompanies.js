@@ -3,6 +3,7 @@ import { API_BASE_URL } from '../config';
 import { adminFetch } from '../adminAuth';
 import AdminHeader from './AdminHeader';
 import AdminSubTabs from './AdminSubTabs';
+import AdminListCount from './AdminListCount';
 
 // Company Admin. Organisations are created automatically from the company
 // names extracted for guests (scraper/organizations.py sync); this page is
@@ -497,9 +498,10 @@ function Suggestions({ onChanged }) {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <p className="text-sm text-gray-500">
-          {total} possible duplicate{total !== 1 ? 's' : ''}, biggest first · computed {timeAgo(computedAt)}.
-        </p>
+        <div>
+          <AdminListCount total={total} shown={items.length} noun="possible duplicate" className="mb-0" />
+          <p className="text-xs text-gray-400">Biggest first · computed {timeAgo(computedAt)}.</p>
+        </div>
         <div className="flex gap-3">
           <button onClick={recompute} className="text-xs text-gray-500 hover:underline">Recompute</button>
           <button onClick={() => { setSkipped(new Set()); load(false, shown); }}
@@ -538,7 +540,7 @@ export default function AdminCompanies() {
     return () => window.removeEventListener('popstate', onPop);
   }, []);
   const [items, setItems] = useState([]);
-  const [totals, setTotals] = useState(null);
+  const [count, setCount] = useState(null);   // { total, allTotal }
   const [q, setQ] = useState('');
   const [view, setView] = useState('active');
   const [orgType, setOrgType] = useState('');
@@ -551,7 +553,7 @@ export default function AdminCompanies() {
     setLoading(true);
     const params = new URLSearchParams({ q, view, org_type: orgType, sort, limit: '300' });
     call(`${API}/companies?${params}`)
-      .then(d => { setItems(d.items || []); setTotals(d.totals); setError(''); })
+      .then(d => { setItems(d.items || []); setCount({ total: d.total, allTotal: d.all_total }); setError(''); })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, [q, view, orgType, sort]);
@@ -564,8 +566,7 @@ export default function AdminCompanies() {
 
   return (
     <div className="min-h-screen bg-gray-100 font-sans">
-      <AdminHeader active="Companies"
-        right={totals && <span className="text-sm text-gray-400">{totals.active} companies · {totals.untyped} untyped</span>} />
+      <AdminHeader active="Companies" />
       <div className="max-w-7xl mx-auto p-4 sm:p-6">
         <AdminSubTabs active={tab} tabs={[
           { id: 'companies',   label: 'Companies',         onClick: () => setTab('companies') },
@@ -606,6 +607,8 @@ export default function AdminCompanies() {
                 </div>
               </div>
 
+              {count && <AdminListCount total={count.total} allTotal={count.allTotal} shown={items.length}
+                noun="company" plural="companies" />}
               <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden overflow-y-auto max-h-[60vh] md:max-h-[calc(100vh-300px)]">
                 {loading && items.length === 0 ? <div className="py-12 text-center text-gray-400 text-sm">Loading…</div>
                   : error ? <div className="py-12 text-center text-red-500 text-sm">{error}</div>

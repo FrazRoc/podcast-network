@@ -3,6 +3,7 @@ import { API_BASE_URL } from '../config';
 import { adminFetch } from '../adminAuth';
 import AdminHeader from './AdminHeader';
 import AdminSubTabs from './AdminSubTabs';
+import AdminListCount from './AdminListCount';
 import { PEOPLE_TABS } from './AdminPeople';
 
 const API = `${API_BASE_URL}/api/admin`;
@@ -118,10 +119,7 @@ export default function AdminDuplicates() {
 
   return (
     <div className="min-h-screen bg-gray-100 font-sans">
-      <AdminHeader
-        active="People"
-        right={<span className="text-sm text-gray-500">{items.length} possible duplicate{items.length === 1 ? '' : 's'}</span>}
-      />
+      <AdminHeader active="People" />
 
       <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-6">
         <div className="-mb-2"><AdminSubTabs tabs={PEOPLE_TABS} active="duplicates" /></div>
@@ -143,6 +141,9 @@ export default function AdminDuplicates() {
         ))}
 
         {loading && <p className="text-sm text-gray-400">Loading…</p>}
+        {!loading && !error && items.length > 0 && (
+          <AdminListCount total={items.length} noun="possible duplicate" className="mb-0" />
+        )}
         {error && <p className="text-sm text-red-500">Couldn't load: {error}</p>}
         {!loading && !error && items.length === 0 && (
           <p className="text-sm text-gray-500">No possible duplicates outstanding.</p>

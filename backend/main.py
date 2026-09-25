@@ -1342,10 +1342,13 @@ async def list_suggestions(apple_podcast_id: str = None, source: str = None,
             WHERE {where}
         """, params)
         total = cur.fetchone()["total"]
+        # Everything in this status, for "N of M" beside the filtered count.
+        cur.execute("SELECT COUNT(*) AS all_total FROM suggestions WHERE status = %(status)s", params)
+        all_total = cur.fetchone()["all_total"]
 
         cur.close()
         conn.close()
-        return {"items": items, "total": total}
+        return {"items": items, "total": total, "all_total": all_total}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -2463,7 +2466,9 @@ async def list_people(q: str = "", filter: str = "all", sort: str = "appearances
                    cr.title   AS current_title,
                    cr.company AS current_company,
                    COUNT(DISTINCT eh.episode_id) AS appearances,
-                   COUNT(DISTINCT e.podcast_id)  AS podcast_count
+                   COUNT(DISTINCT e.podcast_id)  AS podcast_count,
+                   -- Everyone matching the search and filters, before LIMIT.
+                   COUNT(*) OVER () AS matching
             FROM hosts h
             LEFT JOIN unnest(%(role_ids)s::int[], %(role_titles)s::text[], %(role_companies)s::text[])
                  AS cr(host_id, title, company) ON cr.host_id = h.host_id
@@ -2479,16 +2484,13 @@ async def list_people(q: str = "", filter: str = "all", sort: str = "appearances
             LIMIT 100
         """, {"q": q, **role_params})
         rows = cur.fetchall()
-
-        cur.execute("""
-            SELECT COUNT(*) FROM hosts
-            WHERE (%(q)s = '' OR (first_name || ' ' || last_name) ILIKE '%%' || %(q)s || '%%')
-        """, {"q": q})
-        total = cur.fetchone()['count']
+        total = rows[0]['matching'] if rows else 0
+        cur.execute("SELECT COUNT(*) FROM hosts")
+        all_total = cur.fetchone()['count']
 
         cur.close()
         conn.close()
-        return {"items": list(rows), "total": total}
+        return {"items": list(rows), "total": total, "all_total": all_total}
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -3069,6 +3071,7 @@ async def list_companies(q: str = "", org_type: str = "", sort: str = "people_de
                    COALESCE(c.people, 0) AS people, COALESCE(c.roles, 0) AS roles,
                    (SELECT COUNT(*) FROM organization_aliases a WHERE a.org_id = o.org_id) AS alias_count,
                    (SELECT COUNT(*) FROM organizations ch WHERE ch.parent_org_id = o.org_id) AS child_count,
+                   COUNT(*) OVER () AS matching,
                    (SELECT COUNT(*) {_LIVE_SUGGESTIONS}
                       AND o.org_id IN (s.org_a, s.org_b)) AS suggestion_count
             FROM organizations o
@@ -3084,7 +3087,11 @@ async def list_companies(q: str = "", org_type: str = "", sort: str = "people_de
                     "COUNT(*) FILTER (WHERE not_an_org) AS not_org, "
                     "COUNT(*) FILTER (WHERE NOT not_an_org AND org_type IS NULL) AS untyped "
                     "FROM organizations")
-        return {"items": items, "totals": cur.fetchone()}
+        totals = cur.fetchone()
+        return {"items": items, "totals": totals,
+                # Matching the search and filters (before LIMIT), and the whole view.
+                "total": items[0]['matching'] if items else 0,
+                "all_total": totals['not_org'] if view == 'not_org' else totals['active']}
     finally:
         cur.close()
         conn.close()
@@ -3797,10 +3804,12 @@ async def list_episodes(q: str = "", show: str = "", sort: str = "newest", limit
               {credit_filter_sql};
         """, {"q": q, "show": show, "credit_filter": credit_filter})
         total = cur.fetchone()["total"]
+        cur.execute("SELECT COUNT(*) AS all_total FROM episodes")
+        all_total = cur.fetchone()["all_total"]
 
         cur.close()
         conn.close()
-        return {"items": items, "total": total}
+        return {"items": items, "total": total, "all_total": all_total}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

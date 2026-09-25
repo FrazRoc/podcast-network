@@ -226,6 +226,21 @@ class TestPeopleListRoles:
         ann = next(i for i in by_company if i['first_name'] == 'Ann')
         assert (ann['current_title'], ann['current_company']) == ('CEO', 'Zeta')
 
+    def test_total_counts_the_filtered_list(self, role_db, monkeypatch):
+        # total used to count everyone matching the name search, ignoring the
+        # role filter; all_total is everyone.
+        import asyncio
+        import main
+        cur = role_db.cursor()
+        cur.execute("INSERT INTO podcasts (title, apple_podcast_id) VALUES ('Show', 'show') RETURNING podcast_id")
+        self._people(cur, cur.fetchone()[0])
+        role_db.commit()
+        self._list(role_db, monkeypatch)   # points main at the test database
+        r = asyncio.run(main.list_people(filter='role_title_only'))
+        assert (r['total'], r['all_total']) == (1, 4)
+        r = asyncio.run(main.list_people())
+        assert (r['total'], r['all_total']) == (4, 4)
+
     def test_list_shows_the_tidied_title(self, role_db, monkeypatch):
         cur = role_db.cursor()
         cur.execute("INSERT INTO podcasts (title, apple_podcast_id) VALUES ('Show', 'show') RETURNING podcast_id")

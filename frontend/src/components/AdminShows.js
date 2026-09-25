@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { API_BASE_URL } from '../config';
 import { adminFetch } from '../adminAuth';
 import AdminHeader from './AdminHeader';
+import AdminListCount from './AdminListCount';
 import { formatDateOnly } from '../adminUtils';
 
 const API = `${API_BASE_URL}/api/admin`;
@@ -475,7 +476,7 @@ export default function AdminShows() {
 
   return (
     <div className="min-h-screen bg-gray-100 font-sans">
-      <AdminHeader active="Shows" right={<span className="text-sm text-gray-400">{shows.length} shows</span>} />
+      <AdminHeader active="Shows" />
 
       <div className="flex flex-col md:flex-row gap-4 md:gap-6 p-4 md:p-6 max-w-7xl mx-auto">
 
@@ -517,6 +518,7 @@ export default function AdminShows() {
           </div>
 
           {/* Shows list */}
+          {!loading && <AdminListCount total={visibleShows.length} allTotal={shows.length} noun="show" />}
           <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden overflow-y-auto max-h-[60vh] md:max-h-[calc(100vh-280px)]">
             {loading ? (
               <div className="py-12 text-center text-gray-400 text-sm">Loading...</div>

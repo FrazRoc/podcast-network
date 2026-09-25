@@ -3,6 +3,7 @@ import { API_BASE_URL } from '../config';
 import { adminFetch } from '../adminAuth';
 import AdminHeader from './AdminHeader';
 import AdminSubTabs from './AdminSubTabs';
+import AdminListCount from './AdminListCount';
 
 const API = `${API_BASE_URL}/api/admin`;
 
@@ -716,7 +717,7 @@ export default function AdminPeople() {
   const [sort, setSort]             = useState('appearances_desc');
   const [selected, setSelected]     = useState(null);  // person being edited
   const [deleteConfirm, setDeleteConfirm] = useState(null);
-  const [total, setTotal]           = useState(0);
+  const [count, setCount]           = useState(null);   // { total, allTotal }
   const searchRef = useRef(null);
 
   const fetchPeople = useCallback(async (q = '', f = 'all', s = 'appearances_desc') => {
@@ -729,7 +730,7 @@ export default function AdminPeople() {
       const data = await res.json();
       const items = Array.isArray(data) ? data : (data.items || []);
       setPeople(items);
-      setTotal(Array.isArray(data) ? data.length : (data.total || items.length));
+      setCount({ total: data.total ?? items.length, allTotal: data.all_total });
     } catch (e) { setListError(e.message || 'Failed to load'); }
     finally { setLoading(false); }
   }, []);
@@ -785,7 +786,7 @@ export default function AdminPeople() {
 
   return (
     <div className="min-h-screen bg-gray-100 font-sans">
-      <AdminHeader active="People" right={<span className="text-sm text-gray-400">{total} people</span>} />
+      <AdminHeader active="People" />
 
       <div className="max-w-7xl mx-auto px-4 pt-4 md:px-6 md:pt-6 -mb-4 md:-mb-2">
         <AdminSubTabs tabs={PEOPLE_TABS} active="people" />
@@ -831,6 +832,8 @@ export default function AdminPeople() {
           </div>
 
           {/* People list */}
+          {count && <AdminListCount total={count.total} allTotal={count.allTotal} shown={people.length}
+            noun="person" plural="people" />}
           <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden overflow-y-auto max-h-[60vh] md:max-h-[calc(100vh-280px)]">
             {loading ? (
               <div className="py-12 text-center text-gray-400 text-sm">Loading...</div>
