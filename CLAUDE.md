@@ -344,16 +344,29 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   ones were marked (70 places, 35 fragments); the fragments alone sat in
   400+ merge suggestions. `extract_affiliations.py reextract` re-reads the
   affected appearances (244) with Opus 5 and a wider window
-  (`WIDE_WINDOW`) to find the real organisation — built but **not yet run:
-  the API account is out of credit**. Watch for real names that trip the
+  (`WIDE_WINDOW`) to find the real organisation — built but never needed:
+  with the API account out of credit, Claude Code read all 244 itself and
+  rewrote them (75 gained a real organisation, the rest kept their title and
+  lost the fake company). Watch for real names that trip the
   fragment rule (e.g. "Compostable LA" was caught by a French "la" and
   unmarked; "Planet A", "Instant ON" are deliberately allowed).
 - The merge-suggestions tab hides every card naming a company that was just
   merged away and reloads the queue; skipped cards stay hidden until
   Refresh. (First version left those cards in place, and acting on them
   failed with "Company not found".)
-- Not yet: showing the canonical organisation name on the People list and
-  cards (they still show the raw company text), and a public company view.
+- **Role lines show the organisation's name** (`organizations.name`), not
+  the episode's wording, on the public card, People list and Company Admin —
+  so a merge or rename reaches every role line at once. People Admin's role
+  history keeps each show's own wording (`company_as_written`). Company
+  detail's "current" flag matches on `org_id` (a pin, being free text, on
+  spelling), so a rename that adds no alias doesn't unmark anyone.
+- Sep 2026 name cleanup: 386 renames (every lowercase leading "the", glued-on
+  descriptions like "the research firm Wood Mackenzie"), 47 merges (incl.
+  Aurora's "our Berlin office"-style phrasings into Aurora Energy Research),
+  112 marked not an organisation (book titles, politicians/administrations as
+  employer, unnamed descriptions, reports, state names). Undo:
+  `names_undo.json` in that session's scratchpad.
+- Not yet: a public company view.
 
 ## Tests
 

@@ -2867,10 +2867,13 @@ async def delete_alias(alias_id: int):
 def _role_rows(cur, host_id: int) -> list:
     cur.execute("""
         SELECT ha.affiliation_id, ha.episode_id, ha.title,
-               -- A company marked "not an organisation" (a state, a fragment)
-               -- is never shown as anyone's company.
-               CASE WHEN org.not_an_org THEN NULL ELSE ha.company END AS company,
-               ha.company AS company_as_written, ha.title_kind,
+               -- Shown under the organisation's own name, so merges and
+               -- renames in Company Admin reach every role line. A company
+               -- marked "not an organisation" (a state, a fragment) is never
+               -- shown as anyone's company.
+               CASE WHEN org.not_an_org THEN NULL ELSE COALESCE(org.name, ha.company) END AS company,
+               ha.company AS company_as_written,
+               CASE WHEN org.not_an_org THEN NULL ELSE org.org_id END AS org_id, ha.title_kind,
                ha.is_former, ha.data_source,
                ax.appears_on_episode, ax.from_other_episode,
                e.published_date, e.title AS episode_title, p.title AS podcast_title
@@ -2901,8 +2904,8 @@ def _all_current_roles(cur) -> dict:
     """
     cur.execute("""
         SELECT ha.host_id, ha.episode_id, ha.title,
-               CASE WHEN org.not_an_org THEN NULL ELSE ha.company END AS company,
-               ha.title_kind, ha.is_former, ax.from_other_episode, e.published_date
+               CASE WHEN org.not_an_org THEN NULL ELSE COALESCE(org.name, ha.company) END AS company,
+               CASE WHEN org.not_an_org THEN NULL ELSE org.org_id END AS org_id, ha.title_kind, ha.is_former, ax.from_other_episode, e.published_date
         FROM host_affiliations ha
         JOIN affiliation_extractions ax
           ON ax.episode_id = ha.episode_id AND ax.host_id = ha.host_id
@@ -2921,7 +2924,8 @@ def _all_current_roles(cur) -> dict:
     for host_id in by_host.keys() | pins.keys():
         role = format_for_display(pick_current_role(by_host.get(host_id, []), pins.get(host_id)))
         if role:
-            roles[host_id] = (role.get('title'), role.get('company'))
+            # org_id is None for a pin (free text) or an unlinked company.
+            roles[host_id] = (role.get('title'), role.get('company'), role.get('org_id'))
     return roles
 
 
@@ -3115,7 +3119,8 @@ async def get_company(org_id: int, include_sub: bool = False):
         """, (org_id,))
         children = cur.fetchall()
 
-        keys = _org_alias_keys(cur, _org_family(cur, org_id) if include_sub else [org_id])
+        family = _org_family(cur, org_id) if include_sub else [org_id]
+        keys = _org_alias_keys(cur, family)
         cur.execute("""
             SELECT ha.host_id, h.first_name || ' ' || h.last_name AS name, ha.title, ha.company,
                    ha.is_former, e.published_date, p.title AS podcast_title
@@ -3128,12 +3133,16 @@ async def get_company(org_id: int, include_sub: bool = False):
         """, (keys,))
         role_rows = cur.fetchall()
         key_set = set(keys)
-        current = {h: normalize_org_name(c) for h, (_, c) in _all_current_roles(cur).items()}
+        # Linked roles match on the organisation itself; a pin is free text,
+        # so it matches on spelling.
+        family_ids = set(family)
+        current = {h for h, (_, c, oid) in _all_current_roles(cur).items()
+                   if (oid in family_ids if oid else normalize_org_name(c) in key_set)}
         people = {}
         for r in role_rows:
             person = people.setdefault(r['host_id'], {
                 "host_id": r['host_id'], "name": r['name'], "roles": [],
-                "latest": r['published_date'], "is_current": current.get(r['host_id']) in key_set,
+                "latest": r['published_date'], "is_current": r['host_id'] in current,
             })
             person["roles"].append({k: r[k] for k in ('title', 'company', 'is_former',
                                                      'published_date', 'podcast_title')})

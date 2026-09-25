@@ -255,4 +255,4 @@ class TestPeopleListRoles:
         role_db.commit()
         dict_cur = role_db.cursor(cursor_factory=RealDictCursor)
         panel = format_for_display(pick_current_role(_role_rows(dict_cur, host_id), _role_pin(dict_cur, host_id)))
-        assert _all_current_roles(dict_cur)[host_id] == (panel['title'], panel['company'])
+        assert _all_current_roles(dict_cur)[host_id][:2] == (panel['title'], panel['company'])

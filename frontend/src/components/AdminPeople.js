@@ -145,6 +145,9 @@ function AliasEditor({ hostId }) {
 // here. History is every role read from episode text, newest first — raw, as
 // each show worded it.
 const formatRole = (r) => [r?.title, r?.company].filter(Boolean).join(' @ ');
+// A history row keeps the show's own wording; `company` is the organisation's
+// name (blank when it is not an organisation).
+const formatHistoryRole = (r) => formatRole({ ...r, company: r.company && (r.company_as_written || r.company) });
 
 function RoleEditor({ hostId }) {
   const [data, setData]       = useState(null);
@@ -261,7 +264,7 @@ function RoleEditor({ hostId }) {
           <ul className="space-y-1">
             {shown.map(r => (
               <li key={r.affiliation_id} className="text-xs text-gray-600">
-                <span className={r.is_former ? 'text-gray-400' : 'text-gray-800'}>{formatRole(r)}</span>
+                <span className={r.is_former ? 'text-gray-400' : 'text-gray-800'}>{formatHistoryRole(r)}</span>
                 {r.is_former && <span className="ml-1 text-gray-400">(former)</span>}
                 {r.title_kind === 'description' && <span className="ml-1 text-gray-400">(description)</span>}
                 {r.from_other_episode && (

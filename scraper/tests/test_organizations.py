@@ -236,6 +236,21 @@ class TestCompanyEndpoints:
         assert current == {'Ann Test': True, 'Bob Test': True, 'Dan Test': False}
         assert {a['source'] for a in detail['aliases']} == {'auto', 'merge'}
 
+    def test_role_lines_show_the_organisation_name(self, org_db, monkeypatch):
+        cur = self._setup(org_db)
+        bloombergnef = _org_id(cur, 'BloombergNEF')
+        _run(org_db, monkeypatch, 'merge_companies', bloombergnef, _org_id(cur, 'BNEF'))
+        _run(org_db, monkeypatch, 'update_company', bloombergnef, main_body(name='BloombergNEF (BNEF)'))
+
+        role = _run(org_db, monkeypatch, 'get_current_role', self.ann)['current_role']
+        assert role['company'] == 'BloombergNEF (BNEF)'
+        # History keeps each show's own wording.
+        history = _run(org_db, monkeypatch, 'get_person_roles', self.ann)['history']
+        assert [r['company_as_written'] for r in history] == ['BNEF']
+        # A rename that adds no new spelling still counts Ann as current.
+        detail = _run(org_db, monkeypatch, 'get_company', bloombergnef)
+        assert {p['name']: p['is_current'] for p in detail['people']}['Ann Test'] is True
+
     def test_future_extractions_of_a_merged_spelling_link_too(self, org_db, monkeypatch):
         cur = self._setup(org_db)
         _run(org_db, monkeypatch, 'merge_companies', _org_id(cur, 'BloombergNEF'), _org_id(cur, 'BNEF'))
@@ -415,7 +430,7 @@ class TestNotAnOrganisation:
         assert (role['title'], role['company']) == ('Senator', None)
         assert pick_current_role(_role_rows(dict_cur, bob)) is None
         roles = _all_current_roles(dict_cur)
-        assert roles[ann] == ('Senator', None) and bob not in roles
+        assert roles[ann] == ('Senator', None, None) and bob not in roles
 
     def test_reextract_selects_them(self, org_db):
         import extract_affiliations as x
