@@ -18,12 +18,19 @@ ORG_TYPES = ('company', 'investor', 'nonprofit', 'research', 'academic',
 
 # Every organisation with the id of the organisation at the top of its
 # parent chain (itself when it has no parent).
+# A company marked not an organisation never counts as a parent: whatever
+# sits under it is its own top (the hidden "California" once collected three
+# state agencies in Most-Booked Organisations).
 _ORG_TOP = """
     org_top AS (
         WITH RECURSIVE up AS (
-            SELECT org_id, org_id AS top FROM organizations WHERE parent_org_id IS NULL
+            SELECT o.org_id, o.org_id AS top FROM organizations o
+            LEFT JOIN organizations p ON p.org_id = o.parent_org_id
+            WHERE o.parent_org_id IS NULL OR p.not_an_org
             UNION ALL
-            SELECT o.org_id, up.top FROM organizations o JOIN up ON o.parent_org_id = up.org_id
+            SELECT o.org_id, up.top FROM organizations o
+            JOIN up ON o.parent_org_id = up.org_id
+            JOIN organizations p ON p.org_id = o.parent_org_id AND NOT p.not_an_org
         )
         SELECT up.org_id, up.top FROM up
     )

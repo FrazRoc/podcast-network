@@ -3719,14 +3719,24 @@ async def update_company(org_id: int, body: CompanyUpdateRequest):
                 if parent == org_id or parent in _org_family(cur, org_id):
                     raise HTTPException(status_code=400,
                                         detail="That would make the company its own ancestor")
-                cur.execute("SELECT 1 FROM organizations WHERE org_id = %s", (parent,))
-                if not cur.fetchone():
+                cur.execute("SELECT not_an_org FROM organizations WHERE org_id = %s", (parent,))
+                row = cur.fetchone()
+                if not row:
                     raise HTTPException(status_code=404, detail="Parent company not found")
+                if row['not_an_org']:
+                    raise HTTPException(status_code=400,
+                                        detail="That company is marked not an organisation, so it can't be a parent")
             sets.append("parent_org_id = %(parent)s"); params['parent'] = parent
         if not sets:
             raise HTTPException(status_code=400, detail="Nothing to update")
         cur.execute(f"UPDATE organizations SET {', '.join(sets)}, updated_at = now() WHERE org_id = %(org_id)s",
                     params)
+        # A company that is not an organisation can't be anyone's parent: its
+        # sub-organisations stand alone (they'd otherwise be counted in Stats
+        # under a company that's hidden everywhere — "California", Sep 2026).
+        if params.get('not_an_org'):
+            cur.execute("UPDATE organizations SET parent_org_id = NULL, updated_at = now() WHERE parent_org_id = %s",
+                        (org_id,))
         conn.commit()
         return {"success": True}
     finally:

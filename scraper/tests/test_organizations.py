@@ -530,6 +530,16 @@ class TestOrgStats:
         org_db.commit()
         return org_db.cursor(cursor_factory=RealDictCursor)
 
+    def test_hidden_parent_is_not_a_top(self, org_db):
+        # "California" (not an organisation) once collected three state agencies.
+        import org_stats
+        cur = self._setup(org_db)
+        cur.execute("INSERT INTO organizations (name, not_an_org) VALUES ('Bloomberg', true) RETURNING org_id")
+        hidden = cur.fetchone()['org_id']
+        cur.execute("UPDATE organizations SET parent_org_id = %s WHERE name = 'BNEF'", (hidden,))
+        names = {o['name'] for o in org_stats.top_organisations(cur, exclude_in_house=False)['items']}
+        assert 'BNEF' in names and 'Bloomberg' not in names
+
     def test_show_guest_mix(self, org_db):
         import org_stats
         cur = self._setup(org_db)
