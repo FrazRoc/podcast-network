@@ -45,6 +45,9 @@ const FILTERS = [
   { id: 'role_title_only',    label: 'Has role only' },
   { id: 'role_company_only',  label: 'Has company only' },
   { id: 'role_none',          label: 'No role or company' },
+  { id: 'no_linkedin',        label: 'No LinkedIn' },
+  // A name that reads like an organisation or show ("Planet Money").
+  { id: 'org_like_name',      label: 'Name looks like an organisation' },
 ];
 
 const SORTS = [

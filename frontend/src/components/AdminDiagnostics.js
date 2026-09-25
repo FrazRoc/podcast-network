@@ -81,8 +81,13 @@ export default function AdminDiagnostics() {
   const [metric, setMetric] = useState('any');
   const [pipeline, setPipeline] = useState(null);
   const [pipelineError, setPipelineError] = useState(null);
+  const [dataHealth, setDataHealth] = useState(null);
+  const [dataError, setDataError] = useState(null);
   const [repairing, setRepairing] = useState(null);
   const [repairNote, setRepairNote] = useState('');
+  // "Worth looking at" lists open in full on request; 6 each by default.
+  const [allUncovered, setAllUncovered] = useState(false);
+  const [allMissingHosts, setAllMissingHosts] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -103,6 +108,10 @@ export default function AdminDiagnostics() {
       .then(r => { if (!r.ok) throw new Error(`API error ${r.status}`); return r.json(); })
       .then(setPipeline)
       .catch(e => setPipelineError(e.message || 'Failed to load'));
+    adminFetch(`${API}/diagnostics/data`)
+      .then(r => { if (!r.ok) throw new Error(`API error ${r.status}`); return r.json(); })
+      .then(setDataHealth)
+      .catch(e => setDataError(e.message || 'Failed to load'));
   }, []);
 
   // Keeps every credit (unlike a rename in People Admin, which unlinks the
@@ -233,24 +242,37 @@ export default function AdminDiagnostics() {
                       {uncovered.length} show{uncovered.length === 1 ? '' : 's'} with 20% or less of episodes credited
                     </p>
                     <ul className="text-gray-800 space-y-0.5">
-                      {uncovered.slice(0, 6).map(s => (
+                      {(allUncovered ? uncovered : uncovered.slice(0, 6)).map(s => (
                         <li key={s.podcast_id}>
                           <ShowLink show={s}>{s.title}</ShowLink> <span className="text-gray-400">— {s.coverage}% of {s.episodes.toLocaleString()}</span>
+                          <a href={`/admin/episodes?show=${encodeURIComponent(s.title)}&credit_filter=${COVERAGE_METRICS[metric].creditFilter}`}
+                             title={`View episodes missing ${COVERAGE_METRICS[metric].noun}`}
+                             className="ml-1.5 text-teal-600 hover:text-teal-800">→</a>
                         </li>
                       ))}
                     </ul>
+                    {uncovered.length > 6 && (
+                      <button onClick={() => setAllUncovered(v => !v)} className="mt-1 text-xs text-teal-700 hover:underline">
+                        {allUncovered ? 'Show fewer' : `Show all ${uncovered.length}`}
+                      </button>
+                    )}
                   </div>
                   <div>
                     <p className="text-gray-500 mb-1">
                       {missingHosts.length} show{missingHosts.length === 1 ? '' : 's'} credited as nearly all guests, with no host registered
                     </p>
                     <ul className="text-gray-800 space-y-0.5">
-                      {missingHosts.slice(0, 6).map(s => (
+                      {(allMissingHosts ? missingHosts : missingHosts.slice(0, 6)).map(s => (
                         <li key={s.podcast_id}>
                           <ShowLink show={s}>{s.title}</ShowLink> <span className="text-gray-400">— {s.pctGuest}% guest</span>
                         </li>
                       ))}
                     </ul>
+                    {missingHosts.length > 6 && (
+                      <button onClick={() => setAllMissingHosts(v => !v)} className="mt-1 text-xs text-teal-700 hover:underline">
+                        {allMissingHosts ? 'Show fewer' : `Show all ${missingHosts.length}`}
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -348,6 +370,8 @@ export default function AdminDiagnostics() {
             </div>
 
             <RoleExtraction pipeline={pipeline} error={pipelineError} />
+            <CompanyData data={dataHealth} error={dataError} />
+            <PeopleData data={dataHealth} error={dataError} />
 
             <div className="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6">
               <h2 className="text-base font-semibold text-gray-900 mb-1">Host and guest balance</h2>
@@ -643,6 +667,100 @@ function RoleExtraction({ pipeline, error }) {
         <button onClick={() => setShowAll(v => !v)} className="mt-2 text-xs text-teal-700 hover:underline">
           {showAll ? 'Show fewer' : `Show all ${rows.length}`}
         </button>
+      )}
+    </Card>
+  );
+}
+
+// One completeness row: a bar of how many have it, and a link to the ones
+// that don't.
+function HaveRow({ label, have, of, href, missingLabel }) {
+  const p = pct(have, of);
+  return (
+    <li className="grid grid-cols-[9rem_1fr_7rem_8rem] items-center gap-3 py-1">
+      <span className="text-gray-700">{label}</span>
+      <Bar value={p} max={100} color={teal(p / 100)} title={`${have.toLocaleString()} of ${of.toLocaleString()}`} />
+      <span className="text-right tabular-nums text-gray-500">{have.toLocaleString()} · {p}%</span>
+      <span className="text-right text-xs">
+        {href
+          ? <a href={href} className="text-teal-700 hover:underline">{(of - have).toLocaleString()} {missingLabel || 'missing'} →</a>
+          : <span className="text-gray-400">{(of - have).toLocaleString()} {missingLabel || 'missing'}</span>}
+      </span>
+    </li>
+  );
+}
+
+function CompanyData({ data, error }) {
+  const [busy, setBusy] = useState(true);
+  if (error) return <Card title="Company data"><p className="text-sm text-red-500">Couldn't load: {error}</p></Card>;
+  if (!data) return <Card title="Company data"><p className="text-sm text-gray-400">Loading…</p></Card>;
+  const o = busy ? data.orgs.busy : data.orgs.all;
+  return (
+    <Card title="Company data"
+      description="How complete the organisation records are. A gap matters most where several people work, so that's the default view.">
+      <div className="flex text-xs border border-gray-300 rounded overflow-hidden w-fit mb-3">
+        {[[true, `3+ people (${data.orgs.busy.orgs.toLocaleString()})`], [false, `All (${data.orgs.all.orgs.toLocaleString()})`]].map(([v, label]) => (
+          <button key={label} onClick={() => setBusy(v)}
+            className={`px-2 py-1 ${busy === v ? 'bg-teal-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <ul className="text-sm">
+        <HaveRow label="Type" have={o.typed} of={o.orgs} href="/admin/companies?view=untyped" />
+        <HaveRow label="Website (and logo)" have={o.website} of={o.orgs} href="/admin/companies?view=no_website" />
+        <HaveRow label="Wikidata match" have={o.wikidata} of={o.orgs} />
+        <HaveRow label="Parent organisation" have={o.parent} of={o.orgs} missingLabel="without" />
+      </ul>
+      <p className="text-xs text-gray-400 mt-2">
+        Company Admin's lists cover all organisations, most people first. Most organisations have no parent,
+        so that row is for reference, not a target.
+      </p>
+      <div className="flex flex-wrap gap-x-6 gap-y-1 mt-4 text-sm">
+        <a href="/admin/companies/suggestions" className="text-teal-700 hover:underline">
+          {data.merge_queue.toLocaleString()} open merge suggestions →
+        </a>
+        <a href="/admin/companies?view=not_org" className="text-gray-500 hover:underline">
+          {data.not_orgs.toLocaleString()} marked not an organisation
+        </a>
+      </div>
+    </Card>
+  );
+}
+
+function PeopleData({ data, error }) {
+  if (error) return <Card title="People data"><p className="text-sm text-red-500">Couldn't load: {error}</p></Card>;
+  if (!data) return <Card title="People data"><p className="text-sm text-gray-400">Loading…</p></Card>;
+  const p = data.people;
+  const odd = data.org_like_names;
+  return (
+    <Card title="People data"
+      description={`Profile links for the ${p.people.toLocaleString()} people credited as a guest at least once, from show notes and Wikidata or typed in People Admin.`}>
+      <ul className="text-sm">
+        <HaveRow label="LinkedIn" have={p.linkedin} of={p.people} href="/admin/people?filter=no_linkedin" />
+        <HaveRow label="Photo" have={p.photo} of={p.people} href="/admin/people?filter=no_image" />
+        <HaveRow label="X / Twitter" have={p.twitter} of={p.people} />
+        <HaveRow label="Bluesky" have={p.bluesky} of={p.people} />
+        <HaveRow label="Wikipedia" have={p.wikipedia} of={p.people} />
+        <HaveRow label="Wikidata match" have={p.wikidata} of={p.people} />
+      </ul>
+      <p className="text-xs text-gray-400 mt-2">People Admin's filters cover everyone, hosts included, most appearances first.</p>
+
+      <h3 className="text-sm font-semibold text-gray-900 mt-5 mb-1">
+        {odd.length} name{odd.length === 1 ? '' : 's'} that look like an organisation or show
+      </h3>
+      <p className="text-sm text-gray-500 mb-2">
+        A credit line read as a person ("Planet Money"). Not proof: a real name can trip it, so check before deleting.
+      </p>
+      {odd.length > 0 && (
+        <ul className="text-sm space-y-0.5">
+          {odd.map(m => (
+            <li key={m.host_id}>
+              <a href={`/admin/people?host_id=${m.host_id}`} className="text-gray-800 hover:text-teal-700 hover:underline">{m.name}</a>
+              <span className="text-gray-400"> — {m.credits} credit{m.credits === 1 ? '' : 's'}</span>
+            </li>
+          ))}
+        </ul>
       )}
     </Card>
   );

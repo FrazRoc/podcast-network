@@ -19,6 +19,7 @@ const ORG_TYPES = ['company', 'nonprofit', 'government', 'academic', 'research',
 const VIEWS = [
   { id: 'active',  label: 'All' },
   { id: 'untyped', label: 'No type yet' },
+  { id: 'no_website', label: 'No website' },
   { id: 'not_org', label: 'Not an organisation' },
 ];
 
@@ -672,7 +673,13 @@ export default function AdminCompanies() {
   const [items, setItems] = useState([]);
   const [count, setCount] = useState(null);   // { total, allTotal }
   const [q, setQ] = useState('');
-  const [view, setView] = useState('active');
+  // Deep-link support: /admin/companies?view=untyped (Diagnostics).
+  const [view, setView] = useState(() => {
+    try {
+      const v = new URLSearchParams(window.location.search).get('view');
+      return VIEWS.some(x => x.id === v) ? v : 'active';
+    } catch { return 'active'; }
+  });
   const [orgType, setOrgType] = useState('');
   const [sort, setSort] = useState('people_desc');
   const [selected, setSelected] = useState(null);

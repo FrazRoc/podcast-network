@@ -2440,6 +2440,79 @@ async def get_pipeline_diagnostics():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# A person record whose name reads like an organisation or a show ("Planet
+# Money", "Your Solar Cash") — the scanner took a credit line for a person.
+# A worklist, not proof: surnames like Power or Cash are real, so those words
+# are left out. Used by Diagnostics and People Admin's org_like_name filter.
+ORG_LIKE_NAME_SQL = r"""
+    lower(h.first_name) IN ('the', 'your', 'our', 'my', 'team', 'staff')
+    OR (h.first_name || ' ' || h.last_name) ~* '\m(podcasts?|inc|llc|ltd|corp|corporation|company|institute|foundation|university|association|council|agency|network|media|news|show|team|staff|money|solar|energy|capital|partners|group|labs|ventures|coalition|alliance|project|radio|tv|studios?)\M'
+"""
+
+
+@app.get("/api/admin/diagnostics/data", dependencies=[Depends(verify_admin)])
+async def get_data_diagnostics():
+    """Company and people data completeness: how many organisations have a
+    type, website, Wikidata match and parent (all, and those 3+ people work
+    at, where a gap shows most), the open merge queue, how many guests have
+    each profile link, and person records whose name looks like an
+    organisation."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            WITH people AS (
+                SELECT oa.org_id, COUNT(DISTINCT ha.host_id) AS n
+                FROM organization_aliases oa JOIN host_affiliations ha ON ha.company_key = oa.normalized_name
+                GROUP BY oa.org_id
+            )
+            SELECT (COALESCE(p.n, 0) >= 3) AS busy,
+                   COUNT(*) AS orgs,
+                   COUNT(o.org_type) AS typed,
+                   COUNT(o.website_domain) AS website,
+                   COUNT(o.wikidata_id) AS wikidata,
+                   COUNT(o.parent_org_id) AS parent
+            FROM organizations o LEFT JOIN people p ON p.org_id = o.org_id
+            WHERE NOT o.not_an_org
+            GROUP BY 1
+        """)
+        by = {r['busy']: r for r in cur.fetchall()}
+        keys = ('orgs', 'typed', 'website', 'wikidata', 'parent')
+        orgs = {'all': {k: sum(by[b][k] for b in by) for k in keys},
+                'busy': {k: (by.get(True) or {}).get(k, 0) for k in keys}}
+        cur.execute(f"SELECT COUNT(*) AS n {_LIVE_SUGGESTIONS}")
+        merge_queue = cur.fetchone()['n']
+        cur.execute("SELECT COUNT(*) AS n FROM organizations WHERE not_an_org")
+        not_orgs = cur.fetchone()['n']
+
+        # Profile links for everyone ever credited as a guest.
+        cur.execute("""
+            SELECT COUNT(*) AS people,
+                   COUNT(h.linkedin_url) AS linkedin,
+                   COUNT(h.twitter_handle) AS twitter,
+                   COUNT(h.bluesky_handle) AS bluesky,
+                   COUNT(h.profile_image_url) AS photo,
+                   COUNT(h.wikipedia) AS wikipedia,
+                   COUNT(h.wikidata_id) AS wikidata
+            FROM hosts h
+            WHERE EXISTS (SELECT 1 FROM episode_host eh WHERE eh.host_id = h.host_id AND eh.is_guest)
+        """)
+        people = cur.fetchone()
+        cur.execute(f"""
+            SELECT h.host_id, h.first_name || ' ' || h.last_name AS name,
+                   (SELECT COUNT(*) FROM episode_host eh WHERE eh.host_id = h.host_id) AS credits
+            FROM hosts h WHERE {ORG_LIKE_NAME_SQL}
+            ORDER BY credits DESC, name
+        """)
+        org_like = cur.fetchall()
+        cur.close()
+        conn.close()
+        return {"orgs": orgs, "merge_queue": merge_queue, "not_orgs": not_orgs,
+                "people": people, "org_like_names": org_like}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/admin/people/{host_id}/repair-name", dependencies=[Depends(verify_admin)])
 async def repair_mangled_name(host_id: int):
     """Fix a name stored with its UTF-8 read as Latin-1 ("BalÃ¡zs" ->
@@ -2735,6 +2808,10 @@ async def list_people(q: str = "", filter: str = "all", sort: str = "appearances
             extra_where = "AND cr.title IS NULL AND cr.company IS NOT NULL"
         elif filter == "role_none":
             extra_where = "AND cr.title IS NULL AND cr.company IS NULL"
+        elif filter == "no_linkedin":
+            extra_where = "AND h.linkedin_url IS NULL"
+        elif filter == "org_like_name":
+            extra_where = f"AND ({ORG_LIKE_NAME_SQL})"
 
         roles = _all_current_roles(cur)
         role_ids = list(roles)
@@ -3359,6 +3436,8 @@ async def list_companies(q: str = "", org_type: str = "", sort: str = "people_de
         where.append("o.org_type = %(org_type)s")
     if view == "untyped":
         where.append("o.org_type IS NULL")
+    elif view == "no_website":
+        where.append("o.website_domain IS NULL")
     if q.strip():
         where.append("""(o.name ILIKE '%%' || %(q)s || '%%' OR EXISTS (
             SELECT 1 FROM organization_aliases a

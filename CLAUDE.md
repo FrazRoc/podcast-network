@@ -591,6 +591,16 @@ everyone's current role (~6 s):
   (links to People Admin's `?filter=role_*`, which now deep-links), the
   extraction backlog by status, and per show the share of read guest
   appearances that gave a role (unread shows sort last).
+- **Company data / People data** (`GET /api/admin/diagnostics/data`):
+  organisation type / website / Wikidata / parent completeness (orgs with 3+
+  people by default, or all), the live merge-queue size, guests' profile
+  links, and person records whose name looks like an organisation
+  (`ORG_LIKE_NAME_SQL` — a worklist; "Power"/"Cash" left out as real
+  surnames). Links go to Company Admin `?view=untyped|no_website|not_org`
+  and People Admin `?filter=no_linkedin|no_image|org_like_name` (new
+  filters/views, both pages now read them from the address bar).
+- "Worth looking at" lists expand with Show all, and each show links to its
+  episodes missing credits.
 - Credits-per-episode bars link to Episodes `?credit_filter=count_N`
   (`no_credit` for 0). Mangled names have a **Fix** button:
   `POST /api/admin/people/{id}/repair-name` keeps every credit (unlike a
