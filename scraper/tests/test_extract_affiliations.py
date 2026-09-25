@@ -196,7 +196,7 @@ class TestVerifiedAffiliations:
                    "Hans Westerhof, join the show")
         kept, dropped = verified_affiliations(
             [{'title': 'cofounder and managing director', 'company': 'remove'}], snippet)
-        assert pairs(kept) == [{'title': 'cofounder and managing director', 'company': 'remove'}]
+        assert pairs(kept) == [{'title': 'co-founder and managing director', 'company': 'remove'}]  # stored hyphenated
         assert dropped == []
 
     @pytest.mark.parametrize('title, text', [

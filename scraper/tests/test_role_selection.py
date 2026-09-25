@@ -93,9 +93,25 @@ class TestDisplayTitle:
         ("director of DOE's loan programs", 'position', "Director of DOE's Loan Programs"),
         ('VP of Grid', 'position', 'VP of Grid'),
         ('Founder & CTO', 'position', 'Founder & CTO'),
+        ('Cofounder and CEO', 'position', 'Co-Founder and CEO'),
+        ('guest cohost', 'position', 'Guest Co-Host'),
+        ('ecologist, writer, and Greenpeace cofounder', 'description',
+         'Ecologist, writer, and Greenpeace co-founder'),
     ])
     def test_tidied(self, stored, kind, shown):
         assert display_title(stored, kind) == shown
+
+    @pytest.mark.parametrize('stored, fixed', [
+        ('cofounder', 'co-founder'), ('CoFounder', 'Co-Founder'), ('co founder', 'co-founder'),
+        ('co–founder', 'co-founder'), ('Coauthors', 'Co-authors'), ('Cochair', 'Co-chair'),
+        ('CEO and cofounder', 'CEO and co-founder'), ('co-founder', 'co-founder'),
+        # Ordinary words that start with "co" are left alone.
+        ('COO and consultant', 'COO and consultant'), ('correspondent', 'correspondent'),
+        ('coordinator', 'coordinator'), ('cohort lead', 'cohort lead'),
+    ])
+    def test_co_roles_hyphenated(self, stored, fixed):
+        from role_selection import hyphenate_co
+        assert hyphenate_co(stored) == fixed
 
     def test_a_lone_article_is_not_erased(self):
         assert display_title('the', 'position') == 'The'
