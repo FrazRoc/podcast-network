@@ -2401,7 +2401,8 @@ async def get_person(host_id: int):
 
 
 @app.get("/api/admin/people", dependencies=[Depends(verify_admin)])
-async def list_people(q: str = "", filter: str = "all", sort: str = "appearances_desc"):
+async def list_people(q: str = "", filter: str = "all", sort: str = "appearances_desc",
+                      limit: int = 100, offset: int = 0):
     """List/search people with filtering and sorting."""
     try:
         conn = get_db_connection()
@@ -2416,7 +2417,8 @@ async def list_people(q: str = "", filter: str = "all", sort: str = "appearances
             "newest":           "h.created_at DESC",
             "company_asc":      "LOWER(cr.company) ASC NULLS LAST, h.last_name ASC",
         }
-        order = sort_map.get(sort, "appearances DESC, h.last_name ASC")
+        # host_id last so pages never overlap or skip people who tie.
+        order = sort_map.get(sort, "appearances DESC, h.last_name ASC") + ", h.host_id"
 
         extra_where  = ""
         having_clause = ""
@@ -2447,6 +2449,8 @@ async def list_people(q: str = "", filter: str = "all", sort: str = "appearances
             extra_where = "AND cr.title IS NOT NULL AND cr.company IS NULL"
         elif filter == "role_company_only":
             extra_where = "AND cr.title IS NULL AND cr.company IS NOT NULL"
+        elif filter == "role_none":
+            extra_where = "AND cr.title IS NULL AND cr.company IS NULL"
 
         roles = _all_current_roles(cur)
         role_ids = list(roles)
@@ -2481,8 +2485,8 @@ async def list_people(q: str = "", filter: str = "all", sort: str = "appearances
                      cr.title, cr.company
             {having_clause}
             ORDER BY {order}
-            LIMIT 100
-        """, {"q": q, **role_params})
+            LIMIT %(limit)s OFFSET %(offset)s
+        """, {"q": q, "limit": max(1, min(limit, 500)), "offset": max(0, offset), **role_params})
         rows = cur.fetchall()
         total = rows[0]['matching'] if rows else 0
         cur.execute("SELECT COUNT(*) FROM hosts")

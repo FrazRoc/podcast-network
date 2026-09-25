@@ -6,6 +6,7 @@ import AdminSubTabs from './AdminSubTabs';
 import AdminListCount from './AdminListCount';
 
 const API = `${API_BASE_URL}/api/admin`;
+const PAGE_SIZE = 100;
 
 // Duplicates is its own page (AdminDuplicates) under the People section.
 export const PEOPLE_TABS = [
@@ -42,6 +43,7 @@ const FILTERS = [
   { id: 'role_title_company', label: 'Has role & company' },
   { id: 'role_title_only',    label: 'Has role only' },
   { id: 'role_company_only',  label: 'Has company only' },
+  { id: 'role_none',          label: 'No role or company' },
 ];
 
 const SORTS = [
@@ -718,21 +720,29 @@ export default function AdminPeople() {
   const [selected, setSelected]     = useState(null);  // person being edited
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [count, setCount]           = useState(null);   // { total, allTotal }
+  const [loadingMore, setLoadingMore] = useState(false);
   const searchRef = useRef(null);
 
-  const fetchPeople = useCallback(async (q = '', f = 'all', s = 'appearances_desc') => {
-    setLoading(true);
+  // offset > 0 appends the next page (Load more) instead of replacing the
+  // list. Only the newest request may fill it, so a slow page can't land on
+  // top of a list that has since been re-searched or re-filtered.
+  const latestList = useRef(0);
+  const fetchPeople = useCallback(async (q = '', f = 'all', s = 'appearances_desc', offset = 0) => {
+    const token = ++latestList.current;
+    const more = offset > 0;
+    if (more) setLoadingMore(true); else setLoading(true);
     setListError(null);
     try {
-      const params = new URLSearchParams({ q, filter: f, sort: s });
+      const params = new URLSearchParams({ q, filter: f, sort: s, limit: PAGE_SIZE, offset });
       const res = await adminFetch(`${API}/people?${params}`);
       if (!res.ok) throw new Error(`API error ${res.status}`);
       const data = await res.json();
+      if (token !== latestList.current) return;
       const items = Array.isArray(data) ? data : (data.items || []);
-      setPeople(items);
+      setPeople(prev => (more ? [...prev, ...items] : items));
       setCount({ total: data.total ?? items.length, allTotal: data.all_total });
-    } catch (e) { setListError(e.message || 'Failed to load'); }
-    finally { setLoading(false); }
+    } catch (e) { if (token === latestList.current) setListError(e.message || 'Failed to load'); }
+    finally { if (token === latestList.current) { setLoading(false); setLoadingMore(false); } }
   }, []);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -772,12 +782,21 @@ export default function AdminPeople() {
       await adminFetch(`${API}/people/${host_id}`, { method: 'DELETE' });
       setDeleteConfirm(null);
       if (selected?.host_id === host_id) setSelected(null);
-      fetchPeople(searchQ, filter, sort);
+      // Remove in place rather than re-fetching, which would drop the pages
+      // already loaded with Load more.
+      setPeople(prev => prev.filter(p => p.host_id !== host_id));
+      setCount(c => c && { total: Math.max(0, c.total - 1), allTotal: c.allTotal == null ? c.allTotal : Math.max(0, c.allTotal - 1) });
     } catch (e) { console.error(e); }
   };
 
   const handleSaved = (updatedPerson) => {
-    fetchPeople(searchQ, filter, sort);
+    // An edit updates its row in place (keeping pages loaded with Load more);
+    // a new person needs the list re-fetched to find its place.
+    if (updatedPerson && people.some(p => p.host_id === updatedPerson.host_id)) {
+      setPeople(prev => prev.map(p => (p.host_id === updatedPerson.host_id ? { ...p, ...updatedPerson } : p)));
+    } else {
+      fetchPeople(searchQ, filter, sort);
+    }
     // If the saved person is the one currently selected, update it so image refreshes
     if (updatedPerson && selected && updatedPerson.host_id === selected.host_id) {
       setSelected(prev => ({ ...prev, ...updatedPerson }));
@@ -908,6 +927,14 @@ export default function AdminPeople() {
                     </div>
                   );
                 })}
+                {count && people.length < count.total && (
+                  <div className="p-3 text-center">
+                    <button onClick={() => fetchPeople(searchQ, filter, sort, people.length)} disabled={loadingMore}
+                      className="px-4 py-1.5 bg-gray-100 hover:bg-gray-200 disabled:opacity-50 text-gray-700 text-sm font-medium rounded-lg">
+                      {loadingMore ? 'Loading…' : `Load more (${(count.total - people.length).toLocaleString()} remaining)`}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
