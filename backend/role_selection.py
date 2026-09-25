@@ -116,6 +116,47 @@ def hyphenate_co(title: str | None) -> str | None:
     return _CO_ROLE_RE.sub(lambda m: f"{m.group(1)}-{m.group(2)}", title)
 
 
+# "Chief Executive Officer" -> "CEO", and the other chief titles with one
+# standard abbreviation. Ambiguous ones stay spelled out: Sustainability /
+# Strategy / Science all make CSO, Commercial / Content / Customer all make
+# CCO, and CIO usually means Information, not Investment.
+_CHIEF_ABBREVIATIONS = {
+    'executive': 'CEO', 'operating': 'COO', 'financial': 'CFO', 'technology': 'CTO',
+    'technical': 'CTO', 'marketing': 'CMO', 'revenue': 'CRO', 'product': 'CPO', 'legal': 'CLO',
+}
+_CHIEF_RE = re.compile(
+    r'\bchief\s+(' + '|'.join(_CHIEF_ABBREVIATIONS) + r')'
+    # "Officer", also cut off or misspelt in the source ("Offi", "Office").
+    r'(?:\s+(offi(?:cer(s)?|ce|c)?)\b)?'
+    # "Chief Executive Director" / "Chief Executive Committee" are other roles.
+    r'(?!\s+(?:director|committee|board|council|team|member))'
+    # A repeated abbreviation after it: "Chief Executive Officer (CEO)".
+    r'(?:\s*\([A-Z]{3}\))?',
+    re.IGNORECASE)
+
+
+def abbreviate_chiefs(title: str | None) -> str | None:
+    """"Co-founder and Chief Executive Officer" -> "Co-founder and CEO".
+    Only "Chief Executive" may drop "Officer" (it means the same thing);
+    "Chief Technology" alone is left as written."""
+    if not title:
+        return title
+
+    def repl(m):
+        word, officer, plural = m.group(1).lower(), m.group(2), m.group(3)
+        if not officer and word != 'executive':
+            return m.group(0)
+        return _CHIEF_ABBREVIATIONS[word] + ('s' if plural else '')
+
+    return _CHIEF_RE.sub(repl, title)
+
+
+def tidy_title(title: str | None) -> str | None:
+    """The spelling fixes every stored title gets: co- roles hyphenated,
+    common chief titles abbreviated."""
+    return abbreviate_chiefs(hyphenate_co(title))
+
+
 def display_title(title: str | None, title_kind: str | None = None) -> str | None:
     """How a stored title is shown: leading "a"/"an"/"the" dropped, then
     title case for a position, a capital first letter for a description
@@ -124,7 +165,7 @@ def display_title(title: str | None, title_kind: str | None = None) -> str | Non
     if not title:
         return title
     text = _LEADING_ARTICLE_RE.sub('', title.strip()) or title.strip()
-    text = hyphenate_co(text)
+    text = tidy_title(text)
     if title_kind == 'description':
         # Capitalise the first word only; a capital later in the phrase
         # ("… and Greenpeace co-founder") says nothing about the first.

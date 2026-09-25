@@ -58,7 +58,7 @@ from description_cleaner import (  # noqa: E402
     clean_description, _name_pattern, first_name_belongs_to_other,
 )
 from org_names import normalize_org_name, not_an_organisation  # noqa: E402
-from role_selection import hyphenate_co  # noqa: E402
+from role_selection import tidy_title  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
@@ -486,9 +486,10 @@ def verified_affiliations(affiliations: list, snippet: str) -> tuple:
                 clean[field] = None
                 continue
             if value and _in_text(value, haystack, field):
-                # Checked verbatim first; only then is "cofounder" stored as
-                # "co-founder", so every title reads the same way.
-                clean[field] = hyphenate_co(value) if field == 'title' else value
+                # Checked verbatim first; only then tidied ("cofounder" ->
+                # "co-founder", "Chief Executive Officer" -> "CEO"), so every
+                # title reads the same way.
+                clean[field] = tidy_title(value) if field == 'title' else value
             else:
                 clean[field] = None
                 if value:

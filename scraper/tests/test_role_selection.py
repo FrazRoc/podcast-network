@@ -113,6 +113,27 @@ class TestDisplayTitle:
         from role_selection import hyphenate_co
         assert hyphenate_co(stored) == fixed
 
+    @pytest.mark.parametrize('stored, fixed', [
+        ('Chief Executive Officer', 'CEO'), ('chief executive officer', 'CEO'), ('Chief Executive', 'CEO'),
+        ('co-founder and Chief Technology Officer', 'co-founder and CTO'),
+        ('Chairman and Chief Executive Officer (CEO)', 'Chairman and CEO'),
+        ('Chief Operating Officer and Chief Technology Officer', 'COO and CTO'),
+        ('former chief financial officer', 'former CFO'), ('chief executive officers', 'CEOs'),
+        ('co-founder and Chief Executive Offi', 'co-founder and CEO'),   # cut off in the source
+        # Other roles, and ambiguous abbreviations, stay as written.
+        ('Founder and Chief Executive Director', 'Founder and Chief Executive Director'),
+        ('Chief Sustainability Officer', 'Chief Sustainability Officer'),
+        ('Chief Commercial Officer', 'Chief Commercial Officer'),
+        ('Chief Investment Officer', 'Chief Investment Officer'),
+        ('Chief Technology', 'Chief Technology'), ('Chief Scientist', 'Chief Scientist'),
+    ])
+    def test_chief_titles_abbreviated(self, stored, fixed):
+        from role_selection import abbreviate_chiefs
+        assert abbreviate_chiefs(stored) == fixed
+
+    def test_both_tidy_ups_reach_the_display(self):
+        assert display_title('cofounder and chief executive officer', 'position') == 'Co-Founder and CEO'
+
     def test_a_lone_article_is_not_erased(self):
         assert display_title('the', 'position') == 'The'
 
