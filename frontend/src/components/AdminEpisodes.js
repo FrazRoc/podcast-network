@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { API_BASE_URL } from '../config';
 import { adminFetch } from '../adminAuth';
 import AdminHeader from './AdminHeader';
+import AdminListCount from './AdminListCount';
 import { formatDateOnly, highlightNames, stripHtmlForDisplay } from '../adminUtils';
 
 const API = `${API_BASE_URL}/api/admin`;
@@ -44,20 +45,28 @@ function EpisodePanel({ episodeId, onChanged }) {
   const [actioningSuggestionId, setActioningSuggestionId] = useState(null);
   const [suggestionError, setSuggestionError] = useState(null);
 
+  // Only the newest request may fill the panel, so a slow response for a
+  // row clicked earlier can't overwrite the one clicked since.
+  const latest = useRef(0);
   const fetchEpisode = useCallback(async () => {
+    const token = ++latest.current;
     if (!episodeId) { setEpisode(null); return; }
     setLoading(true);
     setError('');
     try {
       const res = await adminFetch(`${API}/episodes/${episodeId}`);
       if (!res.ok) throw new Error(`API error ${res.status}`);
-      setEpisode(await res.json());
+      const data = await res.json();
+      if (token === latest.current) setEpisode(data);
     } catch (e) {
-      setError(e.message || 'Failed to load episode');
+      if (token === latest.current) setError(e.message || 'Failed to load episode');
     } finally {
-      setLoading(false);
+      if (token === latest.current) setLoading(false);
     }
   }, [episodeId]);
+
+  // A different episode: show Loading at once rather than the previous one.
+  useEffect(() => { setEpisode(null); }, [episodeId]);
 
   useEffect(() => {
     fetchEpisode();
@@ -361,6 +370,7 @@ function EpisodePanel({ episodeId, onChanged }) {
 export default function AdminEpisodes() {
   const [episodes, setEpisodes] = useState([]);
   const [total, setTotal] = useState(0);
+  const [allTotal, setAllTotal] = useState(null);
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState(null);
   const [searchQ, setSearchQ] = useState('');
@@ -399,6 +409,7 @@ export default function AdminEpisodes() {
       const data = await res.json();
       setEpisodes(prev => append ? [...prev, ...data.items] : data.items);
       setTotal(data.total);
+      setAllTotal(data.all_total);
     } catch (e) {
       setListError(e.message || 'Failed to load');
     } finally {
@@ -452,7 +463,7 @@ export default function AdminEpisodes() {
 
   return (
     <div className="min-h-screen bg-gray-100 font-sans">
-      <AdminHeader active="Episodes" right={<span className="text-sm text-gray-400">{total} episodes</span>} />
+      <AdminHeader active="Episodes" />
 
       <div className="flex flex-col md:flex-row gap-4 md:gap-6 p-4 md:p-6 max-w-7xl mx-auto">
 
@@ -493,6 +504,7 @@ export default function AdminEpisodes() {
           </div>
 
           {/* Episode list */}
+          {allTotal != null && <AdminListCount total={total} allTotal={allTotal} shown={episodes.length} noun="episode" />}
           <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden overflow-y-auto max-h-[60vh] md:max-h-[calc(100vh-280px)]">
             {loading && episodes.length === 0 ? (
               <div className="py-12 text-center text-gray-400 text-sm">Loading...</div>

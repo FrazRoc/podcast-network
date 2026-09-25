@@ -196,7 +196,7 @@ class TestVerifiedAffiliations:
                    "Hans Westerhof, join the show")
         kept, dropped = verified_affiliations(
             [{'title': 'cofounder and managing director', 'company': 'remove'}], snippet)
-        assert pairs(kept) == [{'title': 'cofounder and managing director', 'company': 'remove'}]
+        assert pairs(kept) == [{'title': 'co-founder and managing director', 'company': 'remove'}]  # stored hyphenated
         assert dropped == []
 
     @pytest.mark.parametrize('title, text', [
@@ -227,6 +227,13 @@ class TestVerifiedAffiliations:
         kept, _ = verified_affiliations([{'title': None, 'company': 'The Nature Conservancy'}],
                                         "Jane Doe of The Nature Conservancy")
         assert pairs(kept) == [{'title': None, 'company': 'The Nature Conservancy'}]
+
+    @pytest.mark.parametrize('company', ['California', 'UK', 'the University of', 'Dun &'])
+    def test_places_and_fragments_are_not_stored_as_companies(self, company):
+        kept, dropped = verified_affiliations([{'title': 'Senator', 'company': company}],
+                                              f"Senator Jane Doe of {company} joins")
+        assert pairs(kept) == [{'title': 'Senator', 'company': None}]
+        assert ('company', company) in dropped
 
     def test_possessive_is_stripped_from_company(self):
         # Real case: "BloombergNEF's Ash Wang" on Switched On.
@@ -387,6 +394,12 @@ class TestRequests:
         assert params['messages'][0]['role'] == 'user'
         assert params['messages'][0]['content'].count('<item ') == 2
 
+    def test_opus_request_sets_effort_alongside_the_schema(self):
+        params = request_params(self._items(1), 'claude-opus-5')
+        assert params['output_config']['effort'] == 'medium'
+        assert params['output_config']['format']['type'] == 'json_schema'
+        assert 'thinking' not in params            # adaptive by default on Opus 5
+
     def test_sonnet_request_turns_thinking_off(self):
         # Adaptive thinking is on by default there and would bill as output.
         params = request_params(self._items(1), 'claude-sonnet-5')
@@ -472,9 +485,11 @@ class TestSelectionBeforeMigration:
             assert [(a['episode_id'], a['host_id']) for a in apps] == [pair]
         finally:
             db_conn.rollback()
-            with open(os.path.join(os.path.dirname(__file__), '..',
-                                   'migrate_add_host_affiliations.sql')) as f:
-                cur.execute(f.read())
+            # Rebuild what was dropped, including later migrations that
+            # alter these tables (company_key).
+            for name in ('migrate_add_host_affiliations.sql', 'migrate_add_organizations.sql'):
+                with open(os.path.join(os.path.dirname(__file__), '..', name)) as f:
+                    cur.execute(f.read())
             db_conn.commit()
 
 
@@ -633,3 +648,30 @@ class TestFollowsCredits:
         aff_db.commit()
         cur.execute("SELECT host_id FROM host_affiliations")
         assert cur.fetchone()[0] == keep_id
+
+
+class TestCostCap:
+    """submit refuses to send a batch estimated over --max-cost. Manually that
+    is an error; from the scheduled `run` it must log and return, or the
+    scrape job would show a failure every six hours."""
+
+    def _one_appearance(self, aff_db, monkeypatch):
+        import extract_affiliations as x
+        cur = aff_db.cursor()
+        _setup_appearance(cur)
+        aff_db.commit()
+        monkeypatch.setattr(x, 'DB', aff_db.dsn)
+        return x, cur
+
+    def test_manual_submit_over_cap_is_an_error(self, aff_db, monkeypatch):
+        x, cur = self._one_appearance(aff_db, monkeypatch)
+        with pytest.raises(SystemExit):
+            x.cmd_submit(max_cost=-1.0)   # one tiny item rounds to $0.00
+        cur.execute("SELECT COUNT(*) FROM affiliation_extractions")
+        assert cur.fetchone()[0] == 0
+
+    def test_scheduled_run_over_cap_logs_and_returns(self, aff_db, monkeypatch):
+        x, cur = self._one_appearance(aff_db, monkeypatch)
+        assert x.cmd_submit(max_cost=-1.0, over_cap_is_error=False) is None
+        cur.execute("SELECT COUNT(*) FROM affiliation_extractions")
+        assert cur.fetchone()[0] == 0          # nothing written, nothing sent

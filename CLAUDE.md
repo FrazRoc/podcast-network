@@ -144,17 +144,22 @@ facts; `data_source` `llm_extracted` or `manual`, and `manual` is never
 overwritten). Both FK to `episode_host` with `ON UPDATE/DELETE CASCADE`, so
 merges and credit deletions carry through without touching that code.
 
-- **Status (Sep 24 2026):** both migrations (`migrate_add_host_affiliations.sql`,
-  `migrate_add_host_role_pins.sql`) have run on production, and the code is
-  merged to `main` and deployed. Stage 1 of the backfill is done: 200 random
-  guest appearances (`submit --limit 200 --random --model claude-sonnet-5`,
-  $0.15) — 194 processed, 210 roles stored, 5 `no_mention`; one appearance
-  vanished between submit and collect because its person was deleted
-  meanwhile (the cascade working as designed). **Stage 2** (the remaining
-  ~15.8k appearances, ~$12) awaits Evan's approval. **Not in `scrape.yml`
-  yet**; the cron step needs `ANTHROPIC_API_KEY` added as a GitHub Actions
-  secret. Locally the key lives in the affiliations worktree's `.env`
-  (gitignored) — load it alongside `DATABASE_URL`.
+- **Status (Sep 24 2026):** all three migrations (`host_affiliations`,
+  `host_role_pins`, `organizations`) have run on production and the code is
+  on `main`. Random samples of 200, 200 and 1,000 were reviewed, then
+  **stage 2 — the whole backlog, 14,699 appearances (~$11.35) — was
+  submitted** as `msgbatch_01Nnc1zGabXa8tDzKB2FW4ue`; `collect` records it.
+- **Scheduled:** `scrape.yml` step "Extract guest roles and companies" runs
+  `extract_affiliations.py run --model claude-sonnet-5 --limit 1000
+  --max-cost 2` every 6 hours: collect earlier batches, then submit
+  appearances not yet processed. Skipped until the `ANTHROPIC_API_KEY` GitHub
+  Actions secret exists, skipped on single-show dispatches, and
+  `continue-on-error` so it can never stop the run being recorded. Over the
+  cost cap, `run` logs and waits for the next run (a manual `submit` exits
+  with an error). `collect` runs `organizations.py sync` afterwards, so new
+  company spellings reach Company Admin without a separate step. The default
+  model is now Sonnet 5. Locally the key lives in the affiliations
+  worktree's `.env` (gitignored) — load it alongside `DATABASE_URL`.
 - Production has 16,074 guest credits (7,148 guests); only 24 are someone on
   their own show — the 1,216 in the Aug export had been cleaned up since.
 - **Pilot (Sep 2026, 88 snippets from the Aug export):** Haiku 4.5 credited
@@ -269,6 +274,111 @@ computes everyone's current role in one pass with the same
 so the rule lives in one place; a test pins list and panel to the same
 answer. ~1–2 s with stage 1's 210 rows — if it slows after stage 2, store
 the current role instead of recomputing it per request.
+
+### Organisations and Company Admin
+
+`migrate_add_organizations.sql`: `organizations` (name, `org_type` —
+company / nonprofit / government / academic / research / media / investor /
+association / other — `parent_org_id`, `website_domain`, `not_an_org`),
+`organization_aliases` (every spelling, `normalized_name` unique),
+`not_same_org_pairs`, and `host_affiliations.company_key`. Also enables
+`pg_trgm`.
+
+- **Roles link through the alias, not a stored org id:**
+  `host_affiliations.company_key = organization_aliases.normalized_name`,
+  with the key from `backend/org_names.py normalize_org_name()` (case,
+  punctuation, leading "the", trailing possessive, legal suffixes like
+  Inc/LLC/Ltd — not "Company" or "Group", which are parts of names). A merge
+  or new alias re-links every past and future role at once.
+- **New spellings become organisations automatically** —
+  `scraper/organizations.py sync` (stamps missing keys, creates one org +
+  `auto` alias per unaliased key, named by the most common spelling, ties to
+  the bare form). Evan chose auto-create + review merges over approving each
+  company: the first ~1,300 roles gave ~1,075 organisations, nearly all seen
+  once.
+- **Company Admin** (`/admin/companies`, `AdminCompanies.js`): list (search
+  names and spellings; views All / No type yet / Not an organisation; type
+  filter; sort by people), edit panel (name, type, website, parent, not an
+  organisation, merge a duplicate in, spellings, sub-orgs, people with a
+  "current" badge, optionally including sub-orgs), and a **Merge
+  suggestions** tab. Suggestions are computed per request, ranked by people
+  affected: `acronym` (initials of a multi-word name, ≥3 letters — "BNEF" /
+  "Bloomberg New Energy Finance"), `similar` (pg_trgm similarity ≥ 0.5 —
+  "Bloomberg NEF" / "BloombergNEF"), `contains` (one name plus more words —
+  "Bloomberg" / "Bloomberg Green", often a parent). Actions: same (keep
+  either), is part of (sets parent), different (recorded in
+  `not_same_org_pairs`), skip.
+- Endpoints: `GET /api/admin/companies`, `GET/PUT /api/admin/companies/{id}`,
+  `POST .../{keep}/merge/{drop}`, `POST /api/admin/companies/not-same`,
+  `GET /api/admin/companies-suggestions`.
+- **The suggestion queue is stored**, not computed per request
+  (`company_merge_suggestions`, `migrate_add_company_merge_suggestions.sql`;
+  logic in `backend/org_suggestions.py`). The full pass took ~95 s per page
+  load at 7,500 organisations; reading the stored queue takes <1 s. Rebuilt
+  by `organizations.py sync` (so after every scheduled extraction),
+  `organizations.py suggestions`, and the tab's Recompute button (a
+  background task, ~1 min). "Not the same" deletes its row, a merge cascades
+  the dropped company's rows away, and parent/child pairs are filtered at
+  read time; pairs a merge newly creates appear at the next rebuild.
+  Sep 24 2026 after stage 2: 7,516 companies, 6,543 suggestions (5,013
+  similar, 1,382 contains, 148 acronym); 6,308 companies have one person.
+- **Cleanup, Sep 24 2026:** 290 companies merged into 248 (formatting
+  variants, one-word misspellings, 88 acronyms checked against episode
+  text) and 2,062 pairs marked different (no distinctive word in common,
+  wrong acronym expansions); logs of both are kept outside the repo. Then
+  combined companies ("Columbia University and NASA" — one title at two
+  organisations) were split: 58 roles became 114, 52 combined companies
+  deleted; 51 books/descriptions marked not an organisation. The prompt
+  now asks for exactly one organisation per `company` (a shared title
+  becomes one entry per organisation) — written while the API account had
+  no credit, so not yet checked against a live model run. Queue after all
+  this: 3,484.
+- **Places and fragments are never companies** (Evan, Sep 2026):
+  `org_names.is_place()` (a state, country, region or their abbreviation —
+  "California", "UK", "AZ", "North America"; cities are left alone, they
+  stand for a city government) and `is_fragment()` (cut off mid-name —
+  "the University of", "Dun &", "…" — or a bare placeholder like "the
+  Centre", "Solar", "the company"). The extraction drops them as companies,
+  the sync creates any that slip through as `not_an_org`, and the displayed
+  current role blanks a company marked not an organisation. 105 existing
+  ones were marked (70 places, 35 fragments); the fragments alone sat in
+  400+ merge suggestions. `extract_affiliations.py reextract` re-reads the
+  affected appearances (244) with Opus 5 and a wider window
+  (`WIDE_WINDOW`) to find the real organisation — built but never needed:
+  with the API account out of credit, Claude Code read all 244 itself and
+  rewrote them (75 gained a real organisation, the rest kept their title and
+  lost the fake company). Watch for real names that trip the
+  fragment rule (e.g. "Compostable LA" was caught by a French "la" and
+  unmarked; "Planet A", "Instant ON" are deliberately allowed).
+- The merge-suggestions tab hides every card naming a company that was just
+  merged away and reloads the queue; skipped cards stay hidden until
+  Refresh. (First version left those cards in place, and acting on them
+  failed with "Company not found".)
+- **Role lines show the organisation's name** (`organizations.name`), not
+  the episode's wording, on the public card, People list and Company Admin —
+  so a merge or rename reaches every role line at once. People Admin's role
+  history keeps each show's own wording (`company_as_written`). Company
+  detail's "current" flag matches on `org_id` (a pin, being free text, on
+  spelling), so a rename that adds no alias doesn't unmark anyone.
+- Sep 2026 name cleanup: 386 renames (every lowercase leading "the", glued-on
+  descriptions like "the research firm Wood Mackenzie"), 47 merges (incl.
+  Aurora's "our Berlin office"-style phrasings into Aurora Energy Research),
+  112 marked not an organisation (book titles, politicians/administrations as
+  employer, unnamed descriptions, reports, state names). Undo:
+  `names_undo.json` in that session's scratchpad.
+- Sep 2026 types: 3,018 companies typed — the 150 with the most people by
+  hand, the rest by name rules (≈85% right on a sample; think tanks are
+  `research`). 3,451 one-off names with no clue stay untyped.
+- Company Admin rows show the type (one colour per type) and the number of
+  open merge suggestions; the Edit Company panel lists them with Merge this
+  into it / Merge it into this / Different, and its Merge section defaults to
+  merging the viewed company into another. "Open" = `_LIVE_SUGGESTIONS` in
+  main.py, shared with the queue.
+- "Similar" suggestions skip pairs whose only overlap is generic words
+  (`org_suggestions.GENERIC_WORDS`: "University of Bern" / "University of
+  Oxford", "Energy UK" / "C12 Energy") — trigram similarity alone put ~290
+  such pairs in the queue (1,657 → 1,375 after the fix, Sep 2026).
+- Not yet: a public company view.
 
 ## Tests
 

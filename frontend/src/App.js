@@ -3,6 +3,7 @@ import AdminSuggestions from './components/AdminSuggestions';
 import AdminSuggestionsList from './components/AdminSuggestionsList';
 import AdminImages from './components/AdminImages';
 import AdminPeople from './components/AdminPeople';
+import AdminCompanies from './components/AdminCompanies';
 import AdminShows from './components/AdminShows';
 import AdminEpisodes from './components/AdminEpisodes';
 import AdminDuplicates from './components/AdminDuplicates';
@@ -21,6 +22,8 @@ function App() {
     return <AdminLoginGate><div className="w-full min-h-screen"><AdminImages /></div></AdminLoginGate>;
   if (path === '/admin/people' || path.startsWith('/admin/people/'))
     return <AdminLoginGate><div className="w-full min-h-screen"><AdminPeople /></div></AdminLoginGate>;
+  if (path === '/admin/companies' || path.startsWith('/admin/companies/'))
+    return <AdminLoginGate><div className="w-full min-h-screen"><AdminCompanies /></div></AdminLoginGate>;
   if (path === '/admin/diagnostics' || path.startsWith('/admin/diagnostics/'))
     return <AdminLoginGate><div className="w-full min-h-screen"><AdminDiagnostics /></div></AdminLoginGate>;
   if (path === '/admin/duplicates' || path.startsWith('/admin/duplicates/'))

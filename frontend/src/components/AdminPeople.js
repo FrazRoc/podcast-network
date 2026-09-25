@@ -2,8 +2,17 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { API_BASE_URL } from '../config';
 import { adminFetch } from '../adminAuth';
 import AdminHeader from './AdminHeader';
+import AdminSubTabs from './AdminSubTabs';
+import AdminListCount from './AdminListCount';
 
 const API = `${API_BASE_URL}/api/admin`;
+const PAGE_SIZE = 100;
+
+// Duplicates is its own page (AdminDuplicates) under the People section.
+export const PEOPLE_TABS = [
+  { id: 'people',     label: 'People',     href: '/admin/people' },
+  { id: 'duplicates', label: 'Duplicates', href: '/admin/duplicates' },
+];
 
 const PROXY = (url) =>
   url && !url.includes('mzstatic.com') && !url.includes('cdn.bsky.app')
@@ -34,6 +43,7 @@ const FILTERS = [
   { id: 'role_title_company', label: 'Has role & company' },
   { id: 'role_title_only',    label: 'Has role only' },
   { id: 'role_company_only',  label: 'Has company only' },
+  { id: 'role_none',          label: 'No role or company' },
 ];
 
 const SORTS = [
@@ -58,13 +68,16 @@ function AliasEditor({ hostId }) {
   const [busy, setBusy]   = useState(false);
   const [error, setError] = useState('');
 
+  const latest = useRef(0);  // newest request wins; see PersonPanel
   const load = useCallback(() => {
+    const token = ++latest.current;
     adminFetch(`${API}/people/${hostId}/aliases`)
       .then(r => r.json())
-      .then(d => setItems(d.items || []))
+      .then(d => { if (token === latest.current) setItems(d.items || []); })
       .catch(console.error);
   }, [hostId]);
 
+  useEffect(() => { setItems([]); }, [hostId]);
   useEffect(() => { load(); }, [load]);
 
   const add = async () => {
@@ -138,6 +151,9 @@ function AliasEditor({ hostId }) {
 // here. History is every role read from episode text, newest first — raw, as
 // each show worded it.
 const formatRole = (r) => [r?.title, r?.company].filter(Boolean).join(' @ ');
+// A history row keeps the show's own wording; `company` is the organisation's
+// name (blank when it is not an organisation).
+const formatHistoryRole = (r) => formatRole({ ...r, company: r.company && (r.company_as_written || r.company) });
 
 function RoleEditor({ hostId }) {
   const [data, setData]       = useState(null);
@@ -147,13 +163,16 @@ function RoleEditor({ hostId }) {
   const [error, setError]     = useState('');
   const [showAll, setShowAll] = useState(false);
 
+  const latest = useRef(0);  // newest request wins; see PersonPanel
   const load = useCallback(() => {
+    const token = ++latest.current;
     adminFetch(`${API}/people/${hostId}/roles`)
       .then(r => r.json())
-      .then(setData)
+      .then(d => { if (token === latest.current) setData(d); })
       .catch(console.error);
   }, [hostId]);
 
+  useEffect(() => { setData(null); }, [hostId]);
   useEffect(() => { load(); setEditing(false); setShowAll(false); setError(''); }, [load]);
 
   const startEdit = () => {
@@ -191,7 +210,7 @@ function RoleEditor({ hostId }) {
     finally { setBusy(false); }
   };
 
-  if (!data) return null;
+  if (!data) return <p className="text-xs text-gray-400 mb-4">Loading role…</p>;
   const { current, derived, history = [] } = data;
   const pinned = current?.source === 'pinned';
   const shown = showAll ? history : history.slice(0, 5);
@@ -254,7 +273,7 @@ function RoleEditor({ hostId }) {
           <ul className="space-y-1">
             {shown.map(r => (
               <li key={r.affiliation_id} className="text-xs text-gray-600">
-                <span className={r.is_former ? 'text-gray-400' : 'text-gray-800'}>{formatRole(r)}</span>
+                <span className={r.is_former ? 'text-gray-400' : 'text-gray-800'}>{formatHistoryRole(r)}</span>
                 {r.is_former && <span className="ml-1 text-gray-400">(former)</span>}
                 {r.title_kind === 'description' && <span className="ml-1 text-gray-400">(description)</span>}
                 {r.from_other_episode && (
@@ -291,15 +310,21 @@ function PersonPanel({ selected, onSaved, onCancel }) {
   const [creditActionId, setCreditActionId] = useState(null); // episode_id currently being acted on
   const isEdit = !!selected;
 
+  // Only the newest request may fill the panel, so a slow response for a
+  // row clicked earlier can't overwrite the one clicked since.
+  const latest = useRef(0);
   const loadEpisodes = useCallback(() => {
+    const token = ++latest.current;
     if (!selected) { setEpisodes([]); return; }
     adminFetch(`${API}/people/${selected.host_id}/episodes`)
       .then(r => r.json())
-      .then(setEpisodes)
+      .then(e => { if (token === latest.current) setEpisodes(e); })
       .catch(console.error);
   }, [selected]);
 
   useEffect(() => {
+    // A different person: show Loading at once rather than the previous one's.
+    setEpisodes(null);
     loadEpisodes();
   // Keyed on the id rather than the object, which is a new reference each render.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -604,7 +629,10 @@ function PersonPanel({ selected, onSaved, onCancel }) {
         </div>
       )}
       {/* Episodes list */}
-      {isEdit && episodes.length > 0 && (
+      {isEdit && episodes === null && (
+        <p className="mt-5 border-t border-gray-100 pt-4 text-sm text-gray-400">Loading appearances…</p>
+      )}
+      {isEdit && episodes?.length > 0 && (
         <div className="mt-5 border-t border-gray-100 pt-4">
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
             Episode Appearances ({episodes.reduce((s, p) => s + p.count, 0)} total)
@@ -691,22 +719,30 @@ export default function AdminPeople() {
   const [sort, setSort]             = useState('appearances_desc');
   const [selected, setSelected]     = useState(null);  // person being edited
   const [deleteConfirm, setDeleteConfirm] = useState(null);
-  const [total, setTotal]           = useState(0);
+  const [count, setCount]           = useState(null);   // { total, allTotal }
+  const [loadingMore, setLoadingMore] = useState(false);
   const searchRef = useRef(null);
 
-  const fetchPeople = useCallback(async (q = '', f = 'all', s = 'appearances_desc') => {
-    setLoading(true);
+  // offset > 0 appends the next page (Load more) instead of replacing the
+  // list. Only the newest request may fill it, so a slow page can't land on
+  // top of a list that has since been re-searched or re-filtered.
+  const latestList = useRef(0);
+  const fetchPeople = useCallback(async (q = '', f = 'all', s = 'appearances_desc', offset = 0) => {
+    const token = ++latestList.current;
+    const more = offset > 0;
+    if (more) setLoadingMore(true); else setLoading(true);
     setListError(null);
     try {
-      const params = new URLSearchParams({ q, filter: f, sort: s });
+      const params = new URLSearchParams({ q, filter: f, sort: s, limit: PAGE_SIZE, offset });
       const res = await adminFetch(`${API}/people?${params}`);
       if (!res.ok) throw new Error(`API error ${res.status}`);
       const data = await res.json();
+      if (token !== latestList.current) return;
       const items = Array.isArray(data) ? data : (data.items || []);
-      setPeople(items);
-      setTotal(Array.isArray(data) ? data.length : (data.total || items.length));
-    } catch (e) { setListError(e.message || 'Failed to load'); }
-    finally { setLoading(false); }
+      setPeople(prev => (more ? [...prev, ...items] : items));
+      setCount({ total: data.total ?? items.length, allTotal: data.all_total });
+    } catch (e) { if (token === latestList.current) setListError(e.message || 'Failed to load'); }
+    finally { if (token === latestList.current) { setLoading(false); setLoadingMore(false); } }
   }, []);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -746,12 +782,21 @@ export default function AdminPeople() {
       await adminFetch(`${API}/people/${host_id}`, { method: 'DELETE' });
       setDeleteConfirm(null);
       if (selected?.host_id === host_id) setSelected(null);
-      fetchPeople(searchQ, filter, sort);
+      // Remove in place rather than re-fetching, which would drop the pages
+      // already loaded with Load more.
+      setPeople(prev => prev.filter(p => p.host_id !== host_id));
+      setCount(c => c && { total: Math.max(0, c.total - 1), allTotal: c.allTotal == null ? c.allTotal : Math.max(0, c.allTotal - 1) });
     } catch (e) { console.error(e); }
   };
 
   const handleSaved = (updatedPerson) => {
-    fetchPeople(searchQ, filter, sort);
+    // An edit updates its row in place (keeping pages loaded with Load more);
+    // a new person needs the list re-fetched to find its place.
+    if (updatedPerson && people.some(p => p.host_id === updatedPerson.host_id)) {
+      setPeople(prev => prev.map(p => (p.host_id === updatedPerson.host_id ? { ...p, ...updatedPerson } : p)));
+    } else {
+      fetchPeople(searchQ, filter, sort);
+    }
     // If the saved person is the one currently selected, update it so image refreshes
     if (updatedPerson && selected && updatedPerson.host_id === selected.host_id) {
       setSelected(prev => ({ ...prev, ...updatedPerson }));
@@ -760,7 +805,11 @@ export default function AdminPeople() {
 
   return (
     <div className="min-h-screen bg-gray-100 font-sans">
-      <AdminHeader active="People" right={<span className="text-sm text-gray-400">{total} people</span>} />
+      <AdminHeader active="People" />
+
+      <div className="max-w-7xl mx-auto px-4 pt-4 md:px-6 md:pt-6 -mb-4 md:-mb-2">
+        <AdminSubTabs tabs={PEOPLE_TABS} active="people" />
+      </div>
 
       <div className="flex flex-col md:flex-row gap-4 md:gap-6 p-4 md:p-6 max-w-7xl mx-auto">
 
@@ -802,6 +851,8 @@ export default function AdminPeople() {
           </div>
 
           {/* People list */}
+          {count && <AdminListCount total={count.total} allTotal={count.allTotal} shown={people.length}
+            noun="person" plural="people" />}
           <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden overflow-y-auto max-h-[60vh] md:max-h-[calc(100vh-280px)]">
             {loading ? (
               <div className="py-12 text-center text-gray-400 text-sm">Loading...</div>
@@ -876,6 +927,14 @@ export default function AdminPeople() {
                     </div>
                   );
                 })}
+                {count && people.length < count.total && (
+                  <div className="p-3 text-center">
+                    <button onClick={() => fetchPeople(searchQ, filter, sort, people.length)} disabled={loadingMore}
+                      className="px-4 py-1.5 bg-gray-100 hover:bg-gray-200 disabled:opacity-50 text-gray-700 text-sm font-medium rounded-lg">
+                      {loadingMore ? 'Loading…' : `Load more (${(count.total - people.length).toLocaleString()} remaining)`}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>

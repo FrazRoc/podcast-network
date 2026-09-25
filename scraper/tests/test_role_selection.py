@@ -93,9 +93,46 @@ class TestDisplayTitle:
         ("director of DOE's loan programs", 'position', "Director of DOE's Loan Programs"),
         ('VP of Grid', 'position', 'VP of Grid'),
         ('Founder & CTO', 'position', 'Founder & CTO'),
+        ('Cofounder and CEO', 'position', 'Co-Founder and CEO'),
+        ('guest cohost', 'position', 'Guest Co-Host'),
+        ('ecologist, writer, and Greenpeace cofounder', 'description',
+         'Ecologist, writer, and Greenpeace co-founder'),
     ])
     def test_tidied(self, stored, kind, shown):
         assert display_title(stored, kind) == shown
+
+    @pytest.mark.parametrize('stored, fixed', [
+        ('cofounder', 'co-founder'), ('CoFounder', 'Co-Founder'), ('co founder', 'co-founder'),
+        ('co–founder', 'co-founder'), ('Coauthors', 'Co-authors'), ('Cochair', 'Co-chair'),
+        ('CEO and cofounder', 'CEO and co-founder'), ('co-founder', 'co-founder'),
+        # Ordinary words that start with "co" are left alone.
+        ('COO and consultant', 'COO and consultant'), ('correspondent', 'correspondent'),
+        ('coordinator', 'coordinator'), ('cohort lead', 'cohort lead'),
+    ])
+    def test_co_roles_hyphenated(self, stored, fixed):
+        from role_selection import hyphenate_co
+        assert hyphenate_co(stored) == fixed
+
+    @pytest.mark.parametrize('stored, fixed', [
+        ('Chief Executive Officer', 'CEO'), ('chief executive officer', 'CEO'), ('Chief Executive', 'CEO'),
+        ('co-founder and Chief Technology Officer', 'co-founder and CTO'),
+        ('Chairman and Chief Executive Officer (CEO)', 'Chairman and CEO'),
+        ('Chief Operating Officer and Chief Technology Officer', 'COO and CTO'),
+        ('former chief financial officer', 'former CFO'), ('chief executive officers', 'CEOs'),
+        ('co-founder and Chief Executive Offi', 'co-founder and CEO'),   # cut off in the source
+        # Other roles, and ambiguous abbreviations, stay as written.
+        ('Founder and Chief Executive Director', 'Founder and Chief Executive Director'),
+        ('Chief Sustainability Officer', 'Chief Sustainability Officer'),
+        ('Chief Commercial Officer', 'Chief Commercial Officer'),
+        ('Chief Investment Officer', 'Chief Investment Officer'),
+        ('Chief Technology', 'Chief Technology'), ('Chief Scientist', 'Chief Scientist'),
+    ])
+    def test_chief_titles_abbreviated(self, stored, fixed):
+        from role_selection import abbreviate_chiefs
+        assert abbreviate_chiefs(stored) == fixed
+
+    def test_both_tidy_ups_reach_the_display(self):
+        assert display_title('cofounder and chief executive officer', 'position') == 'Co-Founder and CEO'
 
     def test_a_lone_article_is_not_erased(self):
         assert display_title('the', 'position') == 'The'
@@ -220,11 +257,34 @@ class TestPeopleListRoles:
         assert names(self._list(role_db, monkeypatch, filter='role_title_company')) == ['Ann', 'Dan']
         assert names(self._list(role_db, monkeypatch, filter='role_title_only')) == ['Bob']
         assert names(self._list(role_db, monkeypatch, filter='role_company_only')) == ['Cat']
+        # Dan has a pin, so nobody here lacks both.
+        assert names(self._list(role_db, monkeypatch, filter='role_none')) == []
 
         by_company = self._list(role_db, monkeypatch, sort='company_asc')
         assert [i['first_name'] for i in by_company] == ['Cat', 'Dan', 'Ann', 'Bob']   # Acme, Beta, Zeta, none
         ann = next(i for i in by_company if i['first_name'] == 'Ann')
         assert (ann['current_title'], ann['current_company']) == ('CEO', 'Zeta')
+
+    def test_total_counts_the_filtered_list(self, role_db, monkeypatch):
+        # total used to count everyone matching the name search, ignoring the
+        # role filter; all_total is everyone.
+        import asyncio
+        import main
+        cur = role_db.cursor()
+        cur.execute("INSERT INTO podcasts (title, apple_podcast_id) VALUES ('Show', 'show') RETURNING podcast_id")
+        self._people(cur, cur.fetchone()[0])
+        role_db.commit()
+        self._list(role_db, monkeypatch)   # points main at the test database
+        r = asyncio.run(main.list_people(filter='role_title_only'))
+        assert (r['total'], r['all_total']) == (1, 4)
+        r = asyncio.run(main.list_people())
+        assert (r['total'], r['all_total']) == (4, 4)
+        assert [i['first_name'] for i in asyncio.run(main.list_people(filter='role_none'))['items']] == ['Dan']
+        # Pages never overlap or skip, even though all four tie on appearances.
+        pages = [asyncio.run(main.list_people(limit=2, offset=o))['items'] for o in (0, 2, 4)]
+        assert sorted(i['first_name'] for p in pages for i in p) == ['Ann', 'Bob', 'Cat', 'Dan']
+        assert pages[2] == []
+        assert asyncio.run(main.list_people(limit=2))['total'] == 4   # total ignores the page size
 
     def test_list_shows_the_tidied_title(self, role_db, monkeypatch):
         cur = role_db.cursor()
@@ -255,4 +315,4 @@ class TestPeopleListRoles:
         role_db.commit()
         dict_cur = role_db.cursor(cursor_factory=RealDictCursor)
         panel = format_for_display(pick_current_role(_role_rows(dict_cur, host_id), _role_pin(dict_cur, host_id)))
-        assert _all_current_roles(dict_cur)[host_id] == (panel['title'], panel['company'])
+        assert _all_current_roles(dict_cur)[host_id][:2] == (panel['title'], panel['company'])

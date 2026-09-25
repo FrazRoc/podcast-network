@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { API_BASE_URL } from '../config';
 import { adminFetch } from '../adminAuth';
 import AdminHeader from './AdminHeader';
+import AdminListCount from './AdminListCount';
 import { formatDateOnly, formatSuggestionSource, highlightNames } from '../adminUtils';
 
 const API = `${API_BASE_URL}/api/admin`;
@@ -20,6 +21,7 @@ const SORTS = [
 export default function AdminSuggestionsList() {
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
+  const [allTotal, setAllTotal] = useState(null);
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState(null);
   const [actioningId, setActioningId] = useState(null);
@@ -77,6 +79,7 @@ export default function AdminSuggestionsList() {
       const data = await res.json();
       setItems(prev => append ? [...prev, ...data.items] : data.items);
       setTotal(data.total);
+      setAllTotal(data.all_total);
     } catch (e) {
       setListError(e.message || 'Failed to load');
     } finally {
@@ -146,6 +149,7 @@ export default function AdminSuggestionsList() {
     const { suggestion_id: suggestionId, apple_podcast_id, source: itemSource } = item;
     setItems(prev => prev.filter(i => i.suggestion_id !== suggestionId));
     setTotal(t => Math.max(0, t - 1));
+    setAllTotal(t => (t == null ? t : Math.max(0, t - 1)));
     setEditedNames(prev => {
       if (!(suggestionId in prev)) return prev;
       const next = { ...prev };
@@ -282,10 +286,7 @@ export default function AdminSuggestionsList() {
 
   return (
     <div className="min-h-screen bg-gray-100 font-sans">
-      <AdminHeader
-        active="Suggestions"
-        right={<span className="text-sm text-gray-400">{total} pending</span>}
-      />
+      <AdminHeader active="Suggestions" />
 
       <div className="px-6 py-3 bg-white border-b border-gray-200 flex items-center gap-2">
         <a href="/admin" className="text-sm text-teal-700 hover:text-teal-900 hover:underline">
@@ -384,6 +385,7 @@ export default function AdminSuggestionsList() {
         )}
 
         {/* List */}
+        {allTotal != null && <AdminListCount total={total} allTotal={allTotal} shown={items.length} noun="pending suggestion" />}
         <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
           {loading && items.length === 0 ? (
             <div className="py-12 text-center text-gray-400 text-sm">Loading...</div>

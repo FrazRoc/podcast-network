@@ -14,8 +14,8 @@ work at Fervo..."), so a model reads them. Cost is kept down three ways:
   * An identical snippet for the same person is sent once. Shows repeat a
     guest's bio line across episodes; the answer is copied to every
     appearance that shares it.
-  * Everything runs through the Message Batches API on Haiku 4.5, which is
-    half the normal per-token price, with ~40 snippets per request so the
+  * Everything runs through the Message Batches API (Sonnet 5 by default),
+    at half the normal per-token price, with ~40 snippets per request so the
     instructions are paid for once per request rather than once per person.
 
 Every extracted value must appear verbatim in the snippet it came from, or
@@ -29,7 +29,9 @@ Usage:
                                                               # API, no DB writes
     python3 extract_affiliations.py submit [--limit N] [--max-cost 2.00]
     python3 extract_affiliations.py collect
+    python3 extract_affiliations.py reextract [--dry-run]      # re-read bad companies with Opus
     python3 extract_affiliations.py run [--limit N]           # collect, then submit
+                                                              # (scrape.yml, every 6 hours)
 
 `estimate` only reads. `pilot` calls the API (normal, non-batch pricing — it
 is small and returns immediately) and writes a CSV for review, never the
@@ -55,6 +57,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 from description_cleaner import (  # noqa: E402
     clean_description, _name_pattern, first_name_belongs_to_other,
 )
+from org_names import normalize_org_name, not_an_organisation  # noqa: E402
+from role_selection import tidy_title  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
@@ -75,8 +79,13 @@ MODELS = {
     # ~3x Haiku's rather than the 2x the price table alone suggests.
     'claude-sonnet-5': {'price': (2.00, 10.00), 'params': {'thinking': {'type': 'disabled'}},
                         'estimate_factor': 1.5},
+    # For re-reading the hard cases (reextract). Adaptive thinking at medium
+    # effort; the factor is a conservative guess for its larger token counts
+    # and thinking, not a measurement.
+    'claude-opus-5': {'price': (5.00, 25.00), 'params': {}, 'output_config': {'effort': 'medium'},
+                      'estimate_factor': 2.5},
 }
-MODEL = 'claude-haiku-4-5'
+MODEL = 'claude-sonnet-5'   # chosen Sep 2026; see the pilot notes in CLAUDE.md
 DATA_SOURCE = 'llm_extracted'
 MAX_ATTEMPTS = 3
 
@@ -136,6 +145,13 @@ Electricity". Never leave the organisation inside the title.
 - Several titles at one organisation stay together as written, e.g. \
 "co-founder and CEO". Roles at different organisations are separate entries, \
 one per organisation.
+- `company` is always exactly one organisation. When one title covers \
+several organisations ("a fellow at Columbia University and NASA", \
+"reporter for the Wall Street Journal and Bloomberg"), return one entry per \
+organisation, each with that title: company "Columbia University" and \
+company "NASA". An "and" or "&" inside a single organisation's name stays \
+("McKinsey & Company", "Black & Veatch", "Los Angeles Department of Water \
+and Power").
 - An organisation with no title still counts: "Eversource's Eric Bosworth" \
 and "Ivan Celanovic from Typhoon" give company "Eversource" / "Typhoon" \
 with title null. Episode titles often pair a guest with their organisation \
@@ -386,7 +402,8 @@ def request_params(items: list, model: str = MODEL) -> dict:
         'max_tokens': MAX_TOKENS,
         'system': SYSTEM_PROMPT,
         'messages': [{'role': 'user', 'content': render_items(items)}],
-        'output_config': {'format': {'type': 'json_schema', 'schema': OUTPUT_SCHEMA}},
+        'output_config': {'format': {'type': 'json_schema', 'schema': OUTPUT_SCHEMA},
+                          **MODELS[model].get('output_config', {})},
     }
 
 
@@ -461,8 +478,18 @@ def verified_affiliations(affiliations: list, snippet: str) -> tuple:
                 value = None
             if value and field == 'company':
                 value = _POSSESSIVE_SUFFIX_RE.sub('', value).strip() or None
+            # A state/country/abbreviation or a cut-off fragment is not an
+            # organisation ("California", "UK", "the University of").
+            if value and field == 'company' and not_an_organisation(value):
+                dropped.append((field, value))
+                value = None
+                clean[field] = None
+                continue
             if value and _in_text(value, haystack, field):
-                clean[field] = value
+                # Checked verbatim first; only then tidied ("cofounder" ->
+                # "co-founder", "Chief Executive Officer" -> "CEO"), so every
+                # title reads the same way.
+                clean[field] = tidy_title(value) if field == 'title' else value
             else:
                 clean[field] = None
                 if value:
@@ -667,7 +694,8 @@ def record_results(cur, pending: list, answers: dict) -> tuple:
         dropped_total += len(dropped)
         done.append(flags)
         new_rows.extend(
-            (episode_id, host_id, a['title'], a['company'], a['title_kind'], a['is_former'], DATA_SOURCE)
+            (episode_id, host_id, a['title'], a['company'], normalize_org_name(a['company']),
+             a['title_kind'], a['is_former'], DATA_SOURCE)
             for a in kept
         )
 
@@ -693,7 +721,7 @@ def record_results(cur, pending: list, answers: dict) -> tuple:
     if new_rows:
         execute_values(cur, """
             INSERT INTO host_affiliations
-                (episode_id, host_id, title, company, title_kind, is_former, data_source)
+                (episode_id, host_id, title, company, company_key, title_kind, is_former, data_source)
             VALUES %s ON CONFLICT DO NOTHING
         """, new_rows)
     if retry:
@@ -801,51 +829,104 @@ def cmd_pilot(limit: int, out_path: str, model: str = MODEL):
     logger.info(f"Wrote {out_path}")
 
 
-def cmd_submit(limit=None, max_cost=2.00, dry_run=False, model=MODEL, random_sample=False):
+def _send(conn, appearances, no_mention, items, model, max_cost, dry_run, over_cap_is_error,
+          record_no_mention=True):
+    """Estimate, check the cost cap, submit one batch, record pending rows."""
     from anthropic import Anthropic
     from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
     from anthropic.types.messages.batch_create_params import Request
 
-    conn = psycopg2.connect(DB)
-    appearances, no_mention, items = _load(conn, limit, random_sample)
     est = estimate_cost(items, model=model)
     _report(appearances, no_mention, items, est)
-
     if dry_run:
-        conn.close()
         return
     if est['dollars'] > max_cost:
-        conn.close()
-        sys.exit(f"Estimated ${est['dollars']:.2f} is over --max-cost ${max_cost:.2f}; "
-                 f"nothing submitted. Lower --limit or raise --max-cost.")
+        message = (f"Estimated ${est['dollars']:.2f} is over --max-cost ${max_cost:.2f}; "
+                   f"nothing submitted. Lower --limit or raise --max-cost.")
+        # The scheduled run must not fail the scrape over this — it logs and
+        # tries again next time. A manual submit stops with an error.
+        if over_cap_is_error:
+            sys.exit(message)
+        logger.warning(message)
+        return
 
     cur = conn.cursor()
-    if no_mention:
+    if no_mention and record_no_mention:
         _upsert_extractions(cur, [
             (a['episode_id'], a['host_id'], 'no_mention', None, None, None, None)
             for a in no_mention
         ])
         conn.commit()
-
     if not items:
         logger.info("Nothing to send.")
-        conn.close()
         return
 
-    client = Anthropic()
-    batch = client.messages.batches.create(requests=[
+    batch = Anthropic().messages.batches.create(requests=[
         Request(custom_id=f'req-{i}', params=MessageCreateParamsNonStreaming(**request_params(group, model)))
         for i, group in enumerate(chunk(items))
     ])
     logger.info(f"Submitted batch {batch.id}")
-
     _upsert_extractions(cur, [
         (a['episode_id'], a['host_id'], 'pending', it['snippet'], it['snippet_hash'], batch.id, model)
         for it in items for a in it['appearances']
     ])
     conn.commit()
     cur.close()
-    conn.close()
+
+
+def cmd_submit(limit=None, max_cost=2.00, dry_run=False, model=MODEL, random_sample=False,
+               over_cap_is_error=True):
+    conn = psycopg2.connect(DB)
+    try:
+        appearances, no_mention, items = _load(conn, limit, random_sample)
+        _send(conn, appearances, no_mention, items, model, max_cost, dry_run, over_cap_is_error)
+    finally:
+        conn.close()
+
+
+def get_appearances_with_non_org_companies(conn) -> list:
+    """Appearances whose stored company is marked "not an organisation" — a
+    state or country ("California", "UK") or a cut-off fragment ("the
+    University of"). The guest's real organisation was missed."""
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT DISTINCT ha.episode_id, ha.host_id, e.title, e.description, p.title
+        FROM host_affiliations ha
+        JOIN organization_aliases oa ON oa.normalized_name = ha.company_key
+        JOIN organizations o ON o.org_id = oa.org_id AND o.not_an_org
+        JOIN episodes e ON e.episode_id = ha.episode_id
+        JOIN podcasts p ON p.podcast_id = e.podcast_id
+        WHERE ha.data_source <> 'manual'
+    """)
+    rows = cur.fetchall()
+    cur.close()
+    return [{'episode_id': r[0], 'host_id': r[1], 'episode_title': r[2], 'description': r[3],
+             'podcast_title': r[4]} for r in rows]
+
+
+# Re-reads look further on each side of the name: a fragment like "the
+# University of" was usually the window's edge cutting the real name.
+WIDE_WINDOW = {'SNIPPET_BEFORE': 300, 'SNIPPET_AFTER': 600, 'SNIPPET_MAX_WINDOWS': 3}
+
+
+def cmd_reextract(model='claude-opus-5', max_cost=5.00, dry_run=False):
+    """Re-read, with a stronger model and a wider window, every appearance
+    whose company turned out not to be an organisation. collect replaces
+    the old roles for those appearances (manual rows are kept)."""
+    saved = {k: globals()[k] for k in WIDE_WINDOW}
+    globals().update(WIDE_WINDOW)
+    conn = psycopg2.connect(DB)
+    try:
+        names = get_names_by_host(conn)
+        appearances = get_appearances_with_non_org_companies(conn)
+        no_mention, items = group_appearances(appearances, names)
+        # Already processed once; a name the wider window cannot find leaves
+        # the existing row alone rather than rewriting its status.
+        _send(conn, appearances, no_mention, items, model, max_cost, dry_run, True,
+              record_no_mention=False)
+    finally:
+        conn.close()
+        globals().update(saved)
 
 
 def cmd_collect():
@@ -861,6 +942,7 @@ def cmd_collect():
     batch_ids = [r[0] for r in cur.fetchall()]
     if not batch_ids:
         logger.info("No pending batches.")
+    recorded_any = False
 
     for batch_id in batch_ids:
         batch = client.messages.batches.retrieve(batch_id)
@@ -898,9 +980,16 @@ def cmd_collect():
         logger.info(f"Batch {batch_id}: {done} appearances done, {added} affiliations, "
                     f"{retry} to retry, {dropped} values dropped as not verbatim; "
                     f"${usage_cost(tokens_in, tokens_out, True, model):.4f}")
+        recorded_any = True
 
     cur.close()
     conn.close()
+
+    # New company spellings become organisations right away, so Company Admin
+    # sees them without a separate step (see organizations.py).
+    if recorded_any:
+        from organizations import sync as sync_organizations
+        sync_organizations()
 
 
 def main():
@@ -931,6 +1020,11 @@ def main():
 
     sub.add_parser('collect', help='Record results of finished batches')
 
+    p = sub.add_parser('reextract', help='Re-read appearances whose company is not an organisation')
+    p.add_argument('--model', choices=sorted(MODELS), default='claude-opus-5')
+    p.add_argument('--max-cost', type=float, default=5.00)
+    p.add_argument('--dry-run', action='store_true')
+
     args = parser.parse_args()
     if args.command == 'estimate':
         cmd_estimate(args.limit, args.model)
@@ -940,9 +1034,12 @@ def main():
         cmd_submit(args.limit, args.max_cost, args.dry_run, args.model, args.random)
     elif args.command == 'collect':
         cmd_collect()
+    elif args.command == 'reextract':
+        cmd_reextract(args.model, args.max_cost, args.dry_run)
     elif args.command == 'run':
         cmd_collect()
-        cmd_submit(args.limit, args.max_cost, args.dry_run, args.model, args.random)
+        cmd_submit(args.limit, args.max_cost, args.dry_run, args.model, args.random,
+                   over_cap_is_error=False)
 
 
 if __name__ == '__main__':
