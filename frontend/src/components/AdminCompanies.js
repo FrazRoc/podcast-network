@@ -49,9 +49,21 @@ const jsonBody = (method, body) => ({
   method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
 });
 
+// One colour per type so a scan of the list shows the mix at a glance.
+const TYPE_COLORS = {
+  company:     'bg-blue-100 text-blue-800',
+  nonprofit:   'bg-green-100 text-green-800',
+  government:  'bg-amber-100 text-amber-800',
+  academic:    'bg-purple-100 text-purple-800',
+  research:    'bg-teal-100 text-teal-800',
+  media:       'bg-pink-100 text-pink-800',
+  investor:    'bg-emerald-100 text-emerald-800',
+  association: 'bg-orange-100 text-orange-800',
+};
+
 function TypeBadge({ type }) {
   if (!type) return null;
-  return <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 flex-shrink-0">{type}</span>;
+  return <span className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${TYPE_COLORS[type] || 'bg-gray-100 text-gray-600'}`}>{type}</span>;
 }
 
 // Search-as-you-type picker over companies, for choosing a parent or a merge target.
@@ -96,6 +108,9 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [mergeTarget, setMergeTarget] = useState(null);
+  // 'into': this company folds into the one picked (the usual case);
+  // 'in': the one picked folds into this company.
+  const [mergeDir, setMergeDir] = useState('into');
 
   const load = useCallback(() => {
     call(`${API}/companies/${orgId}?include_sub=${includeSub}`)
@@ -109,7 +124,7 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
       .catch(e => setError(e.message));
   }, [orgId, includeSub]);
 
-  useEffect(() => { setError(''); setNotice(''); setMergeTarget(null); load(); }, [load]);
+  useEffect(() => { setError(''); setNotice(''); setMergeTarget(null); setMergeDir('into'); load(); }, [load]);
 
   const save = async (extra = {}) => {
     setBusy(true); setError(''); setNotice('');
@@ -123,14 +138,22 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
     } catch (e) { setError(e.message); } finally { setBusy(false); }
   };
 
-  const mergeIn = async () => {
+  const merge = async () => {
     if (!mergeTarget) return;
     setBusy(true); setError('');
     try {
-      const r = await call(`${API}/companies/${orgId}/merge/${mergeTarget.org_id}`, { method: 'POST' });
-      setNotice(`Merged “${r.merged}” into this company`);
-      setMergeTarget(null);
-      load(); onChanged?.();
+      if (mergeDir === 'into') {
+        // This company is merged away, so show the one it became part of.
+        await call(`${API}/companies/${mergeTarget.org_id}/merge/${orgId}`, { method: 'POST' });
+        setMergeTarget(null);
+        onChanged?.();
+        onSelect?.(mergeTarget.org_id);
+      } else {
+        const r = await call(`${API}/companies/${orgId}/merge/${mergeTarget.org_id}`, { method: 'POST' });
+        setNotice(`Merged “${r.merged}” into this company`);
+        setMergeTarget(null);
+        load(); onChanged?.();
+      }
     } catch (e) { setError(e.message); } finally { setBusy(false); }
   };
 
@@ -218,22 +241,38 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
       </div>
 
       <div>
-        <p className="text-xs font-medium text-gray-500 mb-1">Merge another company into this one</p>
+        <div className="flex items-center gap-2 mb-1">
+          <p className="text-xs font-medium text-gray-500">Merge</p>
+          {[['into', 'this into another company'], ['in', 'another company into this']].map(([id, label]) => (
+            <button key={id} onClick={() => { setMergeDir(id); setMergeTarget(null); }}
+              className={`text-xs px-2 py-0.5 rounded ${mergeDir === id ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
         {mergeTarget ? (
           <div className="bg-red-50 rounded-lg p-3 text-sm space-y-2">
-            <p className="text-gray-700">
-              Fold <strong>{mergeTarget.name}</strong> ({mergeTarget.people} people) into <strong>{org.name}</strong>?
-              Its spellings become this company's.
-            </p>
+            {mergeDir === 'into' ? (
+              <p className="text-gray-700">
+                Fold <strong>{org.name}</strong> ({people.length} people) into <strong>{mergeTarget.name}</strong>?
+                This company's spellings become {mergeTarget.name}'s, and this record goes away.
+              </p>
+            ) : (
+              <p className="text-gray-700">
+                Fold <strong>{mergeTarget.name}</strong> ({mergeTarget.people} people) into <strong>{org.name}</strong>?
+                Its spellings become this company's.
+              </p>
+            )}
             <div className="flex gap-2">
-              <button onClick={mergeIn} disabled={busy}
+              <button onClick={merge} disabled={busy}
                 className="px-3 py-1.5 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50">Merge</button>
               <button onClick={() => setMergeTarget(null)}
                 className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-white">Cancel</button>
             </div>
           </div>
         ) : (
-          <CompanyPicker placeholder="Search for a duplicate…" excludeId={orgId} onPick={setMergeTarget} />
+          <CompanyPicker placeholder={mergeDir === 'into' ? 'Search for the company to merge into…' : 'Search for a duplicate…'}
+            excludeId={orgId} onPick={setMergeTarget} />
         )}
       </div>
 
