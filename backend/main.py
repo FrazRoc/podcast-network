@@ -3068,7 +3068,9 @@ async def list_companies(q: str = "", org_type: str = "", sort: str = "people_de
                    o.website_domain, o.not_an_org, o.created_at,
                    COALESCE(c.people, 0) AS people, COALESCE(c.roles, 0) AS roles,
                    (SELECT COUNT(*) FROM organization_aliases a WHERE a.org_id = o.org_id) AS alias_count,
-                   (SELECT COUNT(*) FROM organizations ch WHERE ch.parent_org_id = o.org_id) AS child_count
+                   (SELECT COUNT(*) FROM organizations ch WHERE ch.parent_org_id = o.org_id) AS child_count,
+                   (SELECT COUNT(*) {_LIVE_SUGGESTIONS}
+                      AND o.org_id IN (s.org_a, s.org_b)) AS suggestion_count
             FROM organizations o
             LEFT JOIN organizations p ON p.org_id = o.parent_org_id
             LEFT JOIN counts c ON c.org_id = o.org_id
@@ -3148,7 +3150,26 @@ async def get_company(org_id: int, include_sub: bool = False):
             person["roles"].append({k: r[k] for k in ('title', 'company', 'is_former',
                                                      'published_date', 'podcast_title')})
         ordered = sorted(people.values(), key=lambda p: (not p['is_current'], p['name']))
-        return {"org": org, "aliases": aliases, "children": children, "people": ordered}
+        cur.execute(f"""
+            SELECT CASE WHEN s.org_a = %(id)s THEN b.org_id ELSE a.org_id END AS org_id,
+                   CASE WHEN s.org_a = %(id)s THEN b.name ELSE a.name END AS name,
+                   CASE WHEN s.org_a = %(id)s THEN b.org_type ELSE a.org_type END AS org_type,
+                   s.reason, s.score
+            {_LIVE_SUGGESTIONS} AND %(id)s IN (s.org_a, s.org_b)
+            ORDER BY s.people DESC, s.score DESC
+        """, {"id": org_id})
+        suggestions = cur.fetchall()
+        if suggestions:
+            cur.execute("""
+                SELECT a.org_id, COUNT(DISTINCT ha.host_id) AS people FROM organization_aliases a
+                JOIN host_affiliations ha ON ha.company_key = a.normalized_name
+                WHERE a.org_id = ANY(%s) GROUP BY a.org_id
+            """, ([r['org_id'] for r in suggestions],))
+            counts = {r['org_id']: r['people'] for r in cur.fetchall()}
+            for r in suggestions:
+                r['people'] = counts.get(r['org_id'], 0)
+        return {"org": org, "aliases": aliases, "children": children, "people": ordered,
+                "suggestions": suggestions}
     finally:
         cur.close()
         conn.close()
@@ -3268,6 +3289,19 @@ async def mark_companies_not_same(body: NotSameOrgRequest):
         conn.close()
 
 
+# A stored merge suggestion that still needs a decision: neither side marked
+# not an organisation, and the two not already parent and child. Shared by
+# the queue, the list's per-row count and the company panel.
+_LIVE_SUGGESTIONS = """
+    FROM company_merge_suggestions s
+    JOIN organizations a ON a.org_id = s.org_a
+    JOIN organizations b ON b.org_id = s.org_b
+    WHERE NOT a.not_an_org AND NOT b.not_an_org
+      AND a.parent_org_id IS DISTINCT FROM b.org_id
+      AND b.parent_org_id IS DISTINCT FROM a.org_id
+"""
+
+
 @app.get("/api/admin/companies-suggestions", dependencies=[Depends(verify_admin)])
 async def company_merge_suggestions(limit: int = 40, offset: int = 0):
     """The stored merge-suggestion queue (see org_suggestions.py), biggest
@@ -3276,14 +3310,7 @@ async def company_merge_suggestions(limit: int = 40, offset: int = 0):
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        live = """
-            FROM company_merge_suggestions s
-            JOIN organizations a ON a.org_id = s.org_a
-            JOIN organizations b ON b.org_id = s.org_b
-            WHERE NOT a.not_an_org AND NOT b.not_an_org
-              AND a.parent_org_id IS DISTINCT FROM b.org_id
-              AND b.parent_org_id IS DISTINCT FROM a.org_id
-        """
+        live = _LIVE_SUGGESTIONS
         cur.execute(f"""
             SELECT s.org_a, s.org_b, s.reason, s.score, s.people {live}
             ORDER BY s.people DESC,

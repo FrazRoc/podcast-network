@@ -366,6 +366,14 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   112 marked not an organisation (book titles, politicians/administrations as
   employer, unnamed descriptions, reports, state names). Undo:
   `names_undo.json` in that session's scratchpad.
+- Sep 2026 types: 3,018 companies typed — the 150 with the most people by
+  hand, the rest by name rules (≈85% right on a sample; think tanks are
+  `research`). 3,451 one-off names with no clue stay untyped.
+- Company Admin rows show the type (one colour per type) and the number of
+  open merge suggestions; the Edit Company panel lists them with Merge this
+  into it / Merge it into this / Different, and its Merge section defaults to
+  merging the viewed company into another. "Open" = `_LIVE_SUGGESTIONS` in
+  main.py, shared with the queue.
 - Not yet: a public company view.
 
 ## Tests

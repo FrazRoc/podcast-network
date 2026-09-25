@@ -157,11 +157,31 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
     } catch (e) { setError(e.message); } finally { setBusy(false); }
   };
 
+  // Act on one open merge suggestion from this panel.
+  const decide = async (other, action) => {
+    setBusy(true); setError(''); setNotice('');
+    try {
+      if (action === 'into') {
+        await call(`${API}/companies/${other.org_id}/merge/${orgId}`, { method: 'POST' });
+        onChanged?.(); onSelect?.(other.org_id);
+        return;
+      }
+      if (action === 'in') {
+        const r = await call(`${API}/companies/${orgId}/merge/${other.org_id}`, { method: 'POST' });
+        setNotice(`Merged “${r.merged}” into this company`);
+      } else {
+        await call(`${API}/companies/not-same`, jsonBody('POST', { org_a: orgId, org_b: other.org_id }));
+        setNotice(`Marked different from “${other.name}”`);
+      }
+      load(); onChanged?.();
+    } catch (e) { setError(e.message); } finally { setBusy(false); }
+  };
+
   if (!data || !form) {
     return <div className="bg-white rounded-2xl border border-gray-200 p-6 text-sm text-gray-400">
       {error || 'Loading…'}</div>;
   }
-  const { org, aliases, children, people } = data;
+  const { org, aliases, children, people, suggestions = [] } = data;
   const currentCount = people.filter(p => p.is_current).length;
 
   return (
@@ -226,6 +246,33 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
         </div>
         {error && <p className="text-xs text-red-500">{error}</p>}
       </div>
+
+      {suggestions.length > 0 && (
+        <div className="bg-amber-50 rounded-lg p-3">
+          <p className="text-xs font-medium text-amber-800 mb-2">
+            Possible duplicates ({suggestions.length}) — open merge suggestions
+          </p>
+          <ul className="space-y-2">
+            {suggestions.map(o => (
+              <li key={o.org_id} className="text-sm">
+                <div className="flex items-center gap-2 min-w-0">
+                  <button onClick={() => onSelect(o.org_id)} className="text-blue-600 hover:underline truncate">{o.name}</button>
+                  <TypeBadge type={o.org_type} />
+                  <span className="text-xs text-gray-400 flex-shrink-0">{o.people} {o.people === 1 ? 'person' : 'people'} · {o.reason}</span>
+                </div>
+                <div className="flex gap-1.5 mt-1">
+                  {[['into', 'Merge this into it'], ['in', 'Merge it into this'], ['different', 'Different']].map(([a, label]) => (
+                    <button key={a} onClick={() => decide(o, a)} disabled={busy}
+                      className="text-xs px-2 py-0.5 rounded border border-amber-300 text-amber-800 hover:bg-white disabled:opacity-50">
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div>
         <p className="text-xs font-medium text-gray-500 mb-1">Spellings ({aliases.length})</p>
@@ -570,6 +617,11 @@ export default function AdminCompanies() {
                             {o.alias_count > 1 && ` · ${o.alias_count} spellings`}
                             {o.parent_name && ` · part of ${o.parent_name}`}
                             {o.child_count > 0 && ` · ${o.child_count} sub-org${o.child_count !== 1 ? 's' : ''}`}
+                            {o.suggestion_count > 0 && (
+                              <span className="text-amber-600">
+                                {` · ${o.suggestion_count} merge suggestion${o.suggestion_count !== 1 ? 's' : ''}`}
+                              </span>
+                            )}
                             {o.website_domain && ` · ${o.website_domain}`}
                           </p>
                         </div>

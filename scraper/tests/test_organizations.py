@@ -333,6 +333,22 @@ class TestCompanyEndpoints:
         assert pairs[frozenset(('BNEF', 'Bloomberg New Energy Finance'))]['reason'] == 'acronym'
         assert r['total'] == len(r['items']) and r['computed_at'] is not None
 
+    def test_row_and_panel_show_open_suggestions(self, org_db, monkeypatch):
+        cur = self._setup(org_db)
+        cur.execute("INSERT INTO organizations (name) VALUES ('Bloomberg New Energy Finance')")
+        org_db.commit()
+        self._refresh(org_db)
+        bnef, bnef_long = _org_id(cur, 'BNEF'), _org_id(cur, 'Bloomberg New Energy Finance')
+        counts = {i['name']: i['suggestion_count'] for i in _run(org_db, monkeypatch, 'list_companies')['items']}
+        assert counts['BNEF'] >= 1 and counts['Acme'] == 0
+        panel = _run(org_db, monkeypatch, 'get_company', bnef)['suggestions']
+        assert {s['name'] for s in panel} >= {'Bloomberg New Energy Finance'}
+        # Deciding the pair takes it off both.
+        _run(org_db, monkeypatch, 'mark_companies_not_same',
+             main_body_cls('NotSameOrgRequest', org_a=bnef, org_b=bnef_long))
+        panel = _run(org_db, monkeypatch, 'get_company', bnef)['suggestions']
+        assert 'Bloomberg New Energy Finance' not in {s['name'] for s in panel}
+
     def test_not_same_removes_the_row_and_survives_a_rebuild(self, org_db, monkeypatch):
         cur = self._setup(org_db)
         cur.execute("INSERT INTO organizations (name) VALUES ('Bloomberg New Energy Finance')")
