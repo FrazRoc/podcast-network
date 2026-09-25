@@ -8,6 +8,7 @@ import secrets
 
 from fastapi import FastAPI, HTTPException, Header, Depends, BackgroundTasks
 from pydantic import BaseModel
+from typing import Optional
 from fastapi.middleware.cors import CORSMiddleware
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -311,20 +312,20 @@ app = FastAPI()
 
 
 class AliasRequest(BaseModel):
-    alias_name: str = None
+    alias_name: Optional[str] = None
 
 
 class RolePinRequest(BaseModel):
-    title: str = None
-    company: str = None
+    title: Optional[str] = None
+    company: Optional[str] = None
 
 
 class CompanyUpdateRequest(BaseModel):
-    name: str = None
-    org_type: str = None
-    website_domain: str = None
-    parent_org_id: int = None
-    not_an_org: bool = None
+    name: Optional[str] = None
+    org_type: Optional[str] = None
+    website_domain: Optional[str] = None
+    parent_org_id: Optional[int] = None
+    not_an_org: Optional[bool] = None
 
 
 class NotSameOrgRequest(BaseModel):
@@ -338,7 +339,7 @@ class DismissPairRequest(BaseModel):
 
 
 class NameOverrideRequest(BaseModel):
-    name: str = None
+    name: Optional[str] = None
 
 DEFAULT_ALLOWED_ORIGINS = [
     "http://localhost:3000",
@@ -1885,9 +1886,9 @@ async def proxy_image(url: str):
 class CreatePersonRequest(BaseModel):
     first_name: str
     last_name: str
-    twitter_url: str = None
-    bluesky_url: str = None
-    linkedin_url: str = None
+    twitter_url: Optional[str] = None
+    bluesky_url: Optional[str] = None
+    linkedin_url: Optional[str] = None
 
 
 @app.post("/api/admin/people", dependencies=[Depends(verify_admin)])

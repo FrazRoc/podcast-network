@@ -292,6 +292,17 @@ class TestCompanyEndpoints:
         hidden = _run(org_db, monkeypatch, 'list_companies', view='not_org')['items']
         assert [i['name'] for i in hidden] == ['Acme']
 
+    def test_edit_form_payload_with_nulls_is_accepted(self, org_db, monkeypatch):
+        # Exactly what the Edit Company form sends for an untyped company;
+        # an explicit null used to fail validation (Pydantic 2).
+        cur = self._setup(org_db)
+        import main
+        body = main.CompanyUpdateRequest.model_validate(
+            {"name": "Acme Corp", "org_type": None, "website_domain": "", "parent_org_id": 0})
+        _run(org_db, monkeypatch, 'update_company', _org_id(cur, 'Acme'), body)
+        cur.execute("SELECT COUNT(*) FROM organizations WHERE name = 'Acme Corp'")
+        assert cur.fetchone()[0] == 1
+
     def test_domain_is_cleaned(self, org_db, monkeypatch):
         cur = self._setup(org_db)
         acme = _org_id(cur, 'Acme')
