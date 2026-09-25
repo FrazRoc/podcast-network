@@ -35,7 +35,13 @@ const REASONS = {
 async function call(url, options) {
   const res = await adminFetch(url, options);
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.detail || `API error ${res.status}`);
+  if (!res.ok) {
+    // A validation error (422) sends detail as a list of {loc, msg}.
+    const detail = Array.isArray(data.detail)
+      ? data.detail.map(d => `${(d.loc || []).slice(-1)[0]}: ${d.msg}`).join('; ')
+      : data.detail;
+    throw new Error(detail || `API error ${res.status}`);
+  }
   return data;
 }
 
