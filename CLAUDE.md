@@ -244,10 +244,19 @@ merges and credit deletions carry through without touching that code.
 ### Displayed current role
 
 `backend/role_selection.py` `pick_current_role()`: a pin in
-`host_role_pins` (`migrate_add_host_role_pins.sql`) wins; otherwise the
-newest appearance's current roles (not `is_former`, not
-`from_other_episode`), ranked position+org > position > description >
-bare org. Public `GET /api/people/{id}/current-role` (fetched per card by
+`host_role_pins` (`migrate_add_host_role_pins.sql`) wins. Otherwise
+(rewritten Sep 25 2026 — "newest appearance wins" kept showing a bare
+company or a bare title when an earlier appearance had the full role, and
+pins don't scale): current roles only (not `is_former`; `from_other_episode`
+only as a last resort); a title with no company borrows the company from
+the person's latest row on the same show (Aurora/BNEF staff on their own
+podcasts); the employer is the newest row naming any organisation, counting
+its parent/sub-orgs as one (`top_org_id`), and the shown role is the newest
+position there, skipping bare words like "researcher"/"author" when a fuller
+title exists; if the newest appearance is 3+ years past that, the old
+newest-appearance ranking applies (position+org > position > description >
+bare org). A borrowed company is marked `company_inferred`. Titles are also
+singularised ("Reporters" → "Reporter") in `tidy_title`. Public `GET /api/people/{id}/current-role` (fetched per card by
 `HostProfileCard`, so the graph payload is unchanged); admin
 `GET /api/admin/people/{id}/roles`, `PUT`/`DELETE .../role-pin` (the
 `RoleEditor` section of Edit Person). No per-row history editing —

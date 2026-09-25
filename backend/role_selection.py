@@ -2,22 +2,43 @@
 The displayed "current role" for a person, derived from host_affiliations.
 
 host_affiliations is raw data: one set of rows per appearance, worded
-however each show worded it (see scraper/extract_affiliations.py). This
-picks the one role to show, and is deliberately simple until there is more
-real data to tune it against:
+however each show worded it (see scraper/extract_affiliations.py). Shows
+often name only part of a role — the newest appearance says "Canary Media"
+with no title, or "Co-Head of Advisory" with no company because the show is
+the company's own podcast — so the newest appearance alone is a poor
+answer. The rule (Sep 2026, tuned on ~40 people reviewed by hand):
 
   1. A manual pin (host_role_pins) wins outright.
-  2. Otherwise, only current roles count: former roles are history, and an
-     appearance flagged from_other_episode ("past episodes you'll love",
-     reruns) is dated wrong.
-  3. The most recent appearance with any such role wins.
-  4. Within that appearance, a real position at a named organisation beats
-     a position alone, which beats a description ("clean energy investor"),
-     which beats a bare organisation.
+  2. Only current roles count: former roles are history, and an appearance
+     flagged from_other_episode ("past episodes you'll love", reruns) is
+     dated wrong — used only when nothing else names a position and a company.
+  3. A title with no company borrows the company from the person's latest
+     row on the same show that names one (Aurora's analysts on Aurora's
+     podcast, BNEF's on Switched On).
+  4. The person's current organisation is the one on their newest row that
+     names any — together with its parent and sub-organisations (Bloomberg
+     L.P. / Bloomberg News). The shown role is the newest real position at
+     that organisation, passing over bare words like "researcher" or
+     "author" when a fuller title exists there.
+  5. That organisation has no titled row: its name, with the newest title
+     given without a company since the person appeared there (Alba Forns,
+     "COO and Co-Founder", then Climatize).
+  6. Nothing names an organisation, or the newest appearance is more than
+     three years past the last one that did (a career change the shows
+     haven't named): the newest appearance, where a position at a named
+     organisation beats a position alone, which beats a description
+     ("clean energy investor"), which beats a bare organisation.
 """
 
 import re
-from datetime import date
+from datetime import date, timedelta
+
+# Titles too generic to prefer over a fuller one at the same organisation.
+_WEAK_TITLES = {'researcher', 'expert', 'author', 'guest', 'speaker', 'member', 'commentator',
+                'panelist', 'panellist', 'contributor', 'lead', 'co-lead'}
+# Not a title: a relative clause the extractor kept ("who lead BNEF's EV team").
+_NOT_A_TITLE_RE = re.compile(r'^(who|which|that|whose)\b', re.I)
+_CAREER_CHANGE = timedelta(days=3 * 365)
 
 
 def _rank(row: dict) -> int:
@@ -31,29 +52,108 @@ def _rank(row: dict) -> int:
     return 3
 
 
+def _when(row: dict):
+    return (row.get('published_date') or date.min, row.get('episode_id') or 0)
+
+
+def _family(row: dict):
+    """Organisations counted as one employer: the top of the parent chain,
+    or the company text when it isn't linked to an organisation."""
+    if row.get('top_org_id') or row.get('org_id'):
+        return row.get('top_org_id') or row.get('org_id')
+    return (row.get('company') or '').strip().lower() or None
+
+
+def _is_position(row: dict) -> bool:
+    return row.get('title_kind') == 'position' and bool(row.get('title'))
+
+
+def _is_weak(row: dict) -> bool:
+    return (row.get('title') or '').strip().lower() in _WEAK_TITLES
+
+
+def _clean(rows: list) -> list:
+    out = []
+    for r in rows:
+        if r.get('title') and _NOT_A_TITLE_RE.match(r['title'].strip()):
+            r = {**r, 'title': None, 'title_kind': None}
+        if r.get('title') or r.get('company'):
+            out.append(r)
+    return out
+
+
+def _borrow_show_company(rows: list) -> list:
+    """Rule 3: a company-less title takes the company of the person's latest
+    row on the same show that names one."""
+    by_show = {}
+    for r in sorted(rows, key=_when):
+        if r.get('company') and r.get('podcast_id') is not None:
+            by_show[r['podcast_id']] = r
+    out = []
+    for r in rows:
+        src = by_show.get(r.get('podcast_id')) if r.get('podcast_id') is not None else None
+        if r.get('title') and not r.get('company') and src:
+            r = {**r, 'company': src['company'], 'org_id': src.get('org_id'),
+                 'top_org_id': src.get('top_org_id'), 'company_inferred': True}
+        out.append(r)
+    return out
+
+
+def _newest_appearance(rows: list) -> dict:
+    newest = max(rows, key=_when)
+    same = [r for r in rows if r.get('episode_id') == newest.get('episode_id')]
+    return min(same, key=_rank)
+
+
+def _choose(rows: list) -> dict | None:
+    rows = _borrow_show_company(_clean(rows))
+    if not rows:
+        return None
+    with_org = [r for r in rows if r.get('company')]
+    if not with_org:
+        return _newest_appearance(rows)
+    anchor = max(with_org, key=lambda r: (_when(r), -_rank(r)))
+    newest = max(rows, key=_when)
+    if (newest.get('published_date') and anchor.get('published_date')
+            and newest['published_date'] - anchor['published_date'] > _CAREER_CHANGE):
+        return _newest_appearance(rows)
+
+    family = _family(anchor)
+    titled = [r for r in with_org if _family(r) == family and _is_position(r)]
+    if titled:
+        strong = [r for r in titled if not _is_weak(r)] or titled
+        return max(strong, key=lambda r: (_when(r), not r.get('company_inferred')))
+    # Rule 5: the organisation, with a title given since without a company.
+    since = [r for r in rows if not r.get('company') and _is_position(r) and _when(r) >= _when(anchor)]
+    if since:
+        t = max(since, key=_when)
+        return {**t, 'company': anchor['company'], 'org_id': anchor.get('org_id'),
+                'top_org_id': anchor.get('top_org_id'), 'company_inferred': True}
+    return anchor
+
+
 def pick_current_role(rows: list, pin: dict | None = None) -> dict | None:
     """rows: host_affiliations joined with their extraction and episode —
     dicts with title, company, title_kind, is_former, from_other_episode,
-    published_date, episode_id (plus anything else, passed through).
+    published_date, episode_id, and where known podcast_id, org_id and
+    top_org_id (plus anything else, passed through).
     pin: {'title', 'company'} from host_role_pins, or None.
 
     Returns the chosen row with 'source' set to 'pinned' or 'derived', or
-    None when there is nothing to show.
+    None when there is nothing to show. A company filled in from another row
+    is marked company_inferred.
     """
     if pin and (pin.get('title') or pin.get('company')):
         return {'title': pin.get('title'), 'company': pin.get('company'), 'source': 'pinned'}
 
-    # A row can be left with nothing to show once a non-organisation company
-    # is blanked out (see _role_rows); it does not count as a current role.
-    current = [r for r in rows if not r.get('is_former') and not r.get('from_other_episode')
-               and (r.get('title') or r.get('company'))]
-    if not current:
-        return None
-
-    newest = max(current, key=lambda r: (r.get('published_date') or date.min, r.get('episode_id') or 0))
-    same_appearance = [r for r in current if r.get('episode_id') == newest.get('episode_id')]
-    best = min(same_appearance, key=_rank)
-    return {**best, 'source': 'derived'}
+    live = [r for r in rows if not r.get('is_former')]
+    best = _choose([r for r in live if not r.get('from_other_episode')])
+    if not best or not (_is_position(best) and best.get('company')):
+        # Rule 2's fallback: a reference to another episode, if it is fuller.
+        other = _choose([r for r in live if r.get('from_other_episode')])
+        if other and _is_position(other) and other.get('company'):
+            best = other
+    return {**best, 'source': 'derived'} if best else None
 
 
 # ------------------------------------------------------------------
@@ -209,11 +309,23 @@ def standardise_title_words(title: str | None) -> str | None:
     return text
 
 
+# One person's title taken from a sentence about several ("the reporters X
+# and Y", "co-founders A and B"): the last word back in the singular.
+_PLURAL_ROLE_RE = re.compile(
+    r'\b(reporter|analyst|founder|host|expert|researcher|partner|director|editor|scientist|engineer|'
+    r'economist|associate|fellow|member|correspondent|journalist|writer|author|investor|advisor|adviser|'
+    r'leader|student|lead)s$', re.I)
+
+
+def singular_role(title: str | None) -> str | None:
+    return _PLURAL_ROLE_RE.sub(lambda m: m.group(1), title) if title else title
+
+
 def tidy_title(title: str | None) -> str | None:
     """The spelling fixes every stored title gets: co- roles hyphenated,
-    common chief titles and vice presidents abbreviated, and the other
-    standardisations in standardise_title_words()."""
-    return standardise_title_words(abbreviate_chiefs(hyphenate_co(title)))
+    common chief titles and vice presidents abbreviated, a plural role made
+    singular, and the other standardisations in standardise_title_words()."""
+    return singular_role(standardise_title_words(abbreviate_chiefs(hyphenate_co(title))))
 
 
 def display_title(title: str | None, title_kind: str | None = None) -> str | None:

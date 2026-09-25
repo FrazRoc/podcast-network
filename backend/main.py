@@ -3022,12 +3022,16 @@ def _role_rows(cur, host_id: int) -> list:
                CASE WHEN org.not_an_org THEN NULL ELSE org.org_id END AS org_id, ha.title_kind,
                ha.is_former, ha.data_source,
                ax.appears_on_episode, ax.from_other_episode,
-               e.published_date, e.title AS episode_title, p.title AS podcast_title
+               e.published_date, e.title AS episode_title, p.title AS podcast_title, e.podcast_id,
+               CASE WHEN org.not_an_org THEN NULL
+                    ELSE COALESCE(org_gp.org_id, org_p.org_id, org.org_id) END AS top_org_id
         FROM host_affiliations ha
         JOIN affiliation_extractions ax
           ON ax.episode_id = ha.episode_id AND ax.host_id = ha.host_id
         LEFT JOIN organization_aliases oa ON oa.normalized_name = ha.company_key
         LEFT JOIN organizations org ON org.org_id = oa.org_id
+        LEFT JOIN organizations org_p ON org_p.org_id = org.parent_org_id
+        LEFT JOIN organizations org_gp ON org_gp.org_id = org_p.parent_org_id
         JOIN episodes e ON e.episode_id = ha.episode_id
         JOIN podcasts p ON p.podcast_id = e.podcast_id
         WHERE ha.host_id = %s
@@ -3051,12 +3055,17 @@ def _all_current_roles(cur) -> dict:
     cur.execute("""
         SELECT ha.host_id, ha.episode_id, ha.title,
                CASE WHEN org.not_an_org THEN NULL ELSE COALESCE(org.name, ha.company) END AS company,
-               CASE WHEN org.not_an_org THEN NULL ELSE org.org_id END AS org_id, ha.title_kind, ha.is_former, ax.from_other_episode, e.published_date
+               CASE WHEN org.not_an_org THEN NULL ELSE org.org_id END AS org_id, ha.title_kind, ha.is_former, ax.from_other_episode, e.published_date,
+               e.podcast_id,
+               CASE WHEN org.not_an_org THEN NULL
+                    ELSE COALESCE(org_gp.org_id, org_p.org_id, org.org_id) END AS top_org_id
         FROM host_affiliations ha
         JOIN affiliation_extractions ax
           ON ax.episode_id = ha.episode_id AND ax.host_id = ha.host_id
         LEFT JOIN organization_aliases oa ON oa.normalized_name = ha.company_key
         LEFT JOIN organizations org ON org.org_id = oa.org_id
+        LEFT JOIN organizations org_p ON org_p.org_id = org.parent_org_id
+        LEFT JOIN organizations org_gp ON org_gp.org_id = org_p.parent_org_id
         JOIN episodes e ON e.episode_id = ha.episode_id
         ORDER BY ha.host_id, e.published_date DESC NULLS LAST, ha.episode_id DESC, ha.affiliation_id
     """)

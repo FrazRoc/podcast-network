@@ -15,10 +15,16 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 from role_selection import pick_current_role, display_title, format_for_display  # noqa: E402
 
 
-def row(episode_id, published, title=None, company=None, kind=None, former=False, other=False):
+def row(episode_id, published, title=None, company=None, kind=None, former=False, other=False,
+        podcast=None, org=None, top=None):
     return {'episode_id': episode_id, 'published_date': published, 'title': title,
             'company': company, 'title_kind': kind, 'is_former': former,
-            'from_other_episode': other}
+            'from_other_episode': other, 'podcast_id': podcast, 'org_id': org, 'top_org_id': top}
+
+
+def shown(rows):
+    chosen = pick_current_role(rows)
+    return chosen and (chosen['title'], chosen['company'])
 
 
 class TestPickCurrentRole:
@@ -63,6 +69,64 @@ class TestPickCurrentRole:
         rows = [row(9, None, 'CEO', 'Undated', 'position'),
                 row(1, date(2020, 1, 1), 'CEO', 'Dated', 'position')]
         assert pick_current_role(rows)['company'] == 'Dated'
+
+    # --- Sep 2026: fuller roles from earlier appearances (Evan's review) ---
+
+    def test_title_from_an_earlier_appearance_at_the_same_company(self):
+        # Julian Spector: the newest show names only Canary Media.
+        rows = [row(3, date(2026, 3, 14), None, 'Canary Media', org=5),
+                row(2, date(2025, 8, 22), 'Senior Reporter', 'Canary Media', 'position', org=5),
+                row(1, date(2019, 10, 7), 'Staff Writer', 'Greentech Media', 'position', org=6)]
+        assert shown(rows) == ('Senior Reporter', 'Canary Media')
+
+    def test_sub_organisations_count_as_the_same_employer(self):
+        # Akshat Rathi: "Bloomberg" now, "senior climate reporter at Bloomberg News" before.
+        rows = [row(2, date(2026, 6, 12), None, 'Bloomberg L.P.', org=1, top=1),
+                row(1, date(2026, 5, 10), 'senior climate reporter', 'Bloomberg News', 'position', org=2, top=1)]
+        assert shown(rows) == ('senior climate reporter', 'Bloomberg News')
+
+    def test_company_borrowed_from_the_same_show(self):
+        # Aurora's analysts on Aurora's podcast: the company goes unsaid.
+        rows = [row(2, date(2024, 1, 11), 'Co-Head of Advisory', None, 'position', podcast=9),
+                row(1, date(2020, 10, 29), 'Project Leader', 'Aurora Energy Research', 'position', podcast=9, org=3)]
+        assert shown(rows) == ('Co-Head of Advisory', 'Aurora Energy Research')
+
+    def test_newest_full_role_beats_a_newer_title_alone(self):
+        # Joel Edwards: "Co-founder" (no company) after "co-founder and CTO at Zanskar".
+        rows = [row(2, date(2026, 9, 9), 'Co-founder', None, 'position', podcast=1),
+                row(1, date(2026, 5, 27), 'co-founder and CTO', 'Zanskar', 'position', podcast=2, org=4)]
+        assert shown(rows) == ('co-founder and CTO', 'Zanskar')
+
+    def test_a_bare_word_gives_way_to_a_fuller_title_there(self):
+        # Jesse Jenkins: "researcher" once, "professor" before that.
+        rows = [row(2, date(2025, 7, 10), 'researcher', 'Princeton University', 'position', org=7),
+                row(1, date(2024, 3, 19), 'professor', 'Princeton University', 'position', org=7)]
+        assert shown(rows) == ('professor', 'Princeton University')
+
+    def test_title_given_since_goes_with_the_company(self):
+        # Alba Forns: Climatize named once, then "COO and co-founder" alone.
+        rows = [row(2, date(2025, 5, 29), 'COO and co-founder', None, 'position', podcast=1),
+                row(1, date(2023, 10, 26), None, 'Climatize', podcast=2, org=8)]
+        chosen = pick_current_role(rows)
+        assert (chosen['title'], chosen['company'], chosen['company_inferred']) == ('COO and co-founder', 'Climatize', True)
+
+    def test_relative_clause_is_not_a_title(self):
+        rows = [row(2, date(2026, 8, 20), "who lead BNEF's EV teams", None, 'position'),
+                row(1, date(2025, 11, 28), 'head of intelligent mobility', 'BloombergNEF', 'position', org=9)]
+        assert shown(rows) == ('head of intelligent mobility', 'BloombergNEF')
+
+    def test_other_episode_role_when_nothing_else_is_full(self):
+        # Stacey Abrams: only a description otherwise.
+        rows = [row(2, date(2026, 9, 17), 'senior counsel', 'Rewiring America', 'position', other=True),
+                row(1, date(2024, 7, 12), 'voting rights advocate', None, 'description')]
+        assert shown(rows) == ('senior counsel', 'Rewiring America')
+
+    def test_plural_role_made_singular(self):
+        from role_selection import tidy_title
+        assert tidy_title('Reporters') == 'Reporters'[:-1]
+        assert tidy_title('Co-Founders') == 'Co-Founder'
+        assert tidy_title('Head of Partnerships') == 'Head of Partnerships'
+        assert tidy_title('Senior Analysts') == 'Senior Analyst'
 
     def test_pin_overrides_everything(self):
         rows = [row(1, date(2025, 1, 1), 'CEO', 'Acme', 'position')]
