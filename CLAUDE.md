@@ -574,6 +574,16 @@ production build at a domain root needs `PUBLIC_URL=/`.
 **Scheduled jobs:** `scrape.yml` at `17 */6 * * *`, `backup.yml` at
 `41 4 * * *`. Backups are verified restorable.
 
+### Inherited organisation types
+
+A sub-organisation with no `org_type` of its own takes its parent's (or
+grandparent's) — resolved at read time, never copied, so it follows the
+parent if that changes: `inherited_type` on Company Admin's list and detail
+(dashed badge; the panel's empty Type option names it), the type filter and
+"No type yet" view, Diagnostics' type completeness, and Stats (`org_stats`
+already used `COALESCE(o.org_type, top.org_type)`). Setting a type on the
+sub-organisation overrides it.
+
 ### Diagnostics page (`/admin/diagnostics`)
 
 `GET /api/admin/diagnostics` (show coverage, host/guest balance, credits per

@@ -64,9 +64,17 @@ const TYPE_COLORS = {
   association: 'bg-orange-100 text-orange-800',
 };
 
-function TypeBadge({ type }) {
+// inherited: the type comes from the parent (the company has none of its
+// own), shown lighter with a dashed outline.
+function TypeBadge({ type, inherited, parentName }) {
   if (!type) return null;
-  return <span className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${TYPE_COLORS[type] || 'bg-gray-100 text-gray-600'}`}>{type}</span>;
+  return (
+    <span className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${TYPE_COLORS[type] || 'bg-gray-100 text-gray-600'} ${
+      inherited ? 'opacity-60 border border-dashed border-current' : ''}`}
+      title={inherited ? `Inherited from ${parentName || 'its parent'}` : undefined}>
+      {type}
+    </span>
+  );
 }
 
 // Search-as-you-type picker over companies, for choosing a parent or a merge target.
@@ -333,7 +341,7 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
             <label className="block text-xs font-medium text-gray-500 mb-1">Type</label>
             <select value={form.org_type} onChange={e => setForm(f => ({ ...f, org_type: e.target.value }))}
               className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm focus:border-blue-500 focus:outline-none">
-              <option value="">—</option>
+              <option value="">{org.inherited_type ? `— ${org.inherited_type} (from ${org.parent_name}) —` : '—'}</option>
               {ORG_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
@@ -761,7 +769,8 @@ export default function AdminCompanies() {
                           <div className="flex items-center gap-2">
                             <OrgLogo orgId={o.org_id} name={o.name} size={20} />
                             <p className="text-sm font-medium text-gray-900 truncate" title={o.name}>{o.name}</p>
-                            <TypeBadge type={o.org_type} />
+                            <TypeBadge type={o.org_type || o.inherited_type} inherited={!o.org_type && !!o.inherited_type}
+                              parentName={o.parent_name} />
                           </div>
                           <p className="text-xs text-gray-400">
                             {o.people} {o.people === 1 ? 'person' : 'people'}

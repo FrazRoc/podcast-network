@@ -2490,11 +2490,13 @@ async def get_data_diagnostics():
             )
             SELECT (COALESCE(p.n, 0) >= 3) AS busy,
                    COUNT(*) AS orgs,
-                   COUNT(o.org_type) AS typed,
+                   COUNT(COALESCE(o.org_type, par.org_type, gp.org_type)) AS typed,   -- inherited counts
                    COUNT(o.website_domain) AS website,
                    COUNT(o.wikidata_id) AS wikidata,
                    COUNT(o.parent_org_id) AS parent
             FROM organizations o LEFT JOIN people p ON p.org_id = o.org_id
+            LEFT JOIN organizations par ON par.org_id = o.parent_org_id
+            LEFT JOIN organizations gp ON gp.org_id = par.parent_org_id
             WHERE NOT o.not_an_org
             GROUP BY 1
         """)
@@ -3534,10 +3536,13 @@ async def list_companies(q: str = "", org_type: str = "", sort: str = "people_de
         "newest":      "o.created_at DESC, o.org_id DESC",
     }
     where = ["o.not_an_org = %(not_org)s"]
+    # A sub-organisation with no type of its own takes its parent's (or
+    # grandparent's): "California ISO's Board of Governors" is a nonprofit
+    # because CAISO is. Filters use that effective type.
     if org_type in ORG_TYPES:
-        where.append("o.org_type = %(org_type)s")
+        where.append("COALESCE(o.org_type, p.org_type, gp.org_type) = %(org_type)s")
     if view == "untyped":
-        where.append("o.org_type IS NULL")
+        where.append("COALESCE(o.org_type, p.org_type, gp.org_type) IS NULL")
     elif view == "no_website":
         where.append("o.website_domain IS NULL")
     if q.strip():
@@ -3555,6 +3560,7 @@ async def list_companies(q: str = "", org_type: str = "", sort: str = "people_de
                 GROUP BY oa.org_id
             )
             SELECT o.org_id, o.name, o.org_type, o.parent_org_id, p.name AS parent_name,
+                   CASE WHEN o.org_type IS NULL THEN COALESCE(p.org_type, gp.org_type) END AS inherited_type,
                    o.website_domain, o.not_an_org, o.created_at,
                    COALESCE(c.people, 0) AS people, COALESCE(c.roles, 0) AS roles,
                    (SELECT COUNT(*) FROM organization_aliases a WHERE a.org_id = o.org_id) AS alias_count,
@@ -3564,6 +3570,7 @@ async def list_companies(q: str = "", org_type: str = "", sort: str = "people_de
                       AND o.org_id IN (s.org_a, s.org_b)) AS suggestion_count
             FROM organizations o
             LEFT JOIN organizations p ON p.org_id = o.parent_org_id
+            LEFT JOIN organizations gp ON gp.org_id = p.parent_org_id
             LEFT JOIN counts c ON c.org_id = o.org_id
             WHERE {' AND '.join(where)}
             ORDER BY {sort_map.get(sort, sort_map['people_desc'])}
@@ -3571,10 +3578,12 @@ async def list_companies(q: str = "", org_type: str = "", sort: str = "people_de
         """, {"q": q.strip(), "org_type": org_type, "not_org": view == "not_org",
               "limit": max(1, min(limit, 1000))})
         items = cur.fetchall()
-        cur.execute("SELECT COUNT(*) FILTER (WHERE NOT not_an_org) AS active, "
-                    "COUNT(*) FILTER (WHERE not_an_org) AS not_org, "
-                    "COUNT(*) FILTER (WHERE NOT not_an_org AND org_type IS NULL) AS untyped "
-                    "FROM organizations")
+        cur.execute("SELECT COUNT(*) FILTER (WHERE NOT o.not_an_org) AS active, "
+                    "COUNT(*) FILTER (WHERE o.not_an_org) AS not_org, "
+                    "COUNT(*) FILTER (WHERE NOT o.not_an_org "
+                    "                 AND COALESCE(o.org_type, p.org_type, gp.org_type) IS NULL) AS untyped "
+                    "FROM organizations o LEFT JOIN organizations p ON p.org_id = o.parent_org_id "
+                    "LEFT JOIN organizations gp ON gp.org_id = p.parent_org_id")
         totals = cur.fetchone()
         return {"items": items, "totals": totals,
                 # Matching the search and filters (before LIMIT), and the whole view.
@@ -3594,8 +3603,12 @@ async def get_company(org_id: int, include_sub: bool = False):
     cur = conn.cursor()
     try:
         cur.execute("""
-            SELECT o.*, p.name AS parent_name FROM organizations o
-            LEFT JOIN organizations p ON p.org_id = o.parent_org_id WHERE o.org_id = %s
+            SELECT o.*, p.name AS parent_name,
+                   CASE WHEN o.org_type IS NULL THEN COALESCE(p.org_type, gp.org_type) END AS inherited_type
+            FROM organizations o
+            LEFT JOIN organizations p ON p.org_id = o.parent_org_id
+            LEFT JOIN organizations gp ON gp.org_id = p.parent_org_id
+            WHERE o.org_id = %s
         """, (org_id,))
         org = cur.fetchone()
         if not org:
