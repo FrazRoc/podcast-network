@@ -175,6 +175,9 @@ export default function AdminSuggestions() {
     const handler = (e) => {
       if (actionLoading || !suggestion) return;
       if (e.key === 'a') handleAction('approve');
+      if (e.key === 'm' && suggestion.possible_matches?.length > 0) {
+        handleAction('approve', suggestion.possible_matches[0].name);
+      }
       if (e.key === 'p') handleAction('approve_only');
       if (e.key === 'r') handleAction('reject');
       if (e.key === 's') handleAction('skip');
@@ -186,12 +189,16 @@ export default function AdminSuggestions() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [suggestion, actionLoading]);
 
-  const handleAction = async (action) => {
+  // nameOverride: approve under an existing person's name instead — see
+  // "Possibly already in the database" below. The backend finds that person
+  // by name, so the credit goes to them rather than to a new duplicate.
+  const handleAction = async (action, nameOverride) => {
     if (!suggestion || actionLoading) return;
     setActionLoading(true);
     try {
-      const body = editedName.trim() && editedName.trim() !== suggestion.candidate_name
-        ? JSON.stringify({ name: editedName.trim() })
+      const name = nameOverride || editedName.trim();
+      const body = name && name !== suggestion.candidate_name
+        ? JSON.stringify({ name })
         : undefined;
       const res = await adminFetch(`${API}/suggestions/${suggestion.suggestion_id}/${action}`, {
         method: 'POST',
@@ -433,6 +440,46 @@ export default function AdminSuggestions() {
                 <p className="text-sm text-blue-600">
                   + {suggestion.other_pending_suggestions} other episode{suggestion.other_pending_suggestions !== 1 ? 's' : ''} also mention this name — approving will link all of them.
                 </p>
+              )}
+
+              {/* Existing people this name may be written-differently from
+                  (middle initial, nickname, one-letter spelling, accents).
+                  Approving the suggestion as-is would create a duplicate. */}
+              {suggestion.possible_matches?.length > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 mt-3">
+                  <p className="text-xs font-semibold text-amber-700 mb-1">
+                    Possibly already in the database
+                  </p>
+                  {suggestion.possible_matches.map((m, i) => (
+                    <div key={m.host_id} className="flex items-center justify-between gap-3 py-1">
+                      <div className="text-sm text-amber-900 text-left min-w-0">
+                        <a
+                          href={`/admin/people?host_id=${m.host_id}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-semibold hover:underline"
+                        >
+                          {m.name}
+                        </a>
+                        <span className="text-amber-700"> — {m.reason}</span>
+                        {m.appearances > 0 && (
+                          <span className="block text-xs text-amber-700">
+                            {m.appearances} appearance{m.appearances !== 1 ? 's' : ''}
+                            {m.top_show ? `, mostly on ${m.top_show}` : ''}
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => handleAction('approve', m.name)}
+                        disabled={actionLoading}
+                        className="shrink-0 text-sm px-3 py-1.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-semibold rounded-md"
+                        title={i === 0 ? 'press M' : undefined}
+                      >
+                        Approve as {m.name}{i === 0 ? ' (M)' : ''}
+                      </button>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
 

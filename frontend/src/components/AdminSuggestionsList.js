@@ -466,6 +466,28 @@ export default function AdminSuggestionsList() {
                               ×{dupCount}
                             </span>
                           )}
+                          {/* Existing people this may be written-differently
+                              from: clicking one fills in their name, so
+                              Approve credits them instead of a new duplicate. */}
+                          {!isEditing && item.possible_matches?.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {item.possible_matches.map(m => (
+                                <button
+                                  key={m.host_id}
+                                  onClick={() => setEditedNames(prev => ({ ...prev, [item.suggestion_id]: m.name }))}
+                                  disabled={isActioning || !!bulk}
+                                  title={`${m.reason}${m.appearances ? ` · ${m.appearances} appearance${m.appearances !== 1 ? 's' : ''}` : ''}${m.top_show ? `, mostly on ${m.top_show}` : ''} — click to approve as this person`}
+                                  className={`px-1.5 py-0.5 rounded text-[11px] font-medium border ${
+                                    displayName === m.name
+                                      ? 'bg-teal-100 text-teal-800 border-teal-300'
+                                      : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
+                                  }`}
+                                >
+                                  ≈ {m.name}
+                                </button>
+                              ))}
+                            </div>
+                          )}
                           <a href={`/admin?suggestion_id=${item.suggestion_id}`} className="block">
                             <p className="text-xs text-gray-400 mt-0.5">
                               {item.podcast_title} · {item.episode_title}
