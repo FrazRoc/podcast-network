@@ -1501,3 +1501,8 @@ class TestDescriptorIntro:
 
     def test_solo_episode_has_no_name(self):
         assert self._n("In this episode, it’s just me by my lonesome, sharing some thoughts") == []
+
+    def test_other_shows_host_on_cross_post(self):
+        # Volts, episode 91409: the other show's host is credited as the guest.
+        assert "Dan Ilic" in self._n(
+            "In this episode, Australian comedian Dan Ilic hosts me on The Greatest Moral Podcast Of Our Generation.")

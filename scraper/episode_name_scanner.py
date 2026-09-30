@@ -882,7 +882,12 @@ _DESCRIPTOR_INTRO_RE = re.compile(
     r'\s+(?:[^\s,;:()]+\s+){0,6}?'
     r'(' + _DESCRIPTOR_NAME + r')'
     r'(?=\s*[,;]|\s+(?:of|from|at|and|about|to|on|who|in|discuss(?:es)?|' + _ROLE_LED_NAME_VERBS +
-    r'|speaks?|details?|gives?|demystifies|traces?|waxes|reflects?|sings?|lays? out|makes?)\b|\s*[.!?](?:\s|$))'
+    # "hosts me on" / "had me on": the host's own show is cross-posted as a
+    # Volts episode ("Australian comedian Dan Ilic hosts me on The Greatest
+    # Moral Podcast..."). The other show's host counts as this episode's
+    # guest (Evan, Sep 30 2026).
+    r'|speaks?|details?|gives?|demystifies|traces?|waxes|reflects?|sings?|lays? out|makes?'
+    r'|hosts? me|had me on)\b|\s*[.!?](?:\s|$))'
 )
 
 
