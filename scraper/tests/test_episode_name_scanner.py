@@ -1251,10 +1251,22 @@ class TestStripLeadingRoleWord:
         assert strip_leading_role_word("Ed Crooks") == "Ed Crooks"
 
     def test_end_to_end_host_not_leaked(self):
+        # A show's own host isn't a guest candidate at all: approving the
+        # suggestion would credit them as a Guest on their own show (Sep 30
+        # 2026). Hosts are registered through the show's host list instead.
         text = "Host Ed Crooks talks through the implications for energy with regulars."
         names = [n for n, _ in extract_candidate_names(text)]
         assert "Host Ed Crooks" not in names
-        assert "Ed Crooks" in names
+        assert "Ed Crooks" not in names
+
+    def test_show_staff_not_guests(self):
+        text = "This week on Zero, Akshat Rathi talks with producer Oscar Boyd and Ethan Zindler about tariffs."
+        names = [n for n, _ in extract_candidate_names(text)]
+        assert "Oscar Boyd" not in names and "Ethan Zindler" in names
+
+    def test_other_shows_host_is_a_guest(self):
+        text = "Akshat Rathi talks with Big Take host Wes Kosova about how climate tech is changing."
+        assert "Wes Kosova" in [n for n, _ in extract_candidate_names(text)]
 
 
 def _names(text):
@@ -1506,3 +1518,7 @@ class TestDescriptorIntro:
         # Volts, episode 91409: the other show's host is credited as the guest.
         assert "Dan Ilic" in self._n(
             "In this episode, Australian comedian Dan Ilic hosts me on The Greatest Moral Podcast Of Our Generation.")
+
+
+def test_zero_width_characters_stripped():
+    assert clean_candidate_name("​​Nancy Pfund") == "Nancy Pfund"

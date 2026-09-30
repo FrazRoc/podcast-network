@@ -1132,6 +1132,9 @@ _LEADING_JUNK_WORD_RE = re.compile(
 )
 
 
+_ZERO_WIDTH_RE = re.compile('[\u200b\u200c\u200d\u2060\ufeff]')
+
+
 def clean_candidate_name(name: str) -> str | None:
     """The cleaned-up person name a raw pattern capture stands for, or None
     if it isn't one. Shared by every extraction path, including the labelled
@@ -1142,6 +1145,10 @@ def clean_candidate_name(name: str) -> str | None:
     # spans a line break.
     if not name or '\n' in name:
         return None
+    # Zero-width characters from the feed HTML ("\u200b\u200bNancy Pfund",
+    # Climate One) make a name that looks identical to an existing person
+    # but isn't equal to it, so approving it would create a duplicate.
+    name = _ZERO_WIDTH_RE.sub('', name)
     name = strip_leading_role_word(strip_honorific(strip_possessive_prefix(name)))
     name = _LEADING_JUNK_WORD_RE.sub('', name)
     name = _MIDDLE_INITIAL_STRIP_RE.sub('', name)
@@ -1241,6 +1248,20 @@ def get_known_org_keys(conn) -> set:
     return keys
 
 
+# The show's own staff named in its description: "with producer Oscar
+# Boyd", "Host Neil King is joined by producers Jennifer Collins", "Hosted
+# by: Natalie Bannerman", "with host, Rama Myers" (a dozen suggestions in
+# the Sep 30 2026 review). Only when nothing Capitalized sits right before
+# the role word: "Big Take host Wes Kosova" is another show's host, and a
+# real guest.
+_SHOW_STAFF_BEFORE_RE = re.compile(
+    r'(?:^|[.,;:!?(]\s*|\b(?:with|and|by|our|the|our\s+own|,)\s+|\s(?:[a-z][\w\x27’-]*)\s+)'
+    r'(?:(?:executive|associate|senior|series|guest)\s+)?'
+    r'(?:[Hh]osts?|[Cc]o-?[Hh]osts?|[Hh]osted by|[Pp]roducers?|[Pp]resenters?|[Pp]roduced by)'
+    r'[,:]?\s+(?:(?:Dr|Prof)\.?\s+)?$'
+)
+
+
 def extract_candidate_names_tagged(text: str) -> list[tuple[str, str, str]]:
     """
     Extract candidate person names from text.
@@ -1258,6 +1279,9 @@ def extract_candidate_names_tagged(text: str) -> list[tuple[str, str, str]]:
 
     def add(name, pos, tag):
         name = clean_candidate_name(name)
+        at = text.find(name, max(0, pos - 5)) if name else -1
+        if at != -1 and _SHOW_STAFF_BEFORE_RE.search(text[max(0, at - 45):at]):
+            return
         if name and name.lower() not in seen:
             seen.add(name.lower())
             start = max(0, pos - 60)
