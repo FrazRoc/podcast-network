@@ -41,6 +41,15 @@ STRIP_AFTER_PATTERNS = [
     # of the 193 blocks do; cutting there threw those away. Blocks that go
     # straight to crew are still cut, and the crew tail is removed below.
     r'\nCredits:(?![^\n]{0,60}Hosted by)',
+    # The same block as a bare heading on its own line: TILclimate (Ask MIT
+    # Climate) writes "Credits\nLaur Hesse Fisher, Host and Senior Editor\n
+    # Aaron Krol, Writer and Executive Producer\n..." and Second Nature
+    # "Episode Credits\nListener contributions: ...". Together that credited
+    # eight producers, writers and fact-checkers as guests ~150 times.
+    r'\n(?:Episode )?Credits[ \t]*\n(?![ \t]*Hosted by)',
+    # Tiny Climate Challenge lists every link from the conversation, people
+    # included, under this heading — its theme musician was credited 15 times.
+    r'\n[ \t]*Links mentioned\b',
     r'(?i)(?:\.|\n)\s*Produced by[^.\n]{0,80}',
     r'\n[A-Z][a-z]+ [A-Z][a-z]+ is the co-host',
     r'\n[A-Z][a-z]+ [A-Z][a-z]+ is the host',
@@ -187,6 +196,23 @@ REMOVE_PATTERNS = [
     # strip_html() collapses a tag to a single space, not \n, so a \n-anchor
     # missed it. The negative lookbehind still stops these from matching
     # mid-word (e.g. "coproducer:" or "reeditor:", however unlikely).
+    # Crew and promo sentences that name people not in the episode (Sep 30
+    # 2026 review of people with many credits on only one or two shows):
+    # "The "Plugging In" theme song was written and performed by Jared
+    # Haines" (40 credits), "Produced and edited by Ross Kenyon, Anne Bailey,
+    # and Stephen Lacey" (The Green Blueprint), TED's "with support from Emma
+    # Bryce and Alex Rosenthal, and fact-check by Francisco Diez", Tiny
+    # Climate Challenge's "We are grateful for the generosity of Ashley
+    # Mazanec and her permission to use ...", and Climate One's upcoming-show
+    # promo "On March 24, Google's Chief Sustainability Officer Kate Brandt
+    # and Irina Raicu ... will speak with Climate One".
+    r'(?i)[^.\n]*\btheme (?:song|music)\b[^.\n]*\b(?:written|performed|composed|by)\b[^.\n]*',
+    r'(?i)\bProduced and edited by[^.\n]*',
+    r'(?i)\b(?:with (?:editorial )?support|editorial support|fact[- ]?check(?:ed)?)\s+(?:from|by)\b[^.\n]*',
+    r'(?i)\bWe are grateful for the generosity of[^.\n]*',
+    r'(?i)\bOn (?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|'
+    r'(?:January|February|March|April|May|June|July|August|September|October|November|December) \d{1,2}),'
+    r'[^.\n]{0,160}\bwill (?:speak|talk|join|sit down|be)\b[^.\n]*',
     r'(?<![A-Za-z])Reporters?:[^\n]*',
     r'(?<![A-Za-z])Producers?:[^\n]*',
     r'(?<![A-Za-z])Exec Producer:[^\n]*',

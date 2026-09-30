@@ -1431,3 +1431,43 @@ class TestLooksLikeCommonPhrase:
 
     def test_unseen_words_are_not_common(self):
         assert not looks_like_common_phrase("Zyx Qwerty", lowercase_word_ratios(self.TEXTS))
+
+
+class TestCrewCreditsStripped:
+    """Crew named in credits blocks, thanks lines and promos were credited as
+    guests: TILclimate's credits roster (~150 credits), Plugging In!'s theme
+    musician (40), Green Blueprint's producers (Sep 30 2026)."""
+
+    def test_bare_credits_heading(self):
+        text = ("Why does the ocean absorb so much of the heat we add to the planet, and what "
+                "happens next? Learn more at tilclimate.mit.edu.\nCredits\nLaur Hesse Fisher, Host\n"
+                "Aaron Krol, Writer and Executive Producer\nMichelle Harris, Fact Checker")
+        cleaned = clean_description(text)
+        assert "Aaron Krol" not in cleaned and "Michelle Harris" not in cleaned
+
+    def test_credits_heading_with_hosted_by_kept(self):
+        cleaned = clean_description("A long conversation about grid batteries, markets and what comes "
+                                    "next for storage developers in Texas.\nCredits\nHosted by Jane Doe and John Roe.")
+        assert "Jane Doe" in cleaned
+
+    def test_theme_song_credit(self):
+        text = 'Guest Mary Major explains.\nThe "Plugging In" theme song was written and performed by Jared Haines.'
+        cleaned = clean_description(text)
+        assert "Jared Haines" not in cleaned and "Mary Major" in cleaned
+
+    def test_produced_and_edited_by(self):
+        text = "Credits: Hosted by Lara Pierpoint. Produced and edited by Ross Kenyon, Anne Bailey, and Stephen Lacey."
+        cleaned = clean_description(text)
+        assert "Anne Bailey" not in cleaned and "Lara Pierpoint" in cleaned
+
+    def test_editorial_support_and_fact_check(self):
+        text = ("It was written by Federico Rosei, with support from Emma Bryce and Alex Rosenthal, "
+                "and fact-check by Francisco Diez.")
+        cleaned = clean_description(text)
+        assert "Alex Rosenthal" not in cleaned and "Francisco Diez" not in cleaned
+
+    def test_upcoming_show_promo(self):
+        text = ("Guests: Mindy Lubber, CEO, Ceres\nOn March 24, Google's Chief Sustainability Officer "
+                "Kate Brandt and Irina Raicu will speak with Climate One about AI.")
+        cleaned = clean_description(text)
+        assert "Irina Raicu" not in cleaned and "Mindy Lubber" in cleaned
