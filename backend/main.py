@@ -29,6 +29,7 @@ from role_selection import pick_current_role, format_for_display
 from org_names import normalize_org_name, ambiguous_spelling
 import org_stats
 from org_suggestions import refresh_suggestions
+from similar_people import find_possible_matches, index_people
 
 load_dotenv()
 
@@ -1240,13 +1241,64 @@ def _load_suggestion(cur, suggestion_id: int = None, apple_podcast_id: str = Non
     """, (row['episode_id'], row['suggestion_id']))
     other_pending_names = [r['candidate_name'] for r in cur.fetchall()]
 
+    possible_matches = _possible_matches_for(cur, [row['candidate_name']]).get(
+        (row['candidate_name'] or '').lower(), [])
+
     return {
         "done": False,
         **row,
         "existing_credits": existing_credits,
         "other_pending_suggestions": other_count,
         "other_pending_names": other_pending_names,
+        "possible_matches": possible_matches,
     }
+
+
+def _possible_matches_for(cur, names: list) -> dict:
+    """lowercased candidate name -> [{host_id, name, reason, appearances,
+    top_show}] of existing people it may be written-differently from (see
+    similar_people.py). Approving a suggestion as-is when it's one of these
+    creates a duplicate person; the review page offers "Approve as <name>"
+    instead. Computed per request: ~10k people load in well under a second
+    and each lookup is a few milliseconds."""
+    names = [n for n in dict.fromkeys(names) if n]
+    if not names:
+        return {}
+    cur.execute("""
+        SELECT host_id, first_name || ' ' || last_name AS name FROM hosts
+        UNION ALL
+        SELECT host_id, alias_name AS name FROM host_aliases
+    """)
+    index = index_people(cur.fetchall())
+    result = {n.lower(): find_possible_matches(n, index) for n in names}
+    host_ids = sorted({m['host_id'] for ms in result.values() for m in ms})
+    if not host_ids:
+        return result
+    # Canonical name (a match may have come through an alias row), how many
+    # appearances, and their most frequent show — enough for a reviewer to
+    # tell "the same Art Berman from The Great Simplification" at a glance.
+    cur.execute("""
+        SELECT h.host_id, h.first_name || ' ' || h.last_name AS name,
+               COUNT(eh.episode_id) AS appearances,
+               (SELECT p.title FROM episode_host eh2
+                  JOIN episodes e2 ON e2.episode_id = eh2.episode_id
+                  JOIN podcasts p ON p.podcast_id = e2.podcast_id
+                 WHERE eh2.host_id = h.host_id
+                 GROUP BY p.title ORDER BY COUNT(*) DESC, p.title LIMIT 1) AS top_show
+        FROM hosts h
+        LEFT JOIN episode_host eh ON eh.host_id = h.host_id
+        WHERE h.host_id = ANY(%s)
+        GROUP BY h.host_id
+    """, (host_ids,))
+    details = {r['host_id']: r for r in cur.fetchall()}
+    for matches in result.values():
+        for m in matches:
+            d = details.get(m['host_id'])
+            if d:
+                m['name'] = d['name']
+                m['appearances'] = d['appearances']
+                m['top_show'] = d['top_show']
+    return result
 
 
 @app.get("/api/admin/suggestions/next", dependencies=[Depends(verify_admin)])
@@ -1390,6 +1442,9 @@ async def list_suggestions(apple_podcast_id: str = None, source: str = None,
             LIMIT %(limit)s OFFSET %(offset)s
         """, params)
         items = cur.fetchall()
+        matches = _possible_matches_for(cur, [i['candidate_name'] for i in items])
+        for item in items:
+            item['possible_matches'] = matches.get((item['candidate_name'] or '').lower(), [])
 
         cur.execute(f"""
             SELECT COUNT(*) AS total
