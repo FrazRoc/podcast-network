@@ -1252,3 +1252,127 @@ class TestStripLeadingRoleWord:
         names = [n for n, _ in extract_candidate_names(text)]
         assert "Host Ed Crooks" not in names
         assert "Ed Crooks" in names
+
+
+def _names(text):
+    return [n for n, _ in extract_candidate_names(text)]
+
+
+class TestUncreditedEpisodeShapes:
+    """Guest-introducing shapes found by sampling episodes on text-scanned
+    shows that had no one credited at all (Sep 2026). Each text is the real
+    description fragment from the episode cited."""
+
+    def test_w_slash_without_space(self):
+        # Living Planet, episode 254619
+        assert "Evan Jevnikar" in _names("Summer reads – Learning from dinosaurs w/Evan Jevnikar")
+
+    def test_with_role_word_name_ends_sentence(self):
+        # episode 256989
+        text = "the humanitarian disaster that is cobalt mining in the Congo with author Siddharth Kara.\n\nNext"
+        assert "Siddharth Kara" in _names(text)
+
+    def test_period_after_trigger_does_not_swallow_real_match(self):
+        text = "in this interview with Dr. David Antonelli of the company Kubagen."
+        assert "David Antonelli" in _names(text)
+
+    def test_role_led_name_ends_at_about(self):
+        # episode 18458
+        text = "Stay tuned for a conversation with KORE CEO Lindsay Gorrill about how America can slash"
+        assert "Lindsay Gorrill" in _names(text)
+
+    def test_stock_opener_before_lead_appositive(self):
+        # The Green Circle, episode 269571
+        text = "In this episode, Olu Aruike, Country Director, Husk Power Systems, discusses the potentials"
+        assert "Olu Aruike" in _names(text)
+
+    def test_head_of_is_a_role(self):
+        # Hydrogen Rising, episode 10180 (stray space before the comma)
+        text = 'is "clean"? Ana Angel , Head of Hinicio North America, joins Hydrogen Rising to talk'
+        assert "Ana Angel" in _names(text)
+
+    def test_title_lead_appositive_closed_by_pipe(self):
+        text = "Michael Marsch, Chief Development Officer at BlueWave Solar | Agrivoltaics"
+        assert "Michael Marsch" in _names(text)
+
+    def test_episode_clause_is_not_a_role(self):
+        # episode 10180's title
+        text = "Tracing Your Origins, A Conversation With Sustainable Energy Strategy Consultant, Hinicio, on Hydrogen"
+        assert "Tracing Your Origins" not in _names(text)
+
+    def test_middle_initial_dropped(self):
+        # Decouple, episode 256174
+        assert "Mark Mills" in _names("Mark P. Mills returns to Decouple to challenge our understanding")
+
+    def test_two_subjects_with_shared_org(self):
+        # Climate Rising, episode 254382
+        text = "Justine Mahler and Cameron Westfall of Amazon join Climate Rising to discuss"
+        names = _names(text)
+        assert "Justine Mahler" in names and "Cameron Westfall" in names
+
+    def test_comma_separated_guest_list(self):
+        # Smart Energy Voices, episode 1850
+        text = ("The guests are Joshua Witte, Director of Energy Sustainability and ESG at "
+                "Dollar Tree stores, Rebecca Hensley, Senior Manager of Environmental "
+                "Sustainability at Hilton, and Gary Hilber, Director of Energy at Kohls. Next")
+        names = _names(text)
+        assert {"Joshua Witte", "Rebecca Hensley", "Gary Hilber"} <= set(names)
+        assert "Senior Manager" not in names
+
+    def test_inline_bullet_guest_lines(self):
+        # The ReEnergise Podcast, episode 268956
+        text = ("Joining our host was: \U0001F539Vahid Walker, Walker Subsea "
+                "\U0001F539Ian Armstrong, Pulcea \U0001F539Nassima Brown, Fennex")
+        assert {"Vahid Walker", "Ian Armstrong", "Nassima Brown"} <= set(_names(text))
+
+    def test_quote_attribution_with_role(self):
+        # Climate Cast, episode 253447
+        text = "in the winter,” said Kristoffer Tigue, a reporter for the Minnesota Star Tribune."
+        assert "Kristoffer Tigue" in _names(text)
+
+    def test_quote_attribution_needs_role(self):
+        text = "And that, says Conor McKenna, is the real art of the deal."
+        assert "Conor McKenna" not in [n for n, _, tag in extract_candidate_names_tagged(text)
+                                       if tag == 'quote_attribution']
+
+    def test_role_clause_then_name(self):
+        # episode 110649
+        text = ("April Kreller sits down with President and CEO of the Illinois "
+                "Manufacturer's Association, Mark Denzler, to discuss trends")
+        assert "Mark Denzler" in _names(text)
+
+
+class TestCandidateNameGuards:
+    """Junk the uncredited-episode sample turned up, from new and old
+    patterns alike."""
+
+    def test_name_never_spans_a_line_break(self):
+        text = "Executive Producer\nDavid Lishansky, and Producer Aaron Krol."
+        assert not any('\n' in n for n in _names(text))
+
+    def test_place_after_possessive(self):
+        text = "the U.S. Department of Energy's Los Alamos and Sandia national laboratories"
+        assert "Los Alamos" not in _names(text)
+
+    def test_sponsor_helps_is_not_a_guest(self):
+        text = "Visit sungrowpower.com. Antenna Group helps you connect with customers."
+        assert "Antenna Group" not in _names(text)
+
+    def test_helps_us_is_a_guest(self):
+        # Decouple, episode 256146
+        text = "In the wake of the blackout, commodities investor Alexander Stahel helps us to understand"
+        assert "Alexander Stahel" in _names(text)
+
+    def test_title_question_not_a_name(self):
+        assert "Can Trump" not in _names("Can Trump Explain the Grid?")
+
+    def test_possessive_name_rejected(self):
+        text = "how President Donald Trump’s return to the White House will change"
+        assert "Donald Trump’s" not in _names(text)
+
+    def test_shouting_headline_rejected(self):
+        assert "SURVEY LINK Paces" not in _names("SURVEY LINK Paces helps us find sites")
+
+    def test_newsmaker_secretary_not_role_led(self):
+        text = "former climate counselor to Treasury Secretary Janet Yellen, now head of policy"
+        assert "Janet Yellen" not in [n for n, _ in find_role_led_names(text)]

@@ -294,7 +294,9 @@ _INTRO_RE = re.compile(
         # group swallows it and blows past the 3-word cap.
         meets?|
         I\s+(?:talk|chat|speak)s?\s+(?:to|with))
-        \s+
+        # "w/Evan Jevnikar" (Living Planet, episode 254619) has no space
+        # after the slash at all, which a bare \s+ here never matched.
+        (?:\s+|(?<=w/))
         # Optional title prefix
         (?:(?:Dr|Prof|Mr|Ms|Mrs|Senator|Sen|Rep|CEO|CTO|CFO|COO|Governor|Gov|
            Secretary|Director|Mayor|President|Ambassador|Amb)\.?\s+)*
@@ -435,6 +437,12 @@ _BIO_SENTENCE_LEAD_BAD = {
     'as',
 }
 
+# "Mark P. Mills returns to Decouple" (episode 256174) — an optional middle
+# initial after the first name. add() in extract_candidate_names_tagged
+# drops it again, so the suggestion matches however the person is already
+# stored ("Mark Mills").
+_MIDDLE_INITIAL = r'(?:[^\S\n]+[A-Z]\.)?'
+
 # A company is essentially never described as "is a/the founder/reporter/
 # professor/..." — requiring one of these words to show up in the clause
 # right after "is a/the" is what separates "Adam Greenberg is the CEO and
@@ -453,7 +461,16 @@ _ROLE_WORDS = (
     r'specialists?|experts?|leads?|principals?|fellows?|researchers?|'
     r'entrepreneurs?|activists?|strategists?|physicians?|doctors?|lawyers?|'
     r'economists?|geologists?|glaciologists?|ecologists?|pioneers?|advocates?|'
-    r'philanthropists?|educators?|historians?|ambassadors?|champions?'
+    r'philanthropists?|educators?|historians?|ambassadors?|champions?|'
+    # "Ana Angel , Head of Hinicio North America, joins..." (episode 10180)
+    # / "Ryan Ciesielski, Group Head of Geospatial at National Grid" — "Head
+    # of X" is as common a job title as "Director of X" in show notes.
+    # ("Secretary" was tried as well and left out: "Treasury Secretary
+    # Janet Yellen, ..." is nearly always a newsmaker mentioned in passing.)
+    r'heads?|officers?|physicists?|'
+    # "Paleontologist Evan Jevnikar" (episode 254619) — every -ologist is a
+    # job, so match the family rather than listing them one by one.
+    r'[a-z]*ologists?'
 )
 
 _BIO_ROLE_WORDS_RE = re.compile(
@@ -468,7 +485,14 @@ _BIO_ROLE_WORDS_RE = re.compile(
 # find_role_led_names (where the regex itself excludes the role word from
 # the capture), these leak it straight into the "name". Stripped centrally
 # in add() below rather than duplicated in each pattern that can produce it.
-_LEADING_ROLE_WORD_RE = re.compile(r'^(?:' + _ROLE_WORDS + r')\s+', re.IGNORECASE)
+_LEADING_ROLE_WORD_RE = re.compile(
+    # Plus a few title words that aren't in _ROLE_WORDS because they'd make
+    # role-led matching fire on credits rather than guests ("Producer X",
+    # "Research Associate X"), but still leak in as the tail of a longer
+    # title that some other role word started.
+    r'^(?:' + _ROLE_WORDS + r'|associates?|coordinators?|producers?|assistants?|secretar(?:y|ies)|join|follow)\s+',
+    re.IGNORECASE
+)
 
 
 def strip_leading_role_word(name: str) -> str:
@@ -508,21 +532,47 @@ _BIO_IS_RE = re.compile(
 # verb straight after the name.
 _ROLE_LED_NAME_VERBS = (
     r'takes?|explains?|discusses?|shares?|joins?|tells?|breaks?\s+down|'
-    r'walks?|says?|talks?|argues?|describes?|reveals?|outlines?'
+    r'walks?|says?|talks?|argues?|describes?|reveals?|outlines?|'
+    # "commodities investor Alexander Stahel helps us to understand..."
+    # (episode 256146) / "Mark P. Mills returns to Decouple" (256174) /
+    # "Paleontologist Evan Jevnikar ... explores" (254619). "helps" only
+    # with "us": bare, it's the sponsor-read verb ("Antenna Group helps you
+    # connect with...", "Paces helps developers find...").
+    r'helps?\s+(?:us|me)|returns?|rejoins?|explores?|compares?'
 )
 
 _ROLE_LED_NAME_RE = re.compile(
     r'(?<![a-zA-Z])(?:' + _ROLE_WORDS + r')\s+'
     r'([A-Z][a-zA-ZÀ-ž\x27’-]+(?:\s+[A-Z][a-zA-ZÀ-ž\x27’-]+){1,2}?)'
-    r'(?=\s*,|\s+(?:' + _ROLE_LED_NAME_VERBS + r')\b)',
+    # Beyond a comma or a reporting verb, a role-led name also ends at
+    # "on"/"about": "with ByRotation Founder Eshita Kabra-Davies on building
+    # out..." (episode 253722), "a conversation with KORE CEO Lindsay
+    # Gorrill about how America..." (18458). A sentence-ending period or a
+    # dash was tried too and is mostly junk — "Climate CEO Mastermind Peer
+    # Groups — Our invite-only cohorts", "Executive Briefing Service." —
+    # since a role word followed by Title Case words is as often a product
+    # or team name as a person.
+    r'(?=\s*,|\s+(?:' + _ROLE_LED_NAME_VERBS + r'|on|about)\b)',
     re.IGNORECASE
+)
+
+
+# "...cobalt mining in the Democratic Republic of Congo with author
+# Siddharth Kara." (episode 256989) — a role-led name that simply ends the
+# sentence. Only after "with", and case-sensitive on the name: without
+# that, a bare period terminator matched team and product names ("Executive
+# Briefing Service.") far more often than people, and on _INTRO_RE itself it
+# let "interview with Dr." swallow the real match that follows.
+_WITH_ROLE_NAME_END_RE = re.compile(
+    r'\bwith\s+(?i:' + _ROLE_WORDS + r')\s+'
+    r'([A-Z][a-zA-ZÀ-ž\x27’-]+(?:[^\S\n]+[A-Z][a-zA-ZÀ-ž\x27’-]+){1,2})[.!?](?:\s|$)'
 )
 
 
 def find_role_led_names(text):
     """Names from the "role-word Name" shape (see _ROLE_LED_NAME_RE above).
     Yields (name, absolute_pos) pairs."""
-    for m in _ROLE_LED_NAME_RE.finditer(text):
+    for m in list(_ROLE_LED_NAME_RE.finditer(text)) + list(_WITH_ROLE_NAME_END_RE.finditer(text)):
         name = strip_honorific(m.group(1))
         if not _valid_name(name):
             continue
@@ -548,8 +598,28 @@ def find_role_led_names(text):
 # are common enough in show notes that the pattern needs to recognize
 # either separator in either position, not just the comma/comma pairing.
 _LEAD_APPOSITIVE_RE = re.compile(
-    r'(?:^|[.!?]\s+|\n)\s*([A-Z][a-zA-ZÀ-ž\x27’-]+(?:\s+[A-Z][a-zA-ZÀ-ž\x27’-]+){1,2}?)'
-    r'\s*[,—–]\s*([^,—–]{3,90})\s*[,—–]\s*'
+    r'(?:^|[.!?]\s+|\n)\s*'
+    # "In this episode, Olu Aruike, Country Director, Husk Power Systems,
+    # discusses..." — The Green Circle opens nearly every description this
+    # way (33 of its episodes had no credit at all), so the sentence really
+    # starts with the guest once that stock opener is skipped.
+    r'(?:(?:In\s+(?:this|today[\x27’]s)\s+(?:episode|interview|conversation|show)|This\s+week|Today),\s*)?'
+    # "Engr. Moyeen Abiodun, Renewable Energy Expert..." (episode 269581).
+    r'(?:(?:Dr|Prof|Engr|Mr|Ms|Mrs)\.?\s+)?'
+    r'([A-Z][a-zA-ZÀ-ž\x27’-]+' + _MIDDLE_INITIAL + r'(?:\s+[A-Z][a-zA-ZÀ-ž\x27’-]+){1,2}?)'
+    # "|" as a closing separator too: episode titles in the "Michael Marsch,
+    # Chief Development Officer at BlueWave Solar | Agrivoltaics..." shape
+    # end the role clause with the show's pipe rather than a second comma.
+    r'\s*[,—–]\s*([^,—–|]{3,90})\s*[,—–|]\s*'
+)
+
+# "Tracing Your Origins, A Conversation With Sustainable Energy Strategy
+# Consultant, Hinicio, ..." (episode 10180's title) has the lead-appositive
+# shape exactly, with a real role word inside — but the clause is describing
+# the episode, not the person before it.
+_EPISODE_CLAUSE_RE = re.compile(
+    r'^\s*(?:a|an|the|our)\s+(?:\w+\s+)?(?:conversation|interview|episode|discussion|chat)\b',
+    re.IGNORECASE
 )
 
 
@@ -559,6 +629,8 @@ def find_lead_appositive_name(text):
     above. Yields (name, absolute_pos) pairs."""
     for m in _LEAD_APPOSITIVE_RE.finditer(text):
         if not _BIO_ROLE_WORDS_RE.search(m.group(2)):
+            continue
+        if _EPISODE_CLAUSE_RE.search(m.group(2)):
             continue
         name = strip_honorific(m.group(1))
         if not _valid_name(name):
@@ -616,7 +688,11 @@ def find_mid_appositive_names(text):
 # own "sits down WITH X" trigger doesn't cover the reverse — the guest
 # being the one who sits down, not the object of it).
 _SUBJECT_VERB_LEAD_RE = re.compile(
-    r'(?:^|[.!?]\s+|\n)\s*([A-Z][a-zA-ZÀ-ž\x27’-]+(?:\s+[A-Z][a-zA-ZÀ-ž\x27’-]+){1,2}?)'
+    r'(?:^|[.!?]\s+|\n)\s*([A-Z][a-zA-ZÀ-ž\x27’-]+' + _MIDDLE_INITIAL + r'(?:\s+[A-Z][a-zA-ZÀ-ž\x27’-]+){1,2}?)'
+    # "Justine Mahler and Cameron Westfall of Amazon join Climate Rising..."
+    # (episode 254382) — two subjects, then their shared org, then the verb.
+    r'(?:\s+(?:and|&)\s+([A-Z][a-zA-ZÀ-ž\x27’-]+' + _MIDDLE_INITIAL + r'(?:\s+[A-Z][a-zA-ZÀ-ž\x27’-]+){1,2}?))?'
+    r'(?:\s+(?:of|from)\s+[A-Z][\w&.\x27’-]*(?:\s+[A-Z][\w&.\x27’-]*){0,3}?)?'
     r'\s+(?:' + _ROLE_LED_NAME_VERBS + r'|sits?\s+down|sat\s+down)\b',
     re.IGNORECASE
 )
@@ -635,18 +711,22 @@ def find_subject_verb_lead_names(text):
     is a role abbreviation, not a surname (mirrors find_mid_appositive_names'
     identical check on its OWN last word)."""
     for m in _SUBJECT_VERB_LEAD_RE.finditer(text):
-        name = strip_honorific(m.group(1))
-        if not _valid_name(name):
-            continue
-        if name.split()[0].lower() in _BIO_SENTENCE_LEAD_BAD:
-            continue
-        if looks_like_organisation(name):
-            continue
-        if name.isupper():
-            continue
-        if _BIO_ROLE_WORDS_RE.fullmatch(name.split()[-1]):
-            continue
-        yield name, m.start(1)
+        names = [(m.group(1), m.start(1))]
+        if m.group(2):
+            names.append((m.group(2), m.start(2)))
+        for raw, pos in names:
+            name = strip_honorific(raw)
+            if not _valid_name(name):
+                continue
+            if name.split()[0].lower() in _BIO_SENTENCE_LEAD_BAD:
+                continue
+            if looks_like_organisation(name):
+                continue
+            if name.isupper():
+                continue
+            if _BIO_ROLE_WORDS_RE.fullmatch(name.split()[-1]):
+                continue
+            yield name, pos
 
 
 def find_bio_sentence_names(text):
@@ -664,6 +744,100 @@ def find_bio_sentence_names(text):
         yield name, m.start()
 
 
+# "The guests are Joshua Witte, Director of Energy Sustainability and ESG at
+# Dollar Tree stores, Rebecca Hensley, Senior Manager of ..., and Gary
+# Hilber, ..." (episode 1850) — the same guest list find_guest_list_names
+# reads, but with no colon and commas (not semicolons) between people, so
+# names and job titles alternate in one comma-separated run.
+_GUEST_LIST_VERB_RE = re.compile(
+    r'\b(?:guests?|panelists?|speakers?)\s+(?:are|were|include[sd]?)\s+',
+    re.IGNORECASE
+)
+_LIST_NAME_ITEM_RE = re.compile(
+    r'^(?:and\s+)?([A-Z][a-zA-ZÀ-ž\x27’-]+' + _MIDDLE_INITIAL + r'(?:[^\S\n]+[A-Z][a-zA-ZÀ-ž\x27’-]+){1,2})$'
+)
+
+
+def find_comma_guest_list_names(text):
+    """Names from a "The guests are A, title, B, title, and C" run (see
+    _GUEST_LIST_VERB_RE above). Yields (name, absolute_pos) pairs, and only
+    when 2+ items in the run are name-shaped, so a single "guests are
+    Energy Leaders, ..." phrase can't fire alone."""
+    for m in _GUEST_LIST_VERB_RE.finditer(text):
+        start = m.end()
+        remainder = text[start:start + 600]
+        end = re.search(r'[.!?](?:\s|$)|\n', remainder)
+        run = remainder if not end else remainder[:end.start()]
+        found = []
+        pos = start
+        for item in run.split(','):
+            stripped = item.strip()
+            im = _LIST_NAME_ITEM_RE.match(stripped)
+            if im:
+                name = strip_honorific(im.group(1))
+                if (_valid_name(name) and not looks_like_organisation(name)
+                        and not _BIO_ROLE_WORDS_RE.search(name)):
+                    found.append((name, pos + item.find(stripped) + im.start(1)))
+            pos += len(item) + 1
+        if len(found) >= 2:
+            yield from found
+
+
+# "“Here in Minnesota, we are experiencing climate change predominantly in
+# the winter,” said Kristoffer Tigue, a reporter for the Minnesota Star
+# Tribune." (Climate Cast, episode 253447) — news-style shows attribute a
+# quote to the guest this way instead of introducing them. Requires a role
+# word in the appositive, same as the lead-appositive pattern, so a bare
+# "says Conor McKenna, is the real art of the deal" doesn't fire.
+_QUOTE_ATTRIBUTION_RE = re.compile(
+    r'\b(?:said|says|explains|explained|according\s+to)\s+'
+    r'([A-Z][a-zA-ZÀ-ž\x27’-]+' + _MIDDLE_INITIAL + r'(?:[^\S\n]+[A-Z][a-zA-ZÀ-ž\x27’-]+){1,2}?)'
+    r'\s*,\s+([^,.;\n]{3,90})'
+)
+
+
+def find_quote_attribution_names(text):
+    for m in _QUOTE_ATTRIBUTION_RE.finditer(text):
+        if not _BIO_ROLE_WORDS_RE.search(m.group(2)):
+            continue
+        name = strip_honorific(m.group(1))
+        if not _valid_name(name) or looks_like_organisation(name):
+            continue
+        yield name, m.start(1)
+
+
+# "...sits down with President and CEO of the Illinois Manufacturer's
+# Association, Mark Denzler, to discuss..." (episode 110649) — an intro
+# trigger, then the guest's whole job title, and only THEN the name as a
+# trailing appositive. _INTRO_RE only looks at the words straight after the
+# trigger, which here are the title.
+_INTRO_ROLE_THEN_NAME_RE = re.compile(
+    r'\b(?:with|featuring|joined\s+by|welcomes?|welcoming|interviews?|'
+    r'(?:speak|speaks|spoke|talk|talks|talked|chat|chats)\s+(?:to|with)|'
+    r'(?:sit|sits|sat)\s+down\s+with|(?:hear|hears|heard)\s+from)\s+'
+    r'([^,.;:\n]{3,90}?),\s+'
+    r'([A-Z][a-zA-ZÀ-ž\x27’-]+' + _MIDDLE_INITIAL + r'(?:[^\S\n]+[A-Z][a-zA-ZÀ-ž\x27’-]+){1,2}?)'
+    r'(?=\s*[,.;!?]|\s*$|\s+(?:to|about|on|who)\b)'
+)
+
+
+def find_intro_role_then_name(text):
+    for m in _INTRO_ROLE_THEN_NAME_RE.finditer(text):
+        role = m.group(1)
+        if not _BIO_ROLE_WORDS_RE.search(role):
+            continue
+        # "with Jane Doe, John Smith, ..." — the clause before the comma is
+        # itself a person, not a job title; _INTRO_RE already has them.
+        if _valid_name(strip_honorific(role)) and not looks_like_organisation(role):
+            continue
+        name = strip_honorific(m.group(2))
+        if not _valid_name(name) or looks_like_organisation(name):
+            continue
+        if _BIO_ROLE_WORDS_RE.fullmatch(name.split()[-1]):
+            continue
+        yield name, m.start(2)
+
+
 # A show note "guest bio block" states each guest as its own line/paragraph:
 # "Sebastian Manhart, Senior Policy Advisor at Carbonfuture", one per line,
 # with no semicolons (so find_guest_list_names' colon-then-semicolon-list
@@ -679,11 +853,19 @@ _GUEST_BIO_LINE_RE = re.compile(
 )
 
 
+_INLINE_BULLET_RE = re.compile('[\U0001F539\U0001F538\u2022\u25AA\u25FE\u25BA\u27A4]')
+
+
 def find_guest_bio_lines(text):
     """Names from a one-guest-per-line bio block (see _GUEST_BIO_LINE_RE
     above). Requires 2+ matching lines before yielding any, the same
     confidence bar find_guest_list_names uses, so an isolated "Name,
     something" line elsewhere in a description doesn't fire alone."""
+    # "Joining our host ... was: 🔹Vahid Walker, Walker Subsea 🔹Ian
+    # Armstrong, Pulcea 🔹..." (episode 268956) — an inline bullet is a line
+    # start in all but name. One character for one, so positions still line
+    # up with the original text.
+    text = _INLINE_BULLET_RE.sub('\n', text)
     candidates = []
     for m in _GUEST_BIO_LINE_RE.finditer(text):
         name = strip_honorific(m.group(1))
@@ -826,6 +1008,22 @@ def title_name_end_shows(conn) -> set:
     return {podcast_id for (podcast_id,) in cur.fetchall()}
 
 
+_MIDDLE_INITIAL_STRIP_RE = re.compile(r'(?<=\S)\s+[A-Z]\.(?=\s)')
+
+# "...the U.S. Department of Energy's Los Alamos and Sandia national
+# laboratories" (episode 10181) is name-shaped after a possessive; place
+# names leading with these words never are people.
+_PLACE_LEAD_WORDS = {'los', 'las', 'san', 'santa', 'el', 'fort', 'mount', 'lake', 'port'}
+
+# Title Case episode titles make questions and headlines name-shaped: "Can
+# Trump ..." / "Could Smarter Ag ..." (subject-verb lead) and "Why the
+# Experts Were Wrong about India" (role-led, "about" terminator).
+_QUESTION_LEAD_WORDS = {'can', 'could', 'will', 'would', 'should', 'might',
+                        'does', 'do', 'did', 'how', 'why', 'what'}
+_NEVER_IN_NAME_WORDS = {'are', 'were', 'is', 'was', 'get', 'go', 'says', 'provides',
+                        'answers', 'warning', 'yeah', 'group', 'deputy'}
+
+
 def extract_candidate_names_tagged(text: str) -> list[tuple[str, str, str]]:
     """
     Extract candidate person names from text.
@@ -842,7 +1040,27 @@ def extract_candidate_names_tagged(text: str) -> list[tuple[str, str, str]]:
     seen = set()
 
     def add(name, pos, tag):
+        # Most name patterns join words with \s+, so a heading line straight
+        # above a name gets pulled in with it: "Producer\nDavid Lishansky"
+        # (Grist's credits), "Summary\nKevin Smith". A real name never
+        # spans a line break.
+        if '\n' in name:
+            return
         name = strip_leading_role_word(strip_honorific(strip_possessive_prefix(name)))
+        name = _MIDDLE_INITIAL_STRIP_RE.sub('', name)
+        words = name.split()
+        if not words or words[0].lower() in _PLACE_LEAD_WORDS | _QUESTION_LEAD_WORDS:
+            return
+        if any(w.lower() in _NEVER_IN_NAME_WORDS for w in words):
+            return
+        # "CHINA: BMW CEO Urges..." / "SURVEY LINK Paces" — shouting-case
+        # headlines, not people ("KR Sridhar" keeps one all-caps word).
+        if sum(1 for w in words if len(w) > 1 and w.isupper()) >= 2:
+            return
+        # "President Donald Trump’s return..." — a possessive is about the
+        # person, not the person themselves appearing.
+        if re.search(r"[\x27’]s$", name):
+            return
         if _valid_name(name) and name.lower() not in seen:
             seen.add(name.lower())
             start = max(0, pos - 60)
@@ -920,6 +1138,15 @@ def extract_candidate_names_tagged(text: str) -> list[tuple[str, str, str]]:
 
     for name, pos in find_subject_verb_lead_names(text):
         add(name, pos, 'subject_verb_lead')
+
+    for name, pos in find_comma_guest_list_names(text):
+        add(name, pos, 'guest_list')
+
+    for name, pos in find_quote_attribution_names(text):
+        add(name, pos, 'quote_attribution')
+
+    for name, pos in find_intro_role_then_name(text):
+        add(name, pos, 'intro_role_then_name')
 
     return found
 
