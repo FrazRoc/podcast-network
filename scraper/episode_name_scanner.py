@@ -854,6 +854,63 @@ _GUEST_BIO_LINE_RE = re.compile(
 )
 
 
+# Volts (and plenty of other shows) introduces the guest with a descriptor
+# between the intro phrase and the name, then the org, then a verb:
+# "In this episode, wind industry analyst Samantha Woodworth speaks to...",
+# "In this episode, Rita Frost of NRDC and Brenna Bell of 350 PDX explain",
+# "I talk with Seattle mayoral candidate Katie Wilson, a longtime...",
+# "I was joined by Austin Energy executives Lisa Martin and Michael Enger".
+# 81 of Volts' 126 uncredited episodes (Sep 30 2026) were interviews
+# phrased this way. _INTRO_RE can't take these: its IGNORECASE capture is
+# capped at three words, and "Seattle mayoral candidate Katie Wilson" is
+# five. Here the name itself is matched case-sensitively, so the lazy
+# descriptor prefix (up to six words) skips lowercase words and titles
+# until it reaches Capitalized words that are followed by a natural stop.
+_DESCRIPTOR_INTRO_TRIGGER = (
+    # The comma is required: "In this episode of CDR Policy Scoop, ..."
+    # otherwise reads the show's own name as the guest.
+    r'(?:\bIn (?:this|today[\x27’]s) (?:episode|conversation|interview)[,:]'
+    r'|\b(?:I|we) (?:talk|talked|chat|chatted|speak|spoke|sit down|sat down) with'
+    r'|\b(?:I|we)[\x27’]?(?:m| am| was| were|re| are) joined by'
+    r'|\b(?:I|we) (?:was|were|am|are) joined by'
+    r'|\bjoined by|\bI(?:[\x27’]m| am) (?:talking|chatting|speaking) (?:with|to)'
+    r'|\b(?:I|we) (?:interview|interviewed|welcome|welcomed|contacted))'
+)
+_DESCRIPTOR_NAME = r'[A-Z][a-zA-ZÀ-ž\x27’-]+' + _MIDDLE_INITIAL + r'(?:[^\S\n]+[A-Z][a-zA-ZÀ-ž\x27’-]+){1,2}?'
+_DESCRIPTOR_INTRO_RE = re.compile(
+    _DESCRIPTOR_INTRO_TRIGGER +
+    r'\s+(?:[^\s,;:()]+\s+){0,6}?'
+    r'(' + _DESCRIPTOR_NAME + r')'
+    r'(?=\s*[,;]|\s+(?:of|from|at|and|about|to|on|who|in|discuss(?:es)?|' + _ROLE_LED_NAME_VERBS +
+    r'|speaks?|details?|gives?|demystifies|traces?|waxes|reflects?|sings?|lays? out|makes?)\b|\s*[.!?](?:\s|$))'
+)
+
+
+_DESCRIPTOR_BAD_PRECEDERS = {'of', 'the', 'at', 'from', 'for', 'on', 'by', 'in', 'to', 'a', 'an', 'our', 'their', 'its'}
+
+
+def find_descriptor_intro_names(text):
+    """Names after an intro phrase and a short descriptor (see
+    _DESCRIPTOR_INTRO_RE). Yields (name, absolute_pos) pairs."""
+    for m in _DESCRIPTOR_INTRO_RE.finditer(text):
+        # "...joined by the Western Europe team" / "with the head of Fire
+        # Safety": a name is never the object of a preposition or article
+        # inside the descriptor.
+        before = text[max(0, m.start(1) - 12):m.start(1)].split()
+        if before and before[-1].lower() in _DESCRIPTOR_BAD_PRECEDERS:
+            continue
+        name = strip_honorific(m.group(1))
+        if name.split()[-1].rstrip('.').lower() in {'dr', 'mr', 'ms', 'mrs', 'prof', 'chief', 'coordinator'}:
+            continue
+        if not _valid_name(name) or looks_like_organisation(name):
+            continue
+        if name.split()[0].lower() in _BIO_SENTENCE_LEAD_BAD:
+            continue
+        if _BIO_ROLE_WORDS_RE.fullmatch(name.split()[-1]):
+            continue
+        yield name, m.start(1)
+
+
 _INLINE_BULLET_RE = re.compile('[\U0001F539\U0001F538\u2022\u25AA\u25FE\u25BA\u27A4]')
 
 
@@ -1048,19 +1105,23 @@ _PHRASE_TAIL_WORDS = {
     'platform', 'website', 'market', 'guide', 'tech', 'school', 'trade', 'tire',
     'generation', 'engagement', 'progress', 'resources', 'health', 'demand', 'demands',
     'challenge', 'challenges', 'story', 'journey', 'approach', 'mission', 'vision',
+    'state',
 }
 
 # A job word trailing the name ("...sits down with Guy Nicholson Head of
 # ...", "Hosts: Rollie Williams & Nicole Conlan Executive Producer") is
 # dropped rather than rejecting the whole name.
-_TRAILING_ROLE_WORD_RE = re.compile(r'\s+(?:head|lead|leader|executive|obe|mbe|cbe)$', re.IGNORECASE)
+_TRAILING_ROLE_WORD_RE = re.compile(
+    r'\s+(?:head|lead|leader|executive|obe|mbe|cbe|chief|coordinator|minister|sen|rep|all-star)\.?$',
+    re.IGNORECASE)
 
 # Leading words that are never part of a name, stripped like a role word:
 # "Introducing Mark MacDonald", "Meet Benji Backer", "Podcaster Ed
 # Whittingham", "YouTuber Simon Lindley", "NAES VP of O&M Services Alan Bull
 # joins", "Summary Andy Klump".
 _LEADING_JUNK_WORD_RE = re.compile(
-    r'^(?:introducing|meet|summary|podcaster|youtuber|comedian|commissioner|'
+    r'^(?:introducing|meet|summary|podcaster|youtuber|comedian|commissioner|democrat|republican|'
+    r'leader|minister|ceos|councilmembers?|sen\.?|rep\.?|'
     r'services|safety|robotics|he|hon\.?|engr\.?)\s+',
     re.IGNORECASE
 )
@@ -1278,6 +1339,11 @@ def extract_candidate_names_tagged(text: str) -> list[tuple[str, str, str]]:
 
     for name, pos in find_intro_role_then_name(text):
         add(name, pos, 'intro_role_then_name')
+
+    for name, pos in find_descriptor_intro_names(text):
+        add(name, pos, 'descriptor_intro')
+        for and_name, and_pos in find_and_names(text, pos):
+            add(and_name, and_pos, 'and')
 
     return found
 
@@ -1636,6 +1702,12 @@ def suggest(title_only: bool = False, limit: int = None, show: str = None,
                 continue
 
             if looks_like_common_phrase(name, word_ratios) or normalize_org_name(name) in org_keys:
+                skipped_not_a_name += 1
+                continue
+
+            # The show's own name in a guest-shaped slot: "In this episode,
+            # Switched On speaks with ...", "on Between Two Turbines".
+            if name_lower in podcast_title.lower():
                 skipped_not_a_name += 1
                 continue
 

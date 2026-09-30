@@ -1471,3 +1471,33 @@ class TestCrewCreditsStripped:
                 "Kate Brandt and Irina Raicu will speak with Climate One about AI.")
         cleaned = clean_description(text)
         assert "Irina Raicu" not in cleaned and "Mindy Lubber" in cleaned
+
+
+class TestDescriptorIntro:
+    """Volts' intro shape: descriptor, then name, then org and verb. 81 of its
+    126 uncredited episodes (Sep 30 2026) were interviews phrased this way."""
+
+    def _n(self, text):
+        return [n for n, _ in extract_candidate_names(text)]
+
+    def test_descriptor_then_name_then_verb(self):
+        assert "Samantha Woodworth" in self._n(
+            "In this episode, wind industry analyst Samantha Woodworth speaks to the growing pains")
+
+    def test_two_guests_with_orgs(self):
+        names = self._n("In this episode, Rita Frost of NRDC and Brenna Bell of 350 PDX explain why")
+        assert "Rita Frost" in names and "Brenna Bell" in names
+
+    def test_long_descriptor_after_talk_with(self):
+        assert "Katie Wilson" in self._n(
+            "In this episode, I talk with Seattle mayoral candidate Katie Wilson, a longtime organizer")
+
+    def test_title_before_name(self):
+        assert "JB Pritzker" in self._n("In this episode, I speak with Illinois Governor JB Pritzker, one of the few")
+
+    def test_episode_of_show_name_not_a_guest(self):
+        assert "CDR Policy Scoop" not in self._n(
+            "In this episode of CDR Policy Scoop, we look at what long-term strategies deliver.")
+
+    def test_solo_episode_has_no_name(self):
+        assert self._n("In this episode, it’s just me by my lonesome, sharing some thoughts") == []
