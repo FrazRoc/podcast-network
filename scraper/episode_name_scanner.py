@@ -35,6 +35,7 @@ from description_cleaner import (  # noqa: E402
     extract_labelled_credits, strip_honorific, _valid_name, looks_like_organisation, _ORG_WORDS,
     name_in_text, first_name_belongs_to_other,
 )
+from org_names import normalize_org_name  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
@@ -1021,7 +1022,157 @@ _PLACE_LEAD_WORDS = {'los', 'las', 'san', 'santa', 'el', 'fort', 'mount', 'lake'
 _QUESTION_LEAD_WORDS = {'can', 'could', 'will', 'would', 'should', 'might',
                         'does', 'do', 'did', 'how', 'why', 'what'}
 _NEVER_IN_NAME_WORDS = {'are', 'were', 'is', 'was', 'get', 'go', 'says', 'provides',
-                        'answers', 'warning', 'yeah', 'group', 'deputy'}
+                        'answers', 'warning', 'yeah', 'group', 'deputy',
+                        # "...10 Percent Happier with Dan Harris Hosted on
+                        # Acast", "Greg Sauer VIDEO", "Ben's Dad", "Solar-Fit's
+                        # Newest Members Scott and Jason" (Sep 30 queue review).
+                        'hosted', 'video', 'dad', 'mom', 'members'}
+
+# First words that make a phrase, not a name: "with Hurricane Milton",
+# "Winter Storm Elliott", "Talk with His Daughter Kim and Granddaughter
+# Meghan" (all from the Sep 30 2026 queue review).
+_NON_NAME_LEAD_WORDS = {'hurricane', 'storm', 'winter', 'his', 'her', 'their', 'our',
+                        'my', 'daughter', 'son', 'granddaughter', 'grandson'}
+
+# Last words that make an organisation, programme or topic, not a surname.
+# looks_like_organisation()'s _ORG_WORDS covers legal and corporate forms;
+# these are what the review queue actually held on Sep 30 2026, about 80 of
+# its 181 junk names: "Enfinity Global", "Vineyard Wind", "Fifth Third
+# Bank", "Nigeria's Mini-Grid Sector", "Electra's Bold Mission", "EV
+# Charging Network", "Net Zero Strategy". Each was checked against every
+# known person's surname ("House" was dropped: Kurt House, Heather House).
+_PHRASE_TAIL_WORDS = {
+    'renewables', 'global', 'group', 'bank', 'international', 'electric', 'architects',
+    'organics', 'hydro', 'wind', 'solar', 'project', 'program', 'programme', 'network',
+    'summit', 'strategy', 'sector', 'roadmap', 'framework', 'act', 'plan', 'plans',
+    'platform', 'website', 'market', 'guide', 'tech', 'school', 'trade', 'tire',
+    'generation', 'engagement', 'progress', 'resources', 'health', 'demand', 'demands',
+    'challenge', 'challenges', 'story', 'journey', 'approach', 'mission', 'vision',
+}
+
+# A job word trailing the name ("...sits down with Guy Nicholson Head of
+# ...", "Hosts: Rollie Williams & Nicole Conlan Executive Producer") is
+# dropped rather than rejecting the whole name.
+_TRAILING_ROLE_WORD_RE = re.compile(r'\s+(?:head|lead|leader|executive|obe|mbe|cbe)$', re.IGNORECASE)
+
+# Leading words that are never part of a name, stripped like a role word:
+# "Introducing Mark MacDonald", "Meet Benji Backer", "Podcaster Ed
+# Whittingham", "YouTuber Simon Lindley", "NAES VP of O&M Services Alan Bull
+# joins", "Summary Andy Klump".
+_LEADING_JUNK_WORD_RE = re.compile(
+    r'^(?:introducing|meet|summary|podcaster|youtuber|comedian|commissioner|'
+    r'services|safety|robotics|he|hon\.?|engr\.?)\s+',
+    re.IGNORECASE
+)
+
+
+def clean_candidate_name(name: str) -> str | None:
+    """The cleaned-up person name a raw pattern capture stands for, or None
+    if it isn't one. Shared by every extraction path, including the labelled
+    and title shapes suggest() adds on top of extract_candidate_names_tagged()."""
+    # Most name patterns join words with \s+, so a heading line straight
+    # above a name gets pulled in with it: "Producer\nDavid Lishansky"
+    # (Grist's credits), "Summary\nKevin Smith". A real name never
+    # spans a line break.
+    if not name or '\n' in name:
+        return None
+    name = strip_leading_role_word(strip_honorific(strip_possessive_prefix(name)))
+    name = _LEADING_JUNK_WORD_RE.sub('', name)
+    name = _MIDDLE_INITIAL_STRIP_RE.sub('', name)
+    name = _TRAILING_ROLE_WORD_RE.sub('', name).strip()
+    words = name.split()
+    if not words:
+        return None
+    if words[0].lower() in _PLACE_LEAD_WORDS | _QUESTION_LEAD_WORDS | _NON_NAME_LEAD_WORDS:
+        return None
+    if any(w.lower() in _NEVER_IN_NAME_WORDS for w in words):
+        return None
+    if words[-1].lower().strip("\x27’.,") in _PHRASE_TAIL_WORDS:
+        return None
+    # "CHINA: BMW CEO Urges..." / "SURVEY LINK Paces" — shouting-case
+    # headlines, not people ("KR Sridhar" keeps one all-caps word).
+    if sum(1 for w in words if len(w) > 1 and w.isupper()) >= 2:
+        return None
+    # "President Donald Trump’s return..." — a possessive is about the
+    # person, not the person themselves appearing. A trailing bare
+    # apostrophe too: "Quest Renewables' CEO Finn Findley".
+    if re.search(r"[\x27’]s?$", name):
+        return None
+    return name if _valid_name(name) else None
+
+
+_CASE_WORD_RE = re.compile(r"(?<![\w\x27’-])([A-Za-zÀ-ž][\w\x27’-]*)")
+_SENTENCE_START_RE = re.compile(r'[.!?:\n]\s*$')
+
+
+def lowercase_word_ratios(texts) -> dict:
+    """word -> the share of its mid-sentence appearances in these texts
+    that are lowercase, for words seen at least 3 times. Built by suggest()
+    from every episode's title and description.
+
+    What it's for: a real name's words are written capitalized nearly
+    everywhere they appear ("Hall", "Mark", "Green" as surnames and first
+    names outweigh their ordinary-word uses in show notes), while a
+    Title-Case topic phrase is made of words the same corpus mostly writes
+    in lowercase ("Bold Mission", "Emerging Tech", "Housing Shortage")."""
+    low, cap = defaultdict(int), defaultdict(int)
+    for text in texts:
+        if not text:
+            continue
+        for m in _CASE_WORD_RE.finditer(text):
+            word = m.group(1)
+            if m.start() == 0 or _SENTENCE_START_RE.search(text[max(0, m.start() - 3):m.start()]):
+                continue
+            if word[0].islower():
+                low[word.lower()] += 1
+            elif not word.isupper():
+                cap[word.lower()] += 1
+    ratios = {}
+    for word in set(low) | set(cap):
+        total = low[word] + cap[word]
+        if total >= 3:
+            ratios[word] = low[word] / total
+    return ratios
+
+
+# Measured on the Sep 30 2026 queue review: every word of the name at 0.7+
+# caught 56 of 181 junk names and none of ~950 real ones; across all ~8,600
+# known people it flagged three, two of them junk records themselves
+# ("Tumultuous History", "Great Debates") and one a nun's religious name
+# ("Sister True Dedication"). 0.6 caught more junk but started flagging
+# real people (Ted Power, Rich Lesser).
+COMMON_PHRASE_MIN_RATIO = 0.7
+
+
+def looks_like_common_phrase(name: str, ratios: dict, min_ratio: float = COMMON_PHRASE_MIN_RATIO) -> bool:
+    words = [w.lower().strip("\x27’") for w in name.split()]
+    return bool(words) and all(ratios.get(w, 0.0) >= min_ratio for w in words)
+
+
+def get_known_org_keys(conn) -> set:
+    """normalize_org_name() keys of every organisation (and alias) not
+    marked "not an organisation". A candidate that is exactly an
+    organisation's name — "Baker Hughes", "JP Morgan", "Chatham House",
+    "Gowling WLG" — is a company mentioned in a guest-shaped slot, not a
+    person (14 of the Sep 30 2026 queue's junk names). Person-named firms
+    are the exception, which is what not_an_org already marks."""
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT name FROM organizations WHERE NOT COALESCE(not_an_org, false)")
+        keys = {normalize_org_name(r[0]) for r in cur.fetchall()}
+        cur.execute("""
+            SELECT a.normalized_name FROM organization_aliases a
+            JOIN organizations o USING (org_id)
+            WHERE NOT COALESCE(o.not_an_org, false)
+        """)
+        keys |= {r[0] for r in cur.fetchall()}
+    except Exception:
+        conn.rollback()
+        return set()
+    finally:
+        cur.close()
+    keys.discard(None)
+    return keys
 
 
 def extract_candidate_names_tagged(text: str) -> list[tuple[str, str, str]]:
@@ -1040,28 +1191,8 @@ def extract_candidate_names_tagged(text: str) -> list[tuple[str, str, str]]:
     seen = set()
 
     def add(name, pos, tag):
-        # Most name patterns join words with \s+, so a heading line straight
-        # above a name gets pulled in with it: "Producer\nDavid Lishansky"
-        # (Grist's credits), "Summary\nKevin Smith". A real name never
-        # spans a line break.
-        if '\n' in name:
-            return
-        name = strip_leading_role_word(strip_honorific(strip_possessive_prefix(name)))
-        name = _MIDDLE_INITIAL_STRIP_RE.sub('', name)
-        words = name.split()
-        if not words or words[0].lower() in _PLACE_LEAD_WORDS | _QUESTION_LEAD_WORDS:
-            return
-        if any(w.lower() in _NEVER_IN_NAME_WORDS for w in words):
-            return
-        # "CHINA: BMW CEO Urges..." / "SURVEY LINK Paces" — shouting-case
-        # headlines, not people ("KR Sridhar" keeps one all-caps word).
-        if sum(1 for w in words if len(w) > 1 and w.isupper()) >= 2:
-            return
-        # "President Donald Trump’s return..." — a possessive is about the
-        # person, not the person themselves appearing.
-        if re.search(r"[\x27’]s$", name):
-            return
-        if _valid_name(name) and name.lower() not in seen:
+        name = clean_candidate_name(name)
+        if name and name.lower() not in seen:
             seen.add(name.lower())
             start = max(0, pos - 60)
             end = min(len(text), pos + 80)
@@ -1435,6 +1566,11 @@ def suggest(title_only: bool = False, limit: int = None, show: str = None,
     show_hosts        = get_show_hosts(conn)
     title_credit_pids = title_credit_shows(conn)
     title_name_end_pids = title_name_end_shows(conn)
+    org_keys          = get_known_org_keys(conn)
+    # Built from every episode, before --limit/--show narrow the scan, so
+    # the ratios don't depend on how much of the corpus this run looks at.
+    word_ratios       = lowercase_word_ratios(
+        t for e in episodes for t in (e['title'], e['description']))
 
     if limit:
         episodes = episodes[:limit]
@@ -1444,6 +1580,7 @@ def suggest(title_only: bool = False, limit: int = None, show: str = None,
 
     cur = conn.cursor()
     added = skipped_known = skipped_rejected = skipped_pending = skipped_credited = 0
+    skipped_not_a_name = 0
     by_name = {}
 
     for episode in episodes:
@@ -1484,11 +1621,22 @@ def suggest(title_only: bool = False, limit: int = None, show: str = None,
             candidates += [(f'desc_{tag}', n, c) for n, c, tag in extract_candidate_names_tagged(truncated_desc)]
 
         for source, name, context in candidates:
+            # The labelled and title shapes come straight from their own
+            # extractors, so they get the same cleanup add() applies inside
+            # extract_candidate_names_tagged() (idempotent for those).
+            name = clean_candidate_name(name)
+            if not name:
+                skipped_not_a_name += 1
+                continue
             name_lower = name.lower()
 
             # Skip if already known
             if name_lower in known_names:
                 skipped_known += 1
+                continue
+
+            if looks_like_common_phrase(name, word_ratios) or normalize_org_name(name) in org_keys:
+                skipped_not_a_name += 1
                 continue
 
             # Skip if previously rejected
@@ -1554,6 +1702,7 @@ def suggest(title_only: bool = False, limit: int = None, show: str = None,
     print(f"  ❌ Previously rejected: {skipped_rejected}")
     print(f"  ⚪ Already pending:     {skipped_pending}")
     print(f"  ✅ Already credited:    {skipped_credited}")
+    print(f"  🚫 Not a person:       {skipped_not_a_name}")
 
     # Show pending count
     conn2 = psycopg2.connect(DB)

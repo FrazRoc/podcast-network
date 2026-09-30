@@ -29,6 +29,9 @@ from episode_name_scanner import (
     find_mid_appositive_names,
     find_subject_verb_lead_names,
     strip_leading_role_word,
+    clean_candidate_name,
+    lowercase_word_ratios,
+    looks_like_common_phrase,
 )
 from description_cleaner import coarse_source
 
@@ -1376,3 +1379,55 @@ class TestCandidateNameGuards:
     def test_newsmaker_secretary_not_role_led(self):
         text = "former climate counselor to Treasury Secretary Janet Yellen, now head of policy"
         assert "Janet Yellen" not in [n for n, _ in find_role_led_names(text)]
+
+
+class TestCleanCandidateName:
+    """Junk from the Sep 30 2026 review of the 1,385-suggestion queue."""
+
+    def test_trailing_role_word_dropped(self):
+        assert clean_candidate_name("Guy Nicholson Head") == "Guy Nicholson"
+        assert clean_candidate_name("Nicole Conlan Executive") == "Nicole Conlan"
+        assert clean_candidate_name("Merlin Hyman OBE") == "Merlin Hyman"
+
+    def test_leading_junk_word_dropped(self):
+        assert clean_candidate_name("Introducing Mark MacDonald") == "Mark MacDonald"
+        assert clean_candidate_name("Services Alan Bull") == "Alan Bull"
+        assert clean_candidate_name("HE Teresa Ribera") == "Teresa Ribera"
+        assert clean_candidate_name("Hon. Catherine McKenna") == "Catherine McKenna"
+
+    def test_phrase_tail_rejected(self):
+        for junk in ["Enfinity Global", "Vineyard Wind", "Fifth Third Bank",
+                     "Bold Mission", "EV Charging Network", "Net Zero Strategy"]:
+            assert clean_candidate_name(junk) is None, junk
+
+    def test_family_and_weather_leads_rejected(self):
+        assert clean_candidate_name("His Daughter Kim") is None
+        assert clean_candidate_name("Hurricane Milton") is None
+
+    def test_trailing_apostrophe_rejected(self):
+        assert clean_candidate_name("Quest Renewables'") is None
+
+    def test_real_surnames_that_are_words_kept(self):
+        for real in ["Kurt House", "Ted Power", "Jessica Green"]:
+            assert clean_candidate_name(real) == real
+
+
+class TestLooksLikeCommonPhrase:
+    TEXTS = [
+        "Our mission is bold, and the vision is clear. A bold new mission.",
+        "It was a bold plan with a bold mission, a truly bold one.",
+        "They talked about the housing shortage and the vision for housing.",
+        "We spoke with Mark Hall about grids. Later Mark Hall explained more.",
+        "Jane Doe met Mark Hall, and Mark Hall left a mark on the hall.",
+    ]
+
+    def test_phrase_of_lowercase_words(self):
+        ratios = lowercase_word_ratios(self.TEXTS)
+        assert looks_like_common_phrase("Bold Mission", ratios)
+
+    def test_name_written_capitalized(self):
+        ratios = lowercase_word_ratios(self.TEXTS)
+        assert not looks_like_common_phrase("Mark Hall", ratios)
+
+    def test_unseen_words_are_not_common(self):
+        assert not looks_like_common_phrase("Zyx Qwerty", lowercase_word_ratios(self.TEXTS))
