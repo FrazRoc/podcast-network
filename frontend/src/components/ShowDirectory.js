@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { SiteShell } from './SiteHeader';
 import { useUrlParams, SearchBox, SortSelect, DirectoryHeading } from './Directory';
 import { API_BASE_URL } from '../config';
-import { showHref, avatarUrl, coverUrl, fmtMonthYear, plural, setMeta, slugify } from '../profileUtils';
+import { showHref, avatarUrl, coverUrl, fmtMonthYear, plural, setMeta, slugify, publicFetch } from '../profileUtils';
 
 const SORTS = [['guests', 'Most guests'], ['recent', 'Most recent'], ['episodes', 'Most episodes'], ['name', 'A–Z']];
 const byName = (a, b) => a.title.localeCompare(b.title);
@@ -19,7 +19,7 @@ export default function ShowDirectory() {
   const [params, set] = useUrlParams({ q: '', sort: 'guests' });
   const [state, setState] = useState({ rows: null, error: false });
   useEffect(() => {
-    fetch(`${API_BASE_URL}/api/directory/shows`)
+    publicFetch(`${API_BASE_URL}/api/directory/shows`)
       .then(r => (r.ok ? r.json() : Promise.reject(r)))
       .then(d => setState({ rows: d.rows, error: false }))
       .catch(() => setState({ rows: null, error: true }));

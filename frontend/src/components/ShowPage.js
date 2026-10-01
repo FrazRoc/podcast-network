@@ -3,7 +3,7 @@ import OrgLogo from './OrgLogo';
 import AdminEditLink from './AdminEditLink';
 import { ORG_TYPE_LABELS, ORG_TYPE_COLORS } from '../chartUtils';
 import { stripHtmlForDisplay } from '../adminUtils';
-import { useProfile, personHref, orgHref, showHref, avatarUrl, proxied, coverUrl, fmtDate, fmtMonthYear, plural } from '../profileUtils';
+import { useProfile, personHref, orgHref, showHref, avatarUrl, coverUrl, fmtDate, fmtMonthYear, plural, imageUrl, imageFallback } from '../profileUtils';
 
 const describe = (s) => [s.title,
   `${s.title}: ${plural(s.totals.episodes, 'episode')} since ${fmtMonthYear(s.totals.first_date)}, who it books, `
@@ -101,8 +101,8 @@ export default function ShowPage() {
                   <ul className="space-y-2">
                     {s.top_guests.map(g => (
                       <li key={g.host_id} className="flex items-center gap-2 text-sm">
-                        <img src={g.profile_image_url ? proxied(g.profile_image_url) : avatarUrl(g.name)} alt=""
-                          onError={e => { e.target.onerror = null; e.target.src = avatarUrl(g.name); }}
+                        <img src={g.profile_image_url ? imageUrl(g.profile_image_url, 64) : avatarUrl(g.name)} alt=""
+                          onError={imageFallback(g.profile_image_url, g.name)}
                           className="w-7 h-7 rounded-full object-cover bg-gray-100" />
                         <a href={personHref(g.host_id, g.slug)} className="flex-1 truncate text-gray-900 hover:text-teal-700 hover:underline">{g.name}</a>
                         <span className="text-xs text-gray-400">{plural(g.appearances, 'episode')}</span>

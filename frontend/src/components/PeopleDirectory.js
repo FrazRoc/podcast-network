@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { SiteShell } from './SiteHeader';
 import { useUrlParams, useDirectory, SearchBox, SortSelect, FilterChips, DirectoryHeading, DirectoryList } from './Directory';
 import { ROLE_COLORS } from '../chartUtils';
-import { personHref, orgHref, avatarUrl, proxied, fmtMonthYear, plural, setMeta } from '../profileUtils';
+import { personHref, orgHref, avatarUrl, fmtMonthYear, plural, setMeta, imageUrl, imageFallback } from '../profileUtils';
 
 const SORTS = [['appearances', 'Most episodes'], ['recent', 'Most recent'], ['name', 'A–Z']];
 const COLORS = { ...ROLE_COLORS, host: '#0d9488' };
@@ -17,8 +17,8 @@ export default function PeopleDirectory() {
     const title = p.title || (p.kind === 'host' ? 'Host' : null);
     return (
       <li key={p.host_id} className="py-2.5 flex items-center gap-3">
-        <img src={p.profile_image_url ? proxied(p.profile_image_url) : avatarUrl(p.name)} alt=""
-          onError={e => { e.target.onerror = null; e.target.src = avatarUrl(p.name); }}
+        <img src={p.profile_image_url ? imageUrl(p.profile_image_url, 80) : avatarUrl(p.name)} alt=""
+          onError={imageFallback(p.profile_image_url, p.name)}
           className="w-10 h-10 rounded-full object-cover bg-gray-100 flex-shrink-0" />
         <div className="flex-1 min-w-0">
           <a href={personHref(p.host_id, p.slug)} className="text-sm font-medium text-gray-900 hover:text-teal-700 hover:underline">{p.name}</a>

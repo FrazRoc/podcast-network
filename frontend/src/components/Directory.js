@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { API_BASE_URL } from '../config';
+import { publicFetch } from '../profileUtils';
 
 // Shared pieces of the /people, /orgs and /shows directories.
 
@@ -31,7 +32,7 @@ export function useDirectory(kind, params, pageSize = 50) {
   const request = useRef(0);
   const query = (offset) => {
     const search = new URLSearchParams({ ...params, offset, limit: pageSize });
-    return fetch(`${API_BASE_URL}/api/directory/${kind}?${search}`).then(r => (r.ok ? r.json() : Promise.reject(r)));
+    return publicFetch(`${API_BASE_URL}/api/directory/${kind}?${search}`).then(r => (r.ok ? r.json() : Promise.reject(r)));
   };
   useEffect(() => {
     const id = ++request.current;

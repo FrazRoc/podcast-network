@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import ProfileLayout, { Section, Stat, ShowMore, ShowThumb } from './ProfileLayout';
 import OrgLogo from './OrgLogo';
 import AdminEditLink from './AdminEditLink';
-import { useProfile, personHref, orgHref, showHref, avatarUrl, proxied, fmtDate, fmtMonthYear, plural } from '../profileUtils';
+import { useProfile, personHref, orgHref, showHref, avatarUrl, fmtDate, fmtMonthYear, plural, imageUrl, imageFallback } from '../profileUtils';
 
 const describe = (p) => {
   const role = p.current_role && [p.current_role.title, p.current_role.company].filter(Boolean).join(', ');
@@ -70,8 +70,8 @@ function PeopleList({ title, people }) {
       <ul className="space-y-2">
         {people.map(c => (
           <li key={c.host_id} className="flex items-center gap-2 text-sm">
-            <img src={c.profile_image_url ? proxied(c.profile_image_url) : avatarUrl(c.name)} alt=""
-              onError={e => { e.target.onerror = null; e.target.src = avatarUrl(c.name); }}
+            <img src={c.profile_image_url ? imageUrl(c.profile_image_url, 64) : avatarUrl(c.name)} alt=""
+              onError={imageFallback(c.profile_image_url, c.name)}
               className="w-7 h-7 rounded-full object-cover bg-gray-100" />
             <a href={personHref(c.host_id, c.slug)} className="flex-1 truncate text-gray-900 hover:text-teal-700 hover:underline">{c.name}</a>
             <span className="text-xs text-gray-400">{plural(c.episodes, 'episode')}</span>
@@ -198,8 +198,8 @@ export default function PersonPage() {
           {/* Header */}
           <section className="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6 flex flex-col sm:flex-row gap-4 sm:gap-6 items-center sm:items-start">
             <img
-              src={p.profile_image_url ? proxied(p.profile_image_url) : avatarUrl(p.name)} alt={p.name}
-              onError={e => { e.target.onerror = null; e.target.src = avatarUrl(p.name); }}
+              src={p.profile_image_url ? imageUrl(p.profile_image_url, 240) : avatarUrl(p.name)} alt={p.name}
+              onError={imageFallback(p.profile_image_url, p.name)}
               className="w-28 h-28 rounded-full object-cover bg-gray-100 flex-shrink-0"
             />
             <div className="flex-1 min-w-0 text-center sm:text-left">

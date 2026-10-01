@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { API_BASE_URL } from './config';
+import { getAdminPassword } from './adminAuth';
 
 // Shared by the public person, organisation and show pages
 // (/people/<id>-<slug>, /orgs/<id>-<slug>, /shows/<id>-<slug>). The id is
@@ -23,14 +24,37 @@ export const avatarUrl = (name) =>
   `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name || '?')}&backgroundColor=65c9ff,92a1c6,dd6b7f,58c9b9,ade498`;
 
 // Remote images go through the backend proxy, as on the Network page.
-// A show's cover for an <img>. Apple's artwork (every show's, today) loads
-// straight from Apple at the size asked for (the proxy is only needed where
-// the graph draws images on a canvas); anything else goes through the proxy.
-const APPLE_ART_RE = /^(https:\/\/is\d+-ssl\.mzstatic\.com\/.+\/)\d+x\d+(bb\.(?:jpg|png|webp))$/;
-export const coverUrl = (url, size = 160) => {
+// An image for an <img>, at about the size it's shown (`size` in pixels;
+// pass ~2x the CSS size for sharp screens). Hosts that serve resized copies
+// load straight from the source: Apple's artwork, Bluesky avatars and
+// Wikimedia Commons. Anything else (unavatar.io, mostly) goes through our
+// proxy, which the graph also needs for drawing on its canvas.
+const APPLE_ART_RE = /^(https:\/\/is\d+-ssl\.mzstatic\.com\/.+\/)\d+x\d+([a-z]{2}\.(?:jpg|png|webp))$/;
+const BSKY_AVATAR = 'https://cdn.bsky.app/img/avatar/';
+const COMMONS_FILE_RE = /^(https:\/\/commons\.wikimedia\.org\/wiki\/Special:FilePath\/[^?]+)(?:\?.*)?$/;
+const COMMONS_WIDTHS = [60, 120, 250, 500];   // Wikimedia's standard thumbnail steps
+export const imageUrl = (url, size = 160) => {
   if (!url) return null;
-  const m = url.match(APPLE_ART_RE);
-  return m ? `${m[1]}${size}x${size}${m[2]}` : proxied(url);
+  let m = url.match(APPLE_ART_RE);
+  if (m) return `${m[1]}${size}x${size}${m[2]}`;
+  if (url.startsWith(BSKY_AVATAR)) return size <= 128 ? url.replace(BSKY_AVATAR, 'https://cdn.bsky.app/img/avatar_thumbnail/') : url;
+  m = url.match(COMMONS_FILE_RE);
+  if (m) return `${m[1]}?width=${COMMONS_WIDTHS.find(w => w >= size) || 500}`;
+  return `${proxied(url)}&w=${size}`;   // the proxy shrinks it
+};
+export const coverUrl = imageUrl;
+
+// onError for an image loaded through imageUrl(): retry once through the
+// proxy (a host may refuse a direct load), then fall back to initials.
+export const imageFallback = (url, name) => (e) => {
+  const img = e.currentTarget;
+  if (url && !img.dataset.viaProxy && img.src !== proxied(url)) {
+    img.dataset.viaProxy = '1';
+    img.src = proxied(url);
+  } else {
+    img.onerror = null;
+    img.src = avatarUrl(name);
+  }
 };
 
 export const proxied = (url) => (url ? `${API_BASE_URL}/api/proxy/image?url=${encodeURIComponent(url)}` : null);
@@ -51,6 +75,12 @@ export const idFromPath = (prefix) => {
   return Number.isFinite(id) ? id : null;
 };
 
+// Public API reads. The server lets browsers cache these for a few minutes;
+// a browser logged into admin always asks again, so an edit made there shows
+// up on the next page load.
+const isAdminBrowser = () => { try { return !!getAdminPassword(); } catch { return false; } };
+export const publicFetch = (url) => fetch(url, isAdminBrowser() ? { cache: 'no-cache' } : undefined);
+
 export function setMeta(title, description) {
   document.title = title;
   let tag = document.querySelector('meta[name="description"]');
@@ -70,7 +100,7 @@ export function useProfile(kind, prefix, describe) {
     const id = idFromPath(prefix);
     if (!id) { setState({ data: null, error: 'not_found' }); return; }
     let cancelled = false;
-    fetch(`${API_BASE_URL}/api/${kind}/${id}/profile`)
+    publicFetch(`${API_BASE_URL}/api/${kind}/${id}/profile`)
       .then(r => (r.status === 404 ? Promise.reject(new Error('not_found')) : r.ok ? r.json() : Promise.reject(new Error('error'))))
       .then(data => {
         if (cancelled) return;

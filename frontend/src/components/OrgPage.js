@@ -2,7 +2,7 @@ import ProfileLayout, { Section, Stat, MiniBars, ShowMore, ShowThumb } from './P
 import OrgLogo from './OrgLogo';
 import AdminEditLink from './AdminEditLink';
 import { ORG_TYPE_LABELS, ORG_TYPE_COLORS } from '../chartUtils';
-import { useProfile, personHref, orgHref, showHref, avatarUrl, proxied, fmtDate, fmtMonthYear, plural } from '../profileUtils';
+import { useProfile, personHref, orgHref, showHref, avatarUrl, fmtDate, fmtMonthYear, plural, imageUrl, imageFallback } from '../profileUtils';
 
 const describe = (o) => [o.name,
   `Who from ${o.name} has been on clean-energy podcasts: ${plural(o.totals.people, 'person', 'people')}, `
@@ -18,8 +18,8 @@ export default function OrgPage() {
         const former = o.people.filter(p => p.former);
         const person = (p) => (
           <li key={p.host_id} className="py-2 flex items-center gap-3">
-            <img src={p.profile_image_url ? proxied(p.profile_image_url) : avatarUrl(p.name)} alt=""
-              onError={e => { e.target.onerror = null; e.target.src = avatarUrl(p.name); }}
+            <img src={p.profile_image_url ? imageUrl(p.profile_image_url, 80) : avatarUrl(p.name)} alt=""
+              onError={imageFallback(p.profile_image_url, p.name)}
               className="w-9 h-9 rounded-full object-cover bg-gray-100 flex-shrink-0" />
             <div className="flex-1 min-w-0">
               <a href={personHref(p.host_id, p.slug)} className="text-sm font-medium text-gray-900 hover:text-teal-700 hover:underline">{p.name}</a>

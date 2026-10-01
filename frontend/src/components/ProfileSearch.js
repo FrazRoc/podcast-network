@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { API_BASE_URL } from '../config';
 import OrgLogo from './OrgLogo';
-import { personHref, orgHref, showHref, avatarUrl, proxied, coverUrl, plural } from '../profileUtils';
+import { personHref, orgHref, showHref, avatarUrl, coverUrl, plural, imageUrl, imageFallback, publicFetch } from '../profileUtils';
 
 // Name search across people, organisations and shows (/api/search).
 export default function ProfileSearch({ className = '' }) {
@@ -13,7 +13,7 @@ export default function ProfileSearch({ className = '' }) {
   useEffect(() => {
     if (q.trim().length < 2) { setResults(null); return; }
     const t = setTimeout(() => {
-      fetch(`${API_BASE_URL}/api/search?q=${encodeURIComponent(q.trim())}&limit=6`)
+      publicFetch(`${API_BASE_URL}/api/search?q=${encodeURIComponent(q.trim())}&limit=6`)
         .then(r => (r.ok ? r.json() : null)).then(setResults).catch(() => setResults(null));
     }, 200);
     return () => clearTimeout(t);
@@ -42,8 +42,8 @@ export default function ProfileSearch({ className = '' }) {
           {results.people.length > 0 && <p className={heading}>People</p>}
           {results.people.map(p => (
             <a key={`p${p.host_id}`} href={personHref(p.host_id, p.slug)} className={row}>
-              <img src={p.profile_image_url ? proxied(p.profile_image_url) : avatarUrl(p.name)} alt=""
-                className="w-6 h-6 rounded-full object-cover" onError={e => { e.target.onerror = null; e.target.src = avatarUrl(p.name); }} />
+              <img src={p.profile_image_url ? imageUrl(p.profile_image_url, 64) : avatarUrl(p.name)} alt=""
+                className="w-6 h-6 rounded-full object-cover" onError={imageFallback(p.profile_image_url, p.name)} />
               <span className="flex-1 truncate">{p.name}</span>
               <span className="text-xs text-gray-400">{plural(p.appearances, 'episode')}</span>
             </a>

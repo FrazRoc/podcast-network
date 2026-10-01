@@ -51,3 +51,9 @@ services:
       - type: rewrite
         source: /*
         destination: /index.html
+    # Files under /static/ have a content hash in their name, so a new deploy
+    # never reuses one: browsers can keep them for a year without checking.
+    headers:
+      - path: /static/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
