@@ -1,5 +1,6 @@
 import ProfileLayout, { Section, Stat, ShowMore } from './ProfileLayout';
 import OrgLogo from './OrgLogo';
+import AdminEditLink from './AdminEditLink';
 import { useProfile, personHref, orgHref, showHref, avatarUrl, proxied, fmtDate, fmtMonthYear, plural } from '../profileUtils';
 
 const describe = (p) => {
@@ -28,6 +29,7 @@ export default function PersonPage() {
             />
             <div className="flex-1 min-w-0 text-center sm:text-left">
               <h1 className="text-2xl font-bold text-gray-900">{p.name}</h1>
+              <AdminEditLink href={`/admin/people?host_id=${p.host_id}`} />
               {p.current_role && (p.current_role.title || p.current_role.company) && (
                 <p className="mt-1 text-gray-700 flex items-center justify-center sm:justify-start gap-1.5 flex-wrap">
                   {p.current_role.org_id && <OrgLogo orgId={p.current_role.org_id} name={p.current_role.company} size={20} />}
@@ -99,6 +101,7 @@ export default function PersonPage() {
                         )}
                       </p>
                     </div>
+                    <AdminEditLink href={`/admin/episodes?episode_id=${a.episode_id}`} className="flex-shrink-0">edit</AdminEditLink>
                     {a.listen_url && (
                       <a href={a.listen_url} target="_blank" rel="noopener noreferrer"
                          className="flex-shrink-0 text-xs text-teal-700 hover:underline">Listen ↗</a>

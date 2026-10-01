@@ -1,5 +1,6 @@
 import ProfileLayout, { Section, Stat, MiniBars, ShowMore } from './ProfileLayout';
 import OrgLogo from './OrgLogo';
+import AdminEditLink from './AdminEditLink';
 import { ORG_TYPE_LABELS, ORG_TYPE_COLORS } from '../chartUtils';
 import { useProfile, personHref, orgHref, showHref, avatarUrl, proxied, fmtDate, fmtMonthYear, plural } from '../profileUtils';
 
@@ -27,6 +28,7 @@ export default function OrgPage() {
               </p>
             </div>
             <span className="text-xs text-gray-400 flex-shrink-0">{plural(p.appearances, 'episode')} · {fmtMonthYear(p.last_date)}</span>
+            <AdminEditLink href={`/admin/people?host_id=${p.host_id}`} className="flex-shrink-0">edit</AdminEditLink>
           </li>
         );
         return (
@@ -35,6 +37,7 @@ export default function OrgPage() {
               <OrgLogo orgId={o.org_id} name={o.name} size={96} className="rounded-xl" />
               <div className="flex-1 min-w-0 text-center sm:text-left">
                 <h1 className="text-2xl font-bold text-gray-900">{o.name}</h1>
+                <AdminEditLink href={`/admin/companies?org_id=${o.org_id}`} />
                 <p className="mt-1 text-sm text-gray-600 flex flex-wrap justify-center sm:justify-start items-center gap-x-2 gap-y-1">
                   {o.org_type && (
                     <span className="inline-flex items-center gap-1">
@@ -114,6 +117,7 @@ export default function OrgPage() {
                           ))}
                         </p>
                       </div>
+                      <AdminEditLink href={`/admin/episodes?episode_id=${e.episode_id}`} className="flex-shrink-0">edit</AdminEditLink>
                       {e.listen_url && <a href={e.listen_url} target="_blank" rel="noopener noreferrer" className="flex-shrink-0 text-xs text-teal-700 hover:underline">Listen ↗</a>}
                     </li>
                   ))}

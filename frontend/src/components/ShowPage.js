@@ -1,5 +1,6 @@
 import ProfileLayout, { Section, Stat, MiniBars } from './ProfileLayout';
 import OrgLogo from './OrgLogo';
+import AdminEditLink from './AdminEditLink';
 import { ORG_TYPE_LABELS, ORG_TYPE_COLORS } from '../chartUtils';
 import { stripHtmlForDisplay } from '../adminUtils';
 import { useProfile, personHref, orgHref, showHref, avatarUrl, proxied, fmtDate, fmtMonthYear, plural } from '../profileUtils';
@@ -54,6 +55,10 @@ export default function ShowPage() {
                 className="w-32 h-32 rounded-xl object-cover bg-gray-100 flex-shrink-0" />
               <div className="flex-1 min-w-0 text-center sm:text-left">
                 <h1 className="text-2xl font-bold text-gray-900">{s.title}</h1>
+                <div className="flex justify-center sm:justify-start gap-3">
+                  {s.apple_podcast_id && <AdminEditLink href={`/admin/shows?apple_podcast_id=${s.apple_podcast_id}`} />}
+                  <AdminEditLink href={`/admin/episodes?show=${encodeURIComponent(s.title)}`}>episodes in admin</AdminEditLink>
+                </div>
                 {s.channel && s.channel !== s.title && <p className="text-sm text-gray-500 mt-0.5">{s.channel}</p>}
                 {s.hosts.length > 0 && (
                   <p className="mt-2 text-sm text-gray-700">
@@ -135,6 +140,7 @@ export default function ShowPage() {
                         ))}
                       </p>
                     </div>
+                    <AdminEditLink href={`/admin/episodes?episode_id=${e.episode_id}`} className="flex-shrink-0">edit</AdminEditLink>
                     {e.listen_url && <a href={e.listen_url} target="_blank" rel="noopener noreferrer" className="flex-shrink-0 text-xs text-teal-700 hover:underline">Listen ↗</a>}
                   </li>
                 ))}
