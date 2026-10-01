@@ -1,4 +1,4 @@
-import ProfileLayout, { Section, Stat, ShowMore } from './ProfileLayout';
+import ProfileLayout, { Section, Stat, ShowMore, ShowThumb } from './ProfileLayout';
 import OrgLogo from './OrgLogo';
 import AdminEditLink from './AdminEditLink';
 import { useProfile, personHref, orgHref, showHref, avatarUrl, proxied, fmtDate, fmtMonthYear, plural } from '../profileUtils';
@@ -91,7 +91,8 @@ export default function PersonPage() {
               <ShowMore items={p.appearances} initial={15} render={(a) => (
                 <li key={a.episode_id} className="py-2.5">
                   <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
+                    <ShowThumb show={a.show} />
+                    <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-gray-900">{a.title}</p>
                       <p className="text-xs text-gray-500 mt-0.5">
                         <a href={showHref(a.show.podcast_id, a.show.slug)} className="text-teal-700 hover:underline">{a.show.title}</a>
@@ -131,11 +132,14 @@ export default function PersonPage() {
             <Section title="Shows">
               <ul className="space-y-2">
                 {p.shows.map(s => (
-                  <li key={s.podcast_id} className="text-sm">
-                    <a href={showHref(s.podcast_id, s.slug)} className="text-gray-900 hover:text-teal-700 hover:underline">{s.title}</a>
-                    <p className="text-xs text-gray-500">
-                      {plural(s.appearances, 'episode')}{s.as_host ? ` (host on ${s.as_host})` : ''} · <DateRange from={s.first_date} to={s.last_date} />
-                    </p>
+                  <li key={s.podcast_id} className="text-sm flex items-center gap-3">
+                    <ShowThumb show={s} />
+                    <div className="min-w-0">
+                      <a href={showHref(s.podcast_id, s.slug)} className="text-gray-900 hover:text-teal-700 hover:underline">{s.title}</a>
+                      <p className="text-xs text-gray-500">
+                        {plural(s.appearances, 'episode')}{s.as_host ? ` (host on ${s.as_host})` : ''} · <DateRange from={s.first_date} to={s.last_date} />
+                      </p>
+                    </div>
                   </li>
                 ))}
               </ul>

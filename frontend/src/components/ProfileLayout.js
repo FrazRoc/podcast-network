@@ -70,6 +70,16 @@ export function ProfileSearch({ className = '' }) {
   );
 }
 
+// A show's cover art (episodes have none of their own, so their rows use it
+// too), falling back to an initials tile.
+export function ShowThumb({ show, size = 'w-10 h-10' }) {
+  return (
+    <img src={show.cover_art_url ? proxied(show.cover_art_url) : avatarUrl(show.title)} alt=""
+      onError={e => { e.target.onerror = null; e.target.src = avatarUrl(show.title); }}
+      className={`${size} rounded object-cover bg-gray-100 flex-shrink-0`} />
+  );
+}
+
 export function Section({ title, children, aside }) {
   return (
     <section className="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6">

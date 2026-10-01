@@ -1,4 +1,4 @@
-import ProfileLayout, { Section, Stat, MiniBars, ShowMore } from './ProfileLayout';
+import ProfileLayout, { Section, Stat, MiniBars, ShowMore, ShowThumb } from './ProfileLayout';
 import OrgLogo from './OrgLogo';
 import AdminEditLink from './AdminEditLink';
 import { ORG_TYPE_LABELS, ORG_TYPE_COLORS } from '../chartUtils';
@@ -90,10 +90,11 @@ export default function OrgPage() {
               )}
               {o.shows.length > 0 && (
                 <Section title="Shows that book them most">
-                  <ul className="space-y-1.5">
+                  <ul className="space-y-2">
                     {o.shows.map(s => (
-                      <li key={s.podcast_id} className="flex items-center justify-between gap-2 text-sm">
-                        <a href={showHref(s.podcast_id, s.slug)} className="truncate text-gray-900 hover:text-teal-700 hover:underline">{s.title}</a>
+                      <li key={s.podcast_id} className="flex items-center gap-2 text-sm">
+                        <ShowThumb show={s} size="w-7 h-7" />
+                        <a href={showHref(s.podcast_id, s.slug)} className="flex-1 truncate text-gray-900 hover:text-teal-700 hover:underline">{s.title}</a>
                         <span className="text-xs text-gray-400 flex-shrink-0">{s.appearances}</span>
                       </li>
                     ))}
@@ -107,7 +108,8 @@ export default function OrgPage() {
                 <ul className="divide-y divide-gray-100">
                   {o.recent_episodes.map(e => (
                     <li key={e.episode_id} className="py-2.5 flex items-start justify-between gap-3">
-                      <div className="min-w-0">
+                      <ShowThumb show={e.show} />
+                      <div className="min-w-0 flex-1">
                         <p className="text-sm font-medium text-gray-900">{e.title}</p>
                         <p className="text-xs text-gray-500 mt-0.5">
                           <a href={showHref(e.show.podcast_id, e.show.slug)} className="text-teal-700 hover:underline">{e.show.title}</a>
