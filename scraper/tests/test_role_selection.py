@@ -184,6 +184,8 @@ class TestDisplayTitle:
         ('Chief Operating Officer and Chief Technology Officer', 'COO and CTO'),
         ('former chief financial officer', 'former CFO'), ('chief executive officers', 'CEOs'),
         ('co-founder and Chief Executive Offi', 'co-founder and CEO'),   # cut off in the source
+        ('C.E.O.', 'CEO'), ('Founder and C.F.O.', 'Founder and CFO'), ('C. T. O.', 'CTO'),
+        ('U.S. Attorney', 'U.S. Attorney'), ('C.S.O.', 'C.S.O.'),   # not an unambiguous chief
         # Other roles, and ambiguous abbreviations, stay as written.
         ('Founder and Chief Executive Director', 'Founder and Chief Executive Director'),
         ('Chief Sustainability Officer', 'Chief Sustainability Officer'),

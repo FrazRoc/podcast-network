@@ -234,6 +234,10 @@ _CHIEF_RE = re.compile(
     r'(?:\s*\([A-Z]{3}\))?',
     re.IGNORECASE)
 
+# The same abbreviations written with dots: "C.E.O." -> "CEO".
+_DOTTED_CHIEF_RE = re.compile(
+    r'\bC\.\s?([' + ''.join(sorted({a[1] for a in _CHIEF_ABBREVIATIONS.values()})) + r'])\.\s?O\.')
+
 
 def abbreviate_chiefs(title: str | None) -> str | None:
     """"Co-founder and Chief Executive Officer" -> "Co-founder and CEO".
@@ -248,6 +252,7 @@ def abbreviate_chiefs(title: str | None) -> str | None:
             return m.group(0)
         return _CHIEF_ABBREVIATIONS[word] + ('s' if plural else '')
 
+    title = _DOTTED_CHIEF_RE.sub(lambda m: f"C{m.group(1)}O", title)
     return _CHIEF_RE.sub(repl, title)
 
 
