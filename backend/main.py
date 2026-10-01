@@ -3568,6 +3568,19 @@ async def get_person_profile(host_id: int):
         """, (host_id,))
         co = [{**r, 'slug': profiles.slugify(r['name'])} for r in cur.fetchall()]
 
+        # The same, split by both people's roles on the shared episode.
+        cur.execute("""
+            SELECT eh2.host_id, h.first_name || ' ' || h.last_name AS name, h.profile_image_url,
+                   eh1.is_guest AS me_guest, eh2.is_guest AS them_guest,
+                   COUNT(DISTINCT eh2.episode_id) AS episodes
+            FROM episode_host eh1
+            JOIN episode_host eh2 ON eh2.episode_id = eh1.episode_id AND eh2.host_id <> eh1.host_id
+            JOIN hosts h ON h.host_id = eh2.host_id
+            WHERE eh1.host_id = %s
+            GROUP BY eh2.host_id, h.first_name, h.last_name, h.profile_image_url, eh1.is_guest, eh2.is_guest
+        """, (host_id,))
+        together = profiles.split_co_appearances(cur.fetchall())
+
         dates = [a['published_date'] for a in appearances if a['published_date']]
         return {
             **person,
@@ -3582,8 +3595,10 @@ async def get_person_profile(host_id: int):
             },
             'appearances': appearances,
             'career': profiles.condense_career(role_rows, current),
+            'career_by_org': profiles.career_by_org(role_rows, current),
             'described_as': profiles.described_as(role_rows),
             'appears_with': co,
+            **together,
             'shows': sorted(shows.values(), key=lambda s: (-s['appearances'], s['title'])),
         }
     finally:

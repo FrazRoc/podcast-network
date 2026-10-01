@@ -128,3 +128,97 @@ class TestPersonKind:
         assert person_kind('CEO', as_host=5, as_guest=1, role_kind=kind) == 'host'
         assert person_kind('CEO', as_host=1, as_guest=5, role_kind=kind) == 'ceo'
         assert person_kind(None, as_host=0, as_guest=3, role_kind=kind) is None
+
+
+# --- career_by_org / split_co_appearances ---
+
+from profiles import career_by_org, split_co_appearances  # noqa: E402
+
+
+def _r(d, title=None, kind=None, company=None, org_id=None, former=False):
+    return {'published_date': date.fromisoformat(d), 'title': title, 'title_kind': kind,
+            'company': company, 'org_id': org_id, 'is_former': former}
+
+
+# David Roberts' rows, newest first, as _role_rows() returns them.
+_ROBERTS = [
+    _r('2025-12-17', 'renowned climate and clean energy journalist', 'description'),
+    _r('2025-12-17', None, None, 'Volts', 1025),
+    _r('2025-11-07', 'host', 'position', 'Volts', 1025),
+    _r('2025-07-10', None, None, 'Grist', 488, former=True),
+    _r('2025-07-10', None, None, 'Vox', 1028, former=True),
+    _r('2025-07-10', 'renowned journalist and the author', 'description', 'Volts', 1025),
+    _r('2025-07-09', 'founder', 'position', 'Volts', 1025),
+    _r('2025-03-31', 'reporter', 'position'),
+    _r('2025-01-16', 'respected journalist and progenitor', 'description', 'Volts', 1025),
+    _r('2021-10-21', 'founder and writer', 'position', 'Volts', 1025),
+    _r('2021-10-21', 'host', 'position'),
+    _r('2021-10-21', 'Editor-At-Large', 'position', 'Canary Media', 164),
+    _r('2021-10-14', 'host', 'position', 'Volts', 1025),
+    _r('2020-11-06', 'Energy and Climate Change Writer', 'position', 'Vox', 1028),
+    _r('2020-03-10', 'staff writer', 'position', 'Vox', 1028),
+    _r('2019-12-19', 'energy and politics reporter', 'position', 'Vox', 1028),
+]
+
+
+class TestCareerByOrg:
+    def test_one_entry_per_org_current_first_former_last(self):
+        items = career_by_org(_ROBERTS, {'title': 'Host', 'company': 'Volts', 'org_id': 1025})
+        assert [i['company'] for i in items] == ['Volts', 'Canary Media', 'Vox', 'Grist']
+        volts, canary, vox, grist = items
+        assert volts['current'] and not volts['former']
+        assert vox['former'] and grist['former'] and not canary['former']
+        assert (volts['first_date'], volts['last_date']) == (date(2021, 10, 14), date(2025, 12, 17))
+
+    def test_titles_positions_only_subsumed_dropped(self):
+        volts = career_by_org(_ROBERTS)[0]
+        titles = [t['title'] for t in volts['titles']]
+        # "Founder" folds into "Founder and Writer"; descriptions are left out.
+        assert sorted(titles) == ['Founder and Writer', 'Host']
+        fw = next(t for t in volts['titles'] if t['title'] == 'Founder and Writer')
+        assert fw['last_date'] == date(2021, 10, 21) and fw['mentions'] == 2
+
+    def test_current_title_marked(self):
+        volts = career_by_org(_ROBERTS, {'title': 'Host', 'company': 'Volts', 'org_id': 1025})[0]
+        assert [t['title'] for t in volts['titles'] if t['current']] == ['Host']
+
+    def test_titles_without_an_org_dropped_when_orgs_exist(self):
+        assert all(i['company'] for i in career_by_org(_ROBERTS))
+
+    def test_titles_only_person(self):
+        rows = [_r('2024-01-01', 'energy analyst', 'position'), _r('2023-01-01', 'consultant', 'position'),
+                _r('2023-01-01', 'petroleum geologist', 'description')]
+        items = career_by_org(rows, {'title': 'Energy Analyst', 'company': None, 'org_id': None})
+        assert [i['title'] for i in items] == ['Energy Analyst', 'Consultant']
+        assert items[0]['current'] and items[0]['company'] is None
+
+    def test_later_plain_mention_undoes_former(self):
+        rows = [_r('2025-01-01', 'CEO', 'position', 'Acme', 1), _r('2024-01-01', 'CEO', 'position', 'Acme', 1, former=True)]
+        assert not career_by_org(rows)[0]['former']
+
+    def test_forrest_one_org(self):
+        rows = [_r('2025-10-02', 'CEO', 'position', 'Fortescue', 3518),
+                _r('2025-05-28', 'Executive Chairman', 'position', 'Fortescue', 3518),
+                _r('2025-05-28', 'Billionaire iron magnate', 'description'),
+                _r('2024-12-12', 'Founder and Executive Chairman', 'position', 'Fortescue', 3518)]
+        items = career_by_org(rows, {'title': 'CEO', 'company': 'Fortescue', 'org_id': 3518})
+        assert len(items) == 1
+        # "Executive Chairman" is inside "Founder and Executive Chairman".
+        assert [t['title'] for t in items[0]['titles']] == ['CEO', 'Founder and Executive Chairman']
+
+
+class TestSplitCoAppearances:
+    def test_buckets_by_both_roles(self):
+        rows = [
+            {'host_id': 1, 'name': 'Giles Parkinson', 'me_guest': True, 'them_guest': False, 'episodes': 3},
+            {'host_id': 2, 'name': 'Eva Hanly', 'me_guest': True, 'them_guest': True, 'episodes': 1},
+            {'host_id': 3, 'name': 'Co Host', 'me_guest': False, 'them_guest': False, 'episodes': 9},
+            {'host_id': 4, 'name': 'A Guest', 'me_guest': False, 'them_guest': True, 'episodes': 2},
+            {'host_id': 5, 'name': 'Another', 'me_guest': True, 'them_guest': False, 'episodes': 3},
+        ]
+        out = split_co_appearances(rows)
+        assert [p['name'] for p in out['interviewed_by']] == ['Another', 'Giles Parkinson']
+        assert [p['host_id'] for p in out['appeared_alongside']] == [2]
+        assert [p['host_id'] for p in out['co_hosts']] == [3]
+        assert [p['host_id'] for p in out['guests_hosted']] == [4]
+        assert out['interviewed_by'][0]['slug'] == 'another'
