@@ -174,3 +174,36 @@ class TestInsertEpisodeRetitled:
         assert again == first
         s.cursor.execute("SELECT title FROM episodes WHERE episode_id = %s", (first,))
         assert s.cursor.fetchone()[0] == 'How CEOs Hire A-Players (#326)'
+
+
+# --- show_description_from_feed ---
+
+from scraper import show_description_from_feed
+import feedparser
+
+_RSS = ('<?xml version="1.0"?><rss version="2.0"><channel><title>Volts</title>'
+        '<description>A newsletter and podcast about decarbonization.</description>'
+        '</channel></rss>')
+_CHALLENGE = ('<html><body><div class="main-wrapper"><noscript><span id="challenge-error-text">'
+              'Enable JavaScript and cookies to continue</span></noscript></div></body></html>')
+
+
+def test_show_description_from_real_feed():
+    assert show_description_from_feed(feedparser.parse(_RSS)) == \
+        'A newsletter and podcast about decarbonization.'
+
+
+def test_show_description_rejects_challenge_page():
+    assert show_description_from_feed(feedparser.parse(_CHALLENGE)) == ''
+
+
+def test_show_description_rejects_error_status():
+    feed = feedparser.parse(_RSS)
+    feed['status'] = 404
+    assert show_description_from_feed(feed) == ''
+
+
+def test_show_description_rejects_challenge_text_inside_a_feed():
+    rss = _RSS.replace('A newsletter and podcast about decarbonization.',
+                       '&lt;noscript&gt;Enable JavaScript and cookies to continue&lt;/noscript&gt;')
+    assert show_description_from_feed(feedparser.parse(rss)) == ''

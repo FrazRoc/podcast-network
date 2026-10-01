@@ -30,6 +30,27 @@ _TITLE_SUFFIX_RE = re.compile(
 )
 
 
+# Markers of an HTML error or bot-challenge page served in place of a feed.
+# feedparser happily "parses" those, and their markup ended up as show
+# descriptions (Substack's Cloudflare "Enable JavaScript and cookies to
+# continue", Captivate's Apache 404, Buzzsprout's 404 page header).
+_NOT_A_DESCRIPTION_RE = re.compile(
+    r'challenge-error|enable javascript and cookies|<h1>\s*not found|'
+    r'<(?:noscript|script)\b',
+    re.I,
+)
+
+
+def show_description_from_feed(feed) -> str:
+    """The channel description of a parsed feed, or '' when the fetch didn't
+    return a real feed (an error status, or an HTML page instead of RSS/Atom)."""
+    if getattr(feed, 'status', 200) >= 400 or not feed.get('version'):
+        return ''
+    text = (feed.feed.get('description') or feed.feed.get('subtitle')
+            or feed.feed.get('summary') or '').strip()
+    return '' if _NOT_A_DESCRIPTION_RE.search(text) else text
+
+
 def _flatten_title(title: str) -> str:
     t = title.replace('’', "'").replace('‘', "'")
     t = t.replace('“', '"').replace('”', '"')
@@ -192,12 +213,7 @@ class PodcastScraper:
         feed = feedparser.parse(feed_url)
 
         # Extract show-level description from RSS channel
-        show_description = (
-            getattr(feed.feed, 'description', '') or
-            getattr(feed.feed, 'subtitle', '') or
-            getattr(feed.feed, 'summary', '') or
-            ''
-        )
+        show_description = show_description_from_feed(feed)
 
         feed_data = {
             'description': show_description,
@@ -308,7 +324,8 @@ class PodcastScraper:
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (title) DO UPDATE 
             SET 
-                description = EXCLUDED.description,
+                -- Keep the stored one when this fetch found none.
+                description = COALESCE(NULLIF(EXCLUDED.description, ''), podcasts.description),
                 cover_art_url = EXCLUDED.cover_art_url,
                 website_url = EXCLUDED.website_url,
                 language = EXCLUDED.language,

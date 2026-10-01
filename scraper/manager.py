@@ -412,6 +412,7 @@ class PodcastManager:
         """
         import requests as req
         import feedparser
+        from scraper import show_description_from_feed
 
         conn = self._get_connection()
         cur = conn.cursor()
@@ -435,13 +436,7 @@ class PodcastManager:
 
                 # Try RSS feed first
                 if rss_url:
-                    feed = feedparser.parse(rss_url)
-                    description = (
-                        getattr(feed.feed, 'description', '') or
-                        getattr(feed.feed, 'subtitle', '') or
-                        getattr(feed.feed, 'summary', '') or
-                        ''
-                    )
+                    description = show_description_from_feed(feedparser.parse(rss_url))
 
                 # Fallback: iTunes API lookup
                 if not description and apple_id:
