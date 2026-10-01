@@ -25,11 +25,12 @@ from description_cleaner import (
     clean_description, extract_labelled_credits, name_in_text, first_name_belongs_to_other,
     coarse_source, strip_html,
 )
-from role_selection import pick_current_role, format_for_display
+from role_selection import pick_current_role, format_for_display, display_title
 from org_names import normalize_org_name, ambiguous_spelling
 import org_stats
 from org_suggestions import refresh_suggestions
 from similar_people import find_possible_matches, index_people
+import profiles
 
 load_dotenv()
 
@@ -3479,6 +3480,398 @@ def _public_role(role):
         return None
     # org_id: the company's logo (/api/logo/{org_id}); none for a pin.
     return {k: role.get(k) for k in ('title', 'company', 'org_id', 'source', 'published_date')}
+
+
+# ==================================================================
+# PUBLIC PROFILE PAGES — /people/<id>-<slug>, /orgs/<id>-<slug>,
+# /shows/<id>-<slug>. Read-only. The id is authoritative; slugs are computed
+# from the current name (profiles.slugify) so the frontend can fix up a
+# stale URL. Pure logic lives in profiles.py.
+# ==================================================================
+
+def _episode_link(row) -> dict:
+    return {
+        'episode_id': row['episode_id'],
+        'title': row['episode_title'],
+        'published_date': row['published_date'],
+        'listen_url': profiles.apple_episode_url(row.get('apple_podcast_id'), row.get('apple_episode_id')),
+        'show': {'podcast_id': row['podcast_id'], 'title': row['podcast_title'],
+                 'slug': profiles.slugify(row['podcast_title'])},
+    }
+
+
+@app.get("/api/people/{host_id}/profile")
+async def get_person_profile(host_id: int):
+    """Everything on a person's public page in one response: header, current
+    role, every appearance, career on the record, who they appear with most,
+    and their shows."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT host_id, first_name || ' ' || last_name AS name, profile_image_url, bio,
+                   linkedin_url, twitter_handle, bluesky_handle, website_url, wikipedia
+            FROM hosts WHERE host_id = %s
+        """, (host_id,))
+        person = cur.fetchone()
+        if not person:
+            raise HTTPException(status_code=404, detail="Person not found")
+
+        role_rows = _role_rows(cur, host_id)
+        current = _public_role(format_for_display(pick_current_role(role_rows, _role_pin(cur, host_id))))
+        # The title they were introduced with on each episode (first current
+        # role stated there), shown beside the appearance.
+        intro = {}
+        for r in role_rows:
+            if not r['is_former'] and r['episode_id'] not in intro and (r['title'] or r['company']):
+                intro[r['episode_id']] = {'title': r['title'], 'company': r['company'], 'org_id': r['org_id']}
+
+        cur.execute("""
+            SELECT e.episode_id, e.title AS episode_title, e.published_date, e.apple_episode_id,
+                   p.podcast_id, p.title AS podcast_title, p.apple_podcast_id, eh.is_guest
+            FROM episode_host eh
+            JOIN episodes e ON e.episode_id = eh.episode_id
+            JOIN podcasts p ON p.podcast_id = e.podcast_id
+            WHERE eh.host_id = %s
+            ORDER BY e.published_date DESC NULLS LAST, e.episode_id DESC
+        """, (host_id,))
+        appearances = []
+        shows = {}
+        for r in cur.fetchall():
+            a = _episode_link(r)
+            a['role'] = 'Guest' if r['is_guest'] else 'Host'
+            a['as'] = intro.get(r['episode_id'])
+            appearances.append(a)
+            s = shows.setdefault(r['podcast_id'], {**a['show'], 'appearances': 0, 'as_host': 0,
+                                                   'first_date': None, 'last_date': None})
+            s['appearances'] += 1
+            s['as_host'] += 0 if r['is_guest'] else 1
+            d = r['published_date']
+            if d:
+                s['first_date'] = min(filter(None, [s['first_date'], d]))
+                s['last_date'] = max(filter(None, [s['last_date'], d]))
+
+        cur.execute("""
+            SELECT eh2.host_id, h.first_name || ' ' || h.last_name AS name, h.profile_image_url,
+                   COUNT(DISTINCT eh2.episode_id) AS episodes,
+                   bool_and(NOT eh2.is_guest) AS always_host
+            FROM episode_host eh1
+            JOIN episode_host eh2 ON eh2.episode_id = eh1.episode_id AND eh2.host_id <> eh1.host_id
+            JOIN hosts h ON h.host_id = eh2.host_id
+            WHERE eh1.host_id = %s
+            GROUP BY eh2.host_id, h.first_name, h.last_name, h.profile_image_url
+            ORDER BY episodes DESC, name
+            LIMIT 12
+        """, (host_id,))
+        co = [{**r, 'slug': profiles.slugify(r['name'])} for r in cur.fetchall()]
+
+        dates = [a['published_date'] for a in appearances if a['published_date']]
+        return {
+            **person,
+            'slug': profiles.slugify(person['name']),
+            'current_role': current,
+            'totals': {
+                'appearances': len(appearances),
+                'as_guest': sum(1 for a in appearances if a['role'] == 'Guest'),
+                'shows': len(shows),
+                'first_date': min(dates) if dates else None,
+                'last_date': max(dates) if dates else None,
+            },
+            'appearances': appearances,
+            'career': profiles.condense_career(role_rows, current),
+            'described_as': profiles.described_as(role_rows),
+            'appears_with': co,
+            'shows': sorted(shows.values(), key=lambda s: (-s['appearances'], s['title'])),
+        }
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.get("/api/orgs/{org_id}/profile")
+async def get_org_profile(org_id: int):
+    """An organisation's public page: who from it has been on (sub-
+    organisations rolled up, guests only, like the Stats page), airtime by
+    year, the shows that book them, and recent episodes."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(f"""
+            WITH {org_stats._ORG_TOP}
+            SELECT o.org_id, o.name, COALESCE(o.org_type, t.org_type) AS org_type, o.website_url,
+                   o.hq_city, o.country, o.founded_year, o.wikipedia_url, o.linkedin_url,
+                   o.not_an_org, o.parent_org_id, par.name AS parent_name
+            FROM organizations o
+            LEFT JOIN org_top ot ON ot.org_id = o.org_id
+            LEFT JOIN organizations t ON t.org_id = ot.top
+            LEFT JOIN organizations par ON par.org_id = o.parent_org_id AND NOT par.not_an_org
+            WHERE o.org_id = %s
+        """, (org_id,))
+        org = cur.fetchone()
+        if not org or org['not_an_org']:
+            raise HTTPException(status_code=404, detail="Organisation not found")
+
+        # This organisation and everything under it, the same way the Stats
+        # page rolls sub-organisations up into their parent.
+        cur.execute("""
+            WITH RECURSIVE down AS (
+                SELECT org_id FROM organizations WHERE org_id = %s
+                UNION
+                SELECT c.org_id FROM organizations c JOIN down ON c.parent_org_id = down.org_id
+                WHERE NOT c.not_an_org
+            )
+            SELECT org_id FROM down
+        """, (org_id,))
+        subtree = [r['org_id'] for r in cur.fetchall()]
+        cur.execute("""
+            SELECT org_id, name FROM organizations
+            WHERE parent_org_id = %s AND NOT not_an_org ORDER BY name
+        """, (org_id,))
+        children = [{**r, 'slug': profiles.slugify(r['name'])} for r in cur.fetchall()]
+
+        cur.execute("""
+            SELECT ha.host_id, h.first_name || ' ' || h.last_name AS name, h.profile_image_url,
+                   ha.title, ha.title_kind, ha.is_former, o.name AS org_name,
+                   e.episode_id, e.title AS episode_title, e.published_date, e.apple_episode_id,
+                   p.podcast_id, p.title AS podcast_title, p.apple_podcast_id
+            FROM host_affiliations ha
+            JOIN episode_host eh ON eh.episode_id = ha.episode_id AND eh.host_id = ha.host_id AND eh.is_guest
+            JOIN organization_aliases a ON a.normalized_name = ha.company_key
+            JOIN organizations o ON o.org_id = a.org_id
+            JOIN hosts h ON h.host_id = ha.host_id
+            JOIN episodes e ON e.episode_id = ha.episode_id
+            JOIN podcasts p ON p.podcast_id = e.podcast_id
+            WHERE a.org_id = ANY(%s)
+            ORDER BY e.published_date DESC NULLS LAST, e.episode_id DESC
+        """, (subtree,))
+        rows = cur.fetchall()
+
+        people, by_year, shows, episodes = {}, {}, {}, {}
+        seen = set()
+        for r in rows:
+            key = (r['episode_id'], r['host_id'])
+            if key in seen:
+                continue
+            seen.add(key)
+            pp = people.setdefault(r['host_id'], {
+                'host_id': r['host_id'], 'name': r['name'], 'slug': profiles.slugify(r['name']),
+                'profile_image_url': r['profile_image_url'],
+                'title': display_title(r['title'], r['title_kind']),
+                'org_name': r['org_name'], 'former': r['is_former'], 'appearances': 0,
+                'last_date': r['published_date']})
+            pp['appearances'] += 1
+            if r['published_date']:
+                by_year[r['published_date'].year] = by_year.get(r['published_date'].year, 0) + 1
+            sh = shows.setdefault(r['podcast_id'], {'podcast_id': r['podcast_id'], 'title': r['podcast_title'],
+                                                    'slug': profiles.slugify(r['podcast_title']), 'appearances': 0})
+            sh['appearances'] += 1
+            ep = episodes.get(r['episode_id'])
+            if ep is None:
+                ep = episodes[r['episode_id']] = {**_episode_link(r), 'people': []}
+            ep['people'].append({'host_id': r['host_id'], 'name': r['name'], 'slug': profiles.slugify(r['name'])})
+
+        return {
+            **{k: org[k] for k in ('org_id', 'name', 'org_type', 'website_url', 'hq_city', 'country',
+                                   'founded_year', 'wikipedia_url', 'linkedin_url')},
+            'slug': profiles.slugify(org['name']),
+            'parent': ({'org_id': org['parent_org_id'], 'name': org['parent_name'],
+                        'slug': profiles.slugify(org['parent_name'])} if org['parent_name'] else None),
+            'children': children,
+            'totals': {'people': len(people), 'appearances': len(seen), 'shows': len(shows)},
+            'people': sorted(people.values(), key=lambda p: (p['former'], -p['appearances'], p['name'])),
+            'by_year': [{'year': y, 'appearances': n} for y, n in sorted(by_year.items())],
+            'shows': sorted(shows.values(), key=lambda s: (-s['appearances'], s['title']))[:15],
+            'recent_episodes': list(episodes.values())[:20],
+        }
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.get("/api/shows/{podcast_id}/profile")
+async def get_show_profile(podcast_id: int):
+    """A show's public page: header, hosts, publishing and guest-coverage
+    numbers, who they book, recent episodes, monthly history, and the shows
+    that share the most guests with it."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT p.podcast_id, p.title, p.description, p.cover_art_url, p.website_url, p.rss_feed_url,
+                   p.apple_podcast_id, c.name AS channel
+            FROM podcasts p LEFT JOIN channels c ON c.channel_id = p.channel_id
+            WHERE p.podcast_id = %s
+        """, (podcast_id,))
+        show = cur.fetchone()
+        if not show:
+            raise HTTPException(status_code=404, detail="Show not found")
+
+        cur.execute("""
+            SELECT h.host_id, h.first_name || ' ' || h.last_name AS name, h.profile_image_url,
+                   COUNT(DISTINCT eh.episode_id) FILTER (WHERE NOT eh.is_guest) AS episodes_hosted
+            FROM hosts h
+            LEFT JOIN host_podcast hp ON hp.host_id = h.host_id AND hp.podcast_id = %(p)s
+            LEFT JOIN episode_host eh ON eh.host_id = h.host_id
+                 AND eh.episode_id IN (SELECT episode_id FROM episodes WHERE podcast_id = %(p)s)
+            WHERE hp.host_id IS NOT NULL OR (eh.host_id IS NOT NULL AND NOT eh.is_guest)
+            GROUP BY h.host_id, h.first_name, h.last_name, h.profile_image_url
+            ORDER BY episodes_hosted DESC, name
+        """, {'p': podcast_id})
+        hosts = [{**r, 'slug': profiles.slugify(r['name'])} for r in cur.fetchall()]
+
+        cur.execute("""
+            SELECT COUNT(*) AS episodes, MIN(published_date) AS first_date, MAX(published_date) AS last_date,
+                   COUNT(*) FILTER (WHERE NOT no_guest_confirmed) AS guest_eligible,
+                   COUNT(*) FILTER (WHERE NOT no_guest_confirmed AND EXISTS (
+                       SELECT 1 FROM episode_host eh WHERE eh.episode_id = e.episode_id AND eh.is_guest)) AS with_guest
+            FROM episodes e WHERE podcast_id = %s
+        """, (podcast_id,))
+        t = cur.fetchone()
+
+        cur.execute("""
+            SELECT date_trunc('month', published_date)::date AS month, COUNT(*) AS n
+            FROM episodes WHERE podcast_id = %s AND published_date IS NOT NULL
+            GROUP BY 1 ORDER BY 1
+        """, (podcast_id,))
+        history = cur.fetchall()
+
+        # Who they book, by the type of organisation their guests work for —
+        # the Stats page's guest-mix rule, scoped to this show.
+        cur.execute(org_stats._GUEST_ROLES + """
+            , one AS (
+                SELECT DISTINCT ON (host_id) host_id, org_type, top_id, top_name
+                FROM guest_roles WHERE NOT is_former AND podcast_id = %s
+                ORDER BY host_id, (org_type IS NULL), affiliation_id
+            )
+            SELECT org_type, top_id, top_name, COUNT(*) AS n FROM one GROUP BY org_type, top_id, top_name
+        """, (podcast_id,))
+        mix, orgs = {}, {}
+        for r in cur.fetchall():
+            if r['org_type']:
+                mix[r['org_type']] = mix.get(r['org_type'], 0) + r['n']
+            o = orgs.setdefault(r['top_id'], {'org_id': r['top_id'], 'name': r['top_name'],
+                                              'slug': profiles.slugify(r['top_name']), 'guests': 0})
+            o['guests'] += r['n']
+
+        cur.execute("""
+            SELECT h.host_id, h.first_name || ' ' || h.last_name AS name, h.profile_image_url,
+                   COUNT(*) AS appearances, MAX(e.published_date) AS last_date
+            FROM episode_host eh JOIN episodes e ON e.episode_id = eh.episode_id
+            JOIN hosts h ON h.host_id = eh.host_id
+            WHERE e.podcast_id = %s AND eh.is_guest
+            GROUP BY h.host_id, h.first_name, h.last_name, h.profile_image_url
+            ORDER BY appearances DESC, last_date DESC NULLS LAST
+            LIMIT 15
+        """, (podcast_id,))
+        top_guests = [{**r, 'slug': profiles.slugify(r['name'])} for r in cur.fetchall()]
+
+        cur.execute("""
+            SELECT e.episode_id, e.title AS episode_title, e.published_date, e.apple_episode_id,
+                   p.podcast_id, p.title AS podcast_title, p.apple_podcast_id,
+                   COALESCE(json_agg(json_build_object('host_id', h.host_id,
+                            'name', h.first_name || ' ' || h.last_name) ORDER BY h.last_name)
+                            FILTER (WHERE h.host_id IS NOT NULL), '[]') AS guests
+            FROM episodes e JOIN podcasts p ON p.podcast_id = e.podcast_id
+            LEFT JOIN episode_host eh ON eh.episode_id = e.episode_id AND eh.is_guest
+            LEFT JOIN hosts h ON h.host_id = eh.host_id
+            WHERE e.podcast_id = %s
+            GROUP BY e.episode_id, p.podcast_id
+            ORDER BY e.published_date DESC NULLS LAST, e.episode_id DESC
+            LIMIT 20
+        """, (podcast_id,))
+        recent = []
+        for r in cur.fetchall():
+            ep = _episode_link(r)
+            ep['guests'] = [{**g, 'slug': profiles.slugify(g['name'])} for g in r['guests']]
+            recent.append(ep)
+
+        # Shows sharing the most guests with this one (distinct guest people),
+        # with Jaccard overlap so a huge show doesn't top every list.
+        cur.execute("""
+            WITH g AS (
+                SELECT DISTINCT e.podcast_id, eh.host_id
+                FROM episode_host eh JOIN episodes e ON e.episode_id = eh.episode_id
+                WHERE eh.is_guest
+            ),
+            sizes AS (SELECT podcast_id, COUNT(*) AS n FROM g GROUP BY podcast_id),
+            shared AS (
+                SELECT b.podcast_id, COUNT(*) AS shared
+                FROM g a JOIN g b ON b.host_id = a.host_id AND b.podcast_id <> a.podcast_id
+                WHERE a.podcast_id = %(p)s
+                GROUP BY b.podcast_id
+            )
+            SELECT p.podcast_id, p.title, p.cover_art_url, shared.shared,
+                   ROUND(shared.shared::numeric / NULLIF(sa.n + sb.n - shared.shared, 0), 3) AS jaccard
+            FROM shared
+            JOIN podcasts p ON p.podcast_id = shared.podcast_id
+            JOIN sizes sb ON sb.podcast_id = shared.podcast_id
+            JOIN sizes sa ON sa.podcast_id = %(p)s
+            ORDER BY shared.shared DESC, p.title
+            LIMIT 8
+        """, {'p': podcast_id})
+        overlap = [{**r, 'slug': profiles.slugify(r['title'])} for r in cur.fetchall()]
+
+        return {
+            **show,
+            'slug': profiles.slugify(show['title']),
+            'apple_url': profiles.apple_show_url(show['apple_podcast_id']),
+            'hosts': hosts,
+            'totals': {
+                'episodes': t['episodes'], 'first_date': t['first_date'], 'last_date': t['last_date'],
+                'per_month_last_year': profiles.recent_cadence([(h['month'], h['n']) for h in history]),
+                'guest_eligible': t['guest_eligible'], 'with_guest': t['with_guest'],
+            },
+            'guest_mix': {'types': list(org_stats.ORG_TYPES), 'counts': mix},
+            'top_orgs': sorted((o for o in orgs.values() if o['org_id']),
+                               key=lambda o: (-o['guests'], o['name']))[:12],
+            'top_guests': top_guests,
+            'recent_episodes': recent,
+            'history': history,
+            'overlap': overlap,
+        }
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.get("/api/search")
+async def search_profiles(q: str = "", limit: int = 8):
+    """Name search across people, organisations and shows for the profile
+    pages' search box. Each list is ranked by how much it has been on."""
+    q = (q or '').strip()
+    limit = max(1, min(limit, 20))
+    if len(q) < 2:
+        return {'people': [], 'orgs': [], 'shows': []}
+    like = f"%{q}%"
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT h.host_id, h.first_name || ' ' || h.last_name AS name, h.profile_image_url,
+                   COUNT(eh.episode_id) AS appearances
+            FROM hosts h JOIN episode_host eh ON eh.host_id = h.host_id
+            WHERE h.first_name || ' ' || h.last_name ILIKE %s
+            GROUP BY h.host_id ORDER BY appearances DESC, name LIMIT %s
+        """, (like, limit))
+        people = [{**r, 'slug': profiles.slugify(r['name'])} for r in cur.fetchall()]
+        cur.execute("""
+            SELECT o.org_id, o.name, o.org_type, COUNT(DISTINCT ha.host_id) AS people
+            FROM organizations o
+            JOIN organization_aliases a ON a.org_id = o.org_id
+            JOIN host_affiliations ha ON ha.company_key = a.normalized_name
+            WHERE o.name ILIKE %s AND NOT o.not_an_org
+            GROUP BY o.org_id ORDER BY people DESC, o.name LIMIT %s
+        """, (like, limit))
+        orgs = [{**r, 'slug': profiles.slugify(r['name'])} for r in cur.fetchall()]
+        cur.execute("""
+            SELECT podcast_id, title, cover_art_url FROM podcasts
+            WHERE title ILIKE %s ORDER BY title LIMIT %s
+        """, (like, limit))
+        shows = [{**r, 'slug': profiles.slugify(r['title'])} for r in cur.fetchall()]
+        return {'people': people, 'orgs': orgs, 'shows': shows}
+    finally:
+        cur.close()
+        conn.close()
 
 
 @app.get("/api/people/{host_id}/current-role")
