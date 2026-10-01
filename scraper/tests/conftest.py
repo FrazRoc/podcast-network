@@ -50,3 +50,15 @@ def db_conn():
     cur.close()
     yield conn
     conn.close()
+
+
+@pytest.fixture(autouse=True)
+def _fresh_backend_caches():
+    """The backend keeps some results in memory between requests (current
+    roles, directory lists); tests swap databases under it, so start each
+    test empty."""
+    main = sys.modules.get('main')
+    if main is not None:
+        for name in ('_ROLES_CACHE', '_DIRECTORY_CACHE'):
+            getattr(main, name, {}).clear()
+    yield

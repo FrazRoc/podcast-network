@@ -196,7 +196,10 @@ def _run(org_db, monkeypatch, fn, *args, **kw):
     import main
     monkeypatch.setattr(main, 'get_db_connection',
                         lambda: psycopg2.connect(org_db.dsn, cursor_factory=RealDictCursor))
-    return asyncio.run(getattr(main, fn)(*args, **kw))
+    # Most endpoints are plain functions (run in FastAPI's thread pool); a
+    # few that await network calls are coroutines.
+    r = getattr(main, fn)(*args, **kw)
+    return asyncio.run(r) if asyncio.iscoroutine(r) else r
 
 
 def _org_id(cur, name):

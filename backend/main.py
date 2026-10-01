@@ -380,6 +380,7 @@ async def _cache_headers_and_freshness(request, call_next):
     # An admin edit can change any directory row: have the next request
     # rebuild them (it is still served the old list meanwhile).
     if request.method != 'GET' and request.url.path.startswith('/api/admin/') and response.status_code < 400:
+        _ROLES_CACHE.clear()
         _expire_directories()
     return response
 
@@ -454,7 +455,7 @@ def get_db_connection():
     return psycopg2.connect(**_connect_kwargs())
 
 @app.get("/api/host-connections")
-async def get_host_connections():
+def get_host_connections():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -566,7 +567,7 @@ async def get_host_connections():
 
 
 @app.get("/api/last-updated")
-async def get_last_updated():
+def get_last_updated():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -581,7 +582,7 @@ async def get_last_updated():
 
 
 @app.get("/api/people")
-async def get_people():
+def get_people():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -616,7 +617,7 @@ async def get_people():
 
 
 @app.get("/api/podcasts")
-async def get_podcasts():
+def get_podcasts():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -664,20 +665,20 @@ def _org_stat(fn, *args, **kw):
 
 
 @app.get("/api/stats/show-guest-mix")
-async def stats_show_guest_mix():
+def stats_show_guest_mix():
     """Who each show books: its guests by type of organisation."""
     return _org_stat(org_stats.show_guest_mix)
 
 
 @app.get("/api/stats/revolving-door")
-async def stats_revolving_door():
+def stats_revolving_door():
     """Guests whose former role was at one type of organisation and whose
     current role is at another."""
     return _org_stat(org_stats.revolving_door)
 
 
 @app.get("/api/stats/top-organizations")
-async def stats_top_organizations(by: str = "guests", exclude_in_house: bool = True,
+def stats_top_organizations(by: str = "guests", exclude_in_house: bool = True,
                                   org_type: str = "", limit: int = 15, offset: int = 0):
     """Most-booked organisations, sub-organisations counted under their
     parent; optionally one type of organisation, a page at a time."""
@@ -688,19 +689,19 @@ async def stats_top_organizations(by: str = "guests", exclude_in_house: bool = T
 
 
 @app.get("/api/stats/guest-mix-by-year")
-async def stats_guest_mix_by_year():
+def stats_guest_mix_by_year():
     """Share of guest appearances by organisation type, per year."""
     return _org_stat(org_stats.guest_mix_by_year)
 
 
 @app.get("/api/stats/guest-roles")
-async def stats_guest_roles():
+def stats_guest_roles():
     """Guests by the kind of role they hold, overall and per show."""
     return _org_stat(org_stats.guest_roles)
 
 
 @app.get("/api/stats/guest-appearances")
-async def get_guest_appearance_stats(limit: int = 200):
+def get_guest_appearance_stats(limit: int = 200):
     """Sorted list of people by GUEST episode appearance count — a
     permanent show host would otherwise dominate this (they're credited
     on every episode of their own show), which says nothing about how
@@ -737,7 +738,7 @@ async def get_guest_appearance_stats(limit: int = 200):
 
 
 @app.get("/api/stats/guest-reach")
-async def get_guest_reach():
+def get_guest_reach():
     """Each guest's appearances against the number of distinct shows.
 
     Separates two things a single count hides: people who turn up once on many
@@ -779,7 +780,7 @@ async def get_guest_reach():
 
 
 @app.get("/api/show-connections")
-async def get_show_connections():
+def get_show_connections():
     """The network one level up: shows as nodes, shared people as edges.
 
     The person graph buries the communities it contains — at 1,952 nodes you
@@ -842,7 +843,7 @@ async def get_show_connections():
 
 
 @app.get("/api/stats/guest-cohorts")
-async def get_guest_cohorts():
+def get_guest_cohorts():
     """Each year's guest roster, split by the year those guests first appeared.
 
     The headline is that first-timers fall from 94% of the roster to 40%, but
@@ -909,7 +910,7 @@ async def get_guest_cohorts():
 
 
 @app.get("/api/stats/guest-momentum")
-async def get_guest_momentum():
+def get_guest_momentum():
     """Appearances per year for the guests most present recently.
 
     A ranking chart was the obvious shape and does not work here: 44 people
@@ -1003,7 +1004,7 @@ async def get_guest_momentum():
 
 
 @app.get("/api/stats/bridges")
-async def get_bridges():
+def get_bridges():
     """The two routes to reaching most of the network.
 
     Reach — shows you can get to in one step, through anyone you shared an
@@ -1070,7 +1071,7 @@ async def get_bridges():
 
 
 @app.get("/api/stats/show-overlap")
-async def get_show_overlap_stats(top_n: int = 25):
+def get_show_overlap_stats(top_n: int = 25):
     """Pairwise shared-guest counts among the top_n most-connected shows —
     the data behind the show overlap matrix on the public Stats page."""
     try:
@@ -1120,7 +1121,7 @@ async def get_show_overlap_stats(top_n: int = 25):
 
 
 @app.get("/api/stats/show-timeline")
-async def get_show_timeline_stats():
+def get_show_timeline_stats():
     """Per-show publishing history for the timeline on the Stats page.
 
     Returns a monthly count per show rather than a list of every episode
@@ -1197,7 +1198,7 @@ async def get_show_timeline_stats():
 
 
 @app.get("/api/stats/episode-calendar")
-async def get_episode_calendar_stats():
+def get_episode_calendar_stats():
     """Episode count per day across all shows — the data behind the
     calendar heatmap on the public Stats page."""
     try:
@@ -1381,7 +1382,7 @@ def _possible_matches_for(cur, names: list) -> dict:
 
 
 @app.get("/api/admin/suggestions/next", dependencies=[Depends(verify_admin)])
-async def get_next_suggestion(apple_podcast_id: str = None):
+def get_next_suggestion(apple_podcast_id: str = None):
     """Next pending suggestion for review, with full episode context.
 
     Optionally scoped to one show via apple_podcast_id.
@@ -1399,7 +1400,7 @@ async def get_next_suggestion(apple_podcast_id: str = None):
 
 
 @app.get("/api/admin/suggestions/id/{suggestion_id}", dependencies=[Depends(verify_admin)])
-async def get_suggestion_by_id(suggestion_id: int):
+def get_suggestion_by_id(suggestion_id: int):
     """One specific suggestion, so a link to it can be shared and reopened.
 
     Returns it whatever its status — a link to an already-handled suggestion
@@ -1422,7 +1423,7 @@ async def get_suggestion_by_id(suggestion_id: int):
 
 
 @app.get("/api/admin/suggestions/stats", dependencies=[Depends(verify_admin)])
-async def get_suggestion_stats():
+def get_suggestion_stats():
     """Return counts by status."""
     try:
         conn = get_db_connection()
@@ -1442,7 +1443,7 @@ async def get_suggestion_stats():
 
 
 @app.get("/api/admin/suggestions/sources", dependencies=[Depends(verify_admin)])
-async def get_suggestion_sources(apple_podcast_id: str = None, status: str = "pending"):
+def get_suggestion_sources(apple_podcast_id: str = None, status: str = "pending"):
     """Counts of pending suggestions grouped by the specific pattern that
     found them (source, e.g. "title_dash", "desc_bio_sentence" — see
     extract_candidate_names_tagged() in the scanner). Powers the filter
@@ -1472,7 +1473,7 @@ async def get_suggestion_sources(apple_podcast_id: str = None, status: str = "pe
 
 
 @app.get("/api/admin/suggestions/list", dependencies=[Depends(verify_admin)])
-async def list_suggestions(apple_podcast_id: str = None, source: str = None,
+def list_suggestions(apple_podcast_id: str = None, source: str = None,
                             search: str = "", status: str = "pending",
                             sort: str = "newest", limit: int = 50, offset: int = 0,
                             episode_id: int = None):
@@ -1545,7 +1546,7 @@ async def list_suggestions(apple_podcast_id: str = None, source: str = None,
 
 
 @app.post("/api/admin/suggestions/{suggestion_id}/approve", dependencies=[Depends(verify_admin)])
-async def approve_suggestion(suggestion_id: int, body: NameOverrideRequest = None):
+def approve_suggestion(suggestion_id: int, body: NameOverrideRequest = None):
     """
     Approve a suggestion:
     1. Create host record (optionally with name override from UI)
@@ -1656,7 +1657,7 @@ async def approve_suggestion(suggestion_id: int, body: NameOverrideRequest = Non
 
 
 @app.post("/api/admin/suggestions/{suggestion_id}/approve_only", dependencies=[Depends(verify_admin)])
-async def approve_suggestion_only(suggestion_id: int, body: NameOverrideRequest = None):
+def approve_suggestion_only(suggestion_id: int, body: NameOverrideRequest = None):
     """
     Approve a suggestion as a person but don't link to the source episode.
     Scans ALL OTHER episodes for this name and links any matches.
@@ -1748,7 +1749,7 @@ async def approve_suggestion_only(suggestion_id: int, body: NameOverrideRequest 
 
 
 @app.post("/api/admin/suggestions/{suggestion_id}/reject", dependencies=[Depends(verify_admin)])
-async def reject_suggestion(suggestion_id: int):
+def reject_suggestion(suggestion_id: int):
     """
     Reject a suggestion:
     1. Mark it rejected
@@ -1815,7 +1816,7 @@ class RejectNameRequest(BaseModel):
 
 
 @app.post("/api/admin/rejected-names", dependencies=[Depends(verify_admin)])
-async def add_rejected_name(body: RejectNameRequest):
+def add_rejected_name(body: RejectNameRequest):
     """Pre-emptively blocklist a name with no suggestion yet to reject —
     e.g. a person who is discussed but never a guest (a head of state named
     in an episode's description), where a fix elsewhere might otherwise
@@ -1859,7 +1860,7 @@ async def add_rejected_name(body: RejectNameRequest):
 
 
 @app.post("/api/admin/suggestions/{suggestion_id}/skip", dependencies=[Depends(verify_admin)])
-async def skip_suggestion(suggestion_id: int):
+def skip_suggestion(suggestion_id: int):
     """Move a suggestion to the back of the queue."""
     try:
         conn = get_db_connection()
@@ -1882,7 +1883,7 @@ async def skip_suggestion(suggestion_id: int):
 # ==================================================================
 
 @app.get("/api/admin/images/next", dependencies=[Depends(verify_admin)])
-async def get_next_image_person(skip: str = ""):
+def get_next_image_person(skip: str = ""):
     """Get the next person without a profile image, ordered by most appearances.
     skip: comma-separated host_ids to exclude this session.
     """
@@ -1933,7 +1934,7 @@ async def get_next_image_person(skip: str = ""):
 
 
 @app.get("/api/admin/images/stats", dependencies=[Depends(verify_admin)])
-async def get_image_stats():
+def get_image_stats():
     """Return image coverage stats."""
     try:
         conn = get_db_connection()
@@ -1958,7 +1959,7 @@ class TwitterHandleRequest(BaseModel):
 
 
 @app.post("/api/admin/images/{host_id}/set_twitter", dependencies=[Depends(verify_admin)])
-async def set_twitter_handle(host_id: int, body: TwitterHandleRequest):
+def set_twitter_handle(host_id: int, body: TwitterHandleRequest):
     """
     Extract handle from a Twitter/X URL, store handle and image URL on the host.
     Returns the image URL for preview before final approval.
@@ -1997,7 +1998,7 @@ async def set_twitter_handle(host_id: int, body: TwitterHandleRequest):
 
 
 @app.post("/api/admin/images/{host_id}/approve", dependencies=[Depends(verify_admin)])
-async def approve_image(host_id: int):
+def approve_image(host_id: int):
     """Save the Twitter image URL to hosts.profile_image_url."""
     try:
         conn = get_db_connection()
@@ -2029,7 +2030,7 @@ async def approve_image(host_id: int):
 
 
 @app.post("/api/admin/images/{host_id}/skip", dependencies=[Depends(verify_admin)])
-async def skip_image(host_id: int):
+def skip_image(host_id: int):
     """Skip this person — move them to the back by setting a placeholder."""
     try:
         conn = get_db_connection()
@@ -2397,7 +2398,7 @@ def _suggest_survivor(a, b):
 
 
 @app.get("/api/admin/diagnostics", dependencies=[Depends(verify_admin)])
-async def get_diagnostics():
+def get_diagnostics():
     """Per-show data health, for the admin diagnostics page.
 
     Three things a chart can show that a query does not: which shows have no
@@ -2560,7 +2561,7 @@ def _add_publishing_rhythm(cur, shows: list) -> None:
 
 
 @app.get("/api/admin/diagnostics/pipeline", dependencies=[Depends(verify_admin)])
-async def get_pipeline_diagnostics():
+def get_pipeline_diagnostics():
     """Scanner and role-extraction health, loaded after the main page:
     episodes by week (published, and added to the database), the role
     extraction backlog and results per show, and how complete the displayed
@@ -2650,7 +2651,7 @@ ORG_LIKE_NAME_SQL = r"""
 
 
 @app.get("/api/admin/diagnostics/data", dependencies=[Depends(verify_admin)])
-async def get_data_diagnostics():
+def get_data_diagnostics():
     """Company and people data completeness: how many organisations have a
     type, website, Wikidata match and parent (all, and those 3+ people work
     at, where a gap shows most), the open merge queue, how many guests have
@@ -2753,7 +2754,7 @@ _MENTION_ONLY = """
 
 
 @app.get("/api/admin/diagnostics/mentions", dependencies=[Depends(verify_admin)])
-async def list_mention_only_credits(limit: int = 25, offset: int = 0):
+def list_mention_only_credits(limit: int = 25, offset: int = 0):
     """The review list: newest episodes first, with the text the extractor read."""
     try:
         conn = get_db_connection()
@@ -2779,7 +2780,7 @@ async def list_mention_only_credits(limit: int = 25, offset: int = 0):
 
 @app.post("/api/admin/episodes/{episode_id}/credits/{host_id}/confirm-appears",
           dependencies=[Depends(verify_admin)])
-async def confirm_credit_appears(episode_id: int, host_id: int):
+def confirm_credit_appears(episode_id: int, host_id: int):
     """"Keep" on the review list: the person does take part (the extractor
     was wrong), so the credit leaves the list."""
     conn = get_db_connection()
@@ -2795,7 +2796,7 @@ async def confirm_credit_appears(episode_id: int, host_id: int):
 
 
 @app.post("/api/admin/people/{host_id}/repair-name", dependencies=[Depends(verify_admin)])
-async def repair_mangled_name(host_id: int):
+def repair_mangled_name(host_id: int):
     """Fix a name stored with its UTF-8 read as Latin-1 ("BalÃ¡zs" ->
     "Balázs"), keeping every credit, then credit any episode that names the
     person with the real spelling. Unlike a rename in People Admin, nothing
@@ -2835,7 +2836,7 @@ async def repair_mangled_name(host_id: int):
 
 
 @app.get("/api/admin/people/duplicates", dependencies=[Depends(verify_admin)])
-async def find_duplicate_people():
+def find_duplicate_people():
     """Surface possible duplicate people for a human to judge.
 
     Never merges anything. Unlike an exact-name duplicate, a shortened first
@@ -2986,7 +2987,7 @@ async def find_duplicate_people():
 
 
 @app.post("/api/admin/people/duplicates/dismiss", dependencies=[Depends(verify_admin)])
-async def dismiss_duplicate_pair(body: DismissPairRequest):
+def dismiss_duplicate_pair(body: DismissPairRequest):
     """Mark two people as genuinely different so the pair stops resurfacing."""
     a, b = sorted((body.host_id_a, body.host_id_b))
     if a == b:
@@ -3004,7 +3005,7 @@ async def dismiss_duplicate_pair(body: DismissPairRequest):
 
 
 @app.get("/api/admin/people/{host_id}", dependencies=[Depends(verify_admin)])
-async def get_person(host_id: int):
+def get_person(host_id: int):
     """Single-person summary — used for deep-linking to a person who may
     not be in the default (top-100) list, e.g. by appearance count."""
     try:
@@ -3039,7 +3040,7 @@ async def get_person(host_id: int):
 
 
 @app.get("/api/admin/people", dependencies=[Depends(verify_admin)])
-async def list_people(q: str = "", filter: str = "all", sort: str = "appearances_desc",
+def list_people(q: str = "", filter: str = "all", sort: str = "appearances_desc",
                       limit: int = 100, offset: int = 0):
     """List/search people with filtering and sorting."""
     try:
@@ -3256,7 +3257,7 @@ async def update_person(host_id: int, body: CreatePersonRequest):
 
 
 @app.delete("/api/admin/people/{host_id}", dependencies=[Depends(verify_admin)])
-async def delete_person(host_id: int):
+def delete_person(host_id: int):
     """Delete a person and all their episode/show links."""
     try:
         conn = get_db_connection()
@@ -3287,7 +3288,7 @@ async def delete_person(host_id: int):
 
 
 @app.post("/api/admin/people/{keep_id}/merge/{drop_id}", dependencies=[Depends(verify_admin)])
-async def merge_people(keep_id: int, drop_id: int):
+def merge_people(keep_id: int, drop_id: int):
     """Fold one person's record into another and keep their name matchable.
 
     The dropped record's name is recorded as an alias in the same transaction.
@@ -3436,7 +3437,7 @@ async def merge_people(keep_id: int, drop_id: int):
 
 
 @app.get("/api/admin/people/{host_id}/aliases", dependencies=[Depends(verify_admin)])
-async def list_aliases(host_id: int):
+def list_aliases(host_id: int):
     conn = get_db_connection()
     cur  = conn.cursor()
     cur.execute("""
@@ -3450,7 +3451,7 @@ async def list_aliases(host_id: int):
 
 
 @app.post("/api/admin/people/{host_id}/aliases", dependencies=[Depends(verify_admin)])
-async def add_alias(host_id: int, body: AliasRequest):
+def add_alias(host_id: int, body: AliasRequest):
     """Record another spelling for someone, so scans pick up either form."""
     name = (body.alias_name or '').strip()
     if not name:
@@ -3503,7 +3504,7 @@ async def add_alias(host_id: int, body: AliasRequest):
 
 
 @app.delete("/api/admin/people/aliases/{alias_id}", dependencies=[Depends(verify_admin)])
-async def delete_alias(alias_id: int):
+def delete_alias(alias_id: int):
     conn = get_db_connection()
     cur  = conn.cursor()
     cur.execute("DELETE FROM host_aliases WHERE alias_id = %s RETURNING alias_name", (alias_id,))
@@ -3557,7 +3558,25 @@ def _role_pin(cur, host_id: int):
     return cur.fetchone()
 
 
+_ROLES_CACHE: dict = {}
+_ROLES_TTL = 900
+
+
 def _all_current_roles(cur) -> dict:
+    """_compute_all_current_roles, kept for _ROLES_TTL seconds: it reads
+    every affiliation (~3s) and the admin People list, the directories and
+    several Stats charts all need it. Any admin write clears it (see
+    _cache_headers_and_freshness), so an edit shows on the next load; changes
+    from the scraper show within the TTL."""
+    hit = _ROLES_CACHE.get('roles')
+    if hit and time.monotonic() - hit[0] < _ROLES_TTL:
+        return hit[1]
+    roles = _compute_all_current_roles(cur)
+    _ROLES_CACHE['roles'] = (time.monotonic(), roles)
+    return roles
+
+
+def _compute_all_current_roles(cur) -> dict:
     """{host_id: (title, company)} for everyone with a current role, using the
     same rule as a single person's panel. One pass over host_affiliations
     and host_role_pins rather than a query per person, so the People list
@@ -3623,7 +3642,7 @@ def _episode_link(row) -> dict:
 
 
 @app.get("/api/people/{host_id}/profile")
-async def get_person_profile(host_id: int):
+def get_person_profile(host_id: int):
     """Everything on a person's public page in one response: header, current
     role, every appearance, career on the record, who they appear with most,
     and their shows."""
@@ -3726,7 +3745,7 @@ async def get_person_profile(host_id: int):
 
 
 @app.get("/api/orgs/{org_id}/profile")
-async def get_org_profile(org_id: int):
+def get_org_profile(org_id: int):
     """An organisation's public page: who from it has been on (sub-
     organisations rolled up, guests only, like the Stats page), airtime by
     year, the shows that book them, and recent episodes."""
@@ -3832,7 +3851,7 @@ async def get_org_profile(org_id: int):
 
 
 @app.get("/api/shows/{podcast_id}/profile")
-async def get_show_profile(podcast_id: int):
+def get_show_profile(podcast_id: int):
     """A show's public page: header, hosts, publishing and guest-coverage
     numbers, who they book, recent episodes, monthly history, and the shows
     that share the most guests with it."""
@@ -4123,7 +4142,7 @@ def _chips(counts: dict, labels: dict) -> list:
 
 
 @app.get("/api/directory/people")
-async def people_directory(q: str = "", kind: str = "", sort: str = "appearances",
+def people_directory(q: str = "", kind: str = "", sort: str = "appearances",
                            offset: int = 0, limit: int = 50):
     """Everyone credited on an episode, for the /people directory: search by
     name or company, filter by the kind of role (or hosts), sort by
@@ -4136,7 +4155,7 @@ async def people_directory(q: str = "", kind: str = "", sort: str = "appearances
 
 
 @app.get("/api/directory/orgs")
-async def org_directory(q: str = "", type: str = "", sort: str = "people",
+def org_directory(q: str = "", type: str = "", sort: str = "people",
                         offset: int = 0, limit: int = 50):
     """Every organisation a guest has worked for, for the /orgs directory."""
     page = profiles.directory_page(
@@ -4146,13 +4165,13 @@ async def org_directory(q: str = "", type: str = "", sort: str = "people",
 
 
 @app.get("/api/directory/shows")
-async def show_directory():
+def show_directory():
     """Every show, for the /shows directory (few enough to send whole)."""
     return {'rows': sorted(_directory_index('shows', _build_show_directory), key=profiles.DIRECTORY_SORTS['guests'])}
 
 
 @app.get("/api/search")
-async def search_profiles(q: str = "", limit: int = 8):
+def search_profiles(q: str = "", limit: int = 8):
     """Name search across people, organisations and shows for the profile
     pages' search box. Each list is ranked by how much it has been on."""
     q = (q or '').strip()
@@ -4192,7 +4211,7 @@ async def search_profiles(q: str = "", limit: int = 8):
 
 
 @app.get("/api/people/{host_id}/current-role")
-async def get_current_role(host_id: int):
+def get_current_role(host_id: int):
     """The one role shown on the public person card, or null."""
     conn = get_db_connection()
     cur = conn.cursor()
@@ -4205,7 +4224,7 @@ async def get_current_role(host_id: int):
 
 
 @app.get("/api/admin/people/{host_id}/roles", dependencies=[Depends(verify_admin)])
-async def get_person_roles(host_id: int):
+def get_person_roles(host_id: int):
     """Current role, the pin behind it if any, and every role on record."""
     conn = get_db_connection()
     cur = conn.cursor()
@@ -4225,7 +4244,7 @@ async def get_person_roles(host_id: int):
 
 
 @app.put("/api/admin/people/{host_id}/role-pin", dependencies=[Depends(verify_admin)])
-async def set_role_pin(host_id: int, body: RolePinRequest):
+def set_role_pin(host_id: int, body: RolePinRequest):
     title = (body.title or '').strip() or None
     company = (body.company or '').strip() or None
     if not title and not company:
@@ -4249,7 +4268,7 @@ async def set_role_pin(host_id: int, body: RolePinRequest):
 
 
 @app.delete("/api/admin/people/{host_id}/role-pin", dependencies=[Depends(verify_admin)])
-async def clear_role_pin(host_id: int):
+def clear_role_pin(host_id: int):
     conn = get_db_connection()
     cur = conn.cursor()
     try:
@@ -4290,7 +4309,7 @@ def _org_family(cur, org_id: int) -> list:
 
 
 @app.get("/api/admin/companies", dependencies=[Depends(verify_admin)])
-async def list_companies(q: str = "", org_type: str = "", sort: str = "people_desc",
+def list_companies(q: str = "", org_type: str = "", sort: str = "people_desc",
                          view: str = "active", limit: int = 200):
     """Company list. view: 'active' (default), 'not_org' (marked not an
     organisation), 'untyped' (active, no type yet). people = distinct people
@@ -4360,7 +4379,7 @@ async def list_companies(q: str = "", org_type: str = "", sort: str = "people_de
 
 
 @app.get("/api/admin/companies/{org_id}", dependencies=[Depends(verify_admin)])
-async def get_company(org_id: int, include_sub: bool = False):
+def get_company(org_id: int, include_sub: bool = False):
     """One organisation: its aliases, parent and sub-organisations, and the
     people with a role there (optionally including sub-organisations'),
     each marked current when their displayed current role is here."""
@@ -4449,7 +4468,7 @@ async def get_company(org_id: int, include_sub: bool = False):
 
 
 @app.put("/api/admin/companies/{org_id}", dependencies=[Depends(verify_admin)])
-async def update_company(org_id: int, body: CompanyUpdateRequest):
+def update_company(org_id: int, body: CompanyUpdateRequest):
     """Edit name / type / domain / parent / not-an-organisation. Only the
     fields sent are changed; send parent_org_id 0 to clear the parent."""
     fields = body.model_dump(exclude_unset=True) if hasattr(body, 'model_dump') else body.dict(exclude_unset=True)
@@ -4552,7 +4571,7 @@ def _split_alias(cur, alias_id: int) -> int:
 
 
 @app.get("/api/admin/companies/{keep_id}/merge/{drop_id}/preview", dependencies=[Depends(verify_admin)])
-async def merge_companies_preview(keep_id: int, drop_id: int):
+def merge_companies_preview(keep_id: int, drop_id: int):
     """What a merge would carry across, with ambiguous spellings flagged, so
     the page can ask before "Aurora" becomes a spelling of Aurora Solar."""
     conn = get_db_connection()
@@ -4569,7 +4588,7 @@ async def merge_companies_preview(keep_id: int, drop_id: int):
 
 
 @app.post("/api/admin/companies/{org_id}/aliases/{alias_id}/split", dependencies=[Depends(verify_admin)])
-async def split_company_alias(org_id: int, alias_id: int):
+def split_company_alias(org_id: int, alias_id: int):
     """Split one spelling off into a company of its own — the fix when a
     merge carried across a word that means another organisation too."""
     conn = get_db_connection()
@@ -4590,7 +4609,7 @@ async def split_company_alias(org_id: int, alias_id: int):
 
 
 @app.post("/api/admin/companies/{keep_id}/merge/{drop_id}", dependencies=[Depends(verify_admin)])
-async def merge_companies(keep_id: int, drop_id: int, body: Optional[MergeCompaniesRequest] = None):
+def merge_companies(keep_id: int, drop_id: int, body: Optional[MergeCompaniesRequest] = None):
     """Fold one organisation into another. Every spelling of the dropped one
     becomes an alias of the survivor, so all its roles re-link at once —
     except any listed in split_alias_ids, which become companies of their own."""
@@ -4642,7 +4661,7 @@ async def merge_companies(keep_id: int, drop_id: int, body: Optional[MergeCompan
 
 
 @app.post("/api/admin/companies/not-same", dependencies=[Depends(verify_admin)])
-async def mark_companies_not_same(body: NotSameOrgRequest):
+def mark_companies_not_same(body: NotSameOrgRequest):
     """Record that two organisations are different, so they stop being suggested."""
     a, b = sorted((body.org_a, body.org_b))
     if a == b:
@@ -4673,7 +4692,7 @@ _LIVE_SUGGESTIONS = """
 
 
 @app.get("/api/admin/companies-suggestions", dependencies=[Depends(verify_admin)])
-async def company_merge_suggestions(limit: int = 40, offset: int = 0):
+def company_merge_suggestions(limit: int = 40, offset: int = 0):
     """The stored merge-suggestion queue (see org_suggestions.py), biggest
     first. Rows whose pair has since been decided are skipped: either side
     marked not an organisation, or the two now parent and child."""
@@ -4728,14 +4747,14 @@ def _refresh_suggestions_job():
 
 
 @app.post("/api/admin/companies-suggestions/refresh", dependencies=[Depends(verify_admin)])
-async def refresh_company_merge_suggestions(background_tasks: BackgroundTasks):
+def refresh_company_merge_suggestions(background_tasks: BackgroundTasks):
     """Rebuild the queue after the response is sent — it takes a minute or two."""
     background_tasks.add_task(_refresh_suggestions_job)
     return {"started": True}
 
 
 @app.post("/api/admin/people/{host_id}/scan", dependencies=[Depends(verify_admin)])
-async def scan_person_episodes(host_id: int):
+def scan_person_episodes(host_id: int):
     """Scan all episodes for an existing person's name and link any matches."""
     try:
         conn = get_db_connection()
@@ -4801,7 +4820,7 @@ def _match_snippet(full_name: str, title: str, description: str) -> str:
 
 
 @app.get("/api/admin/people/{host_id}/episodes", dependencies=[Depends(verify_admin)])
-async def get_person_episodes(host_id: int):
+def get_person_episodes(host_id: int):
     """Get all episodes a person appears in, grouped by podcast."""
     try:
         conn = get_db_connection()
@@ -4874,11 +4893,30 @@ class AddShowRequest(BaseModel):
 
 
 @app.get("/api/admin/shows", dependencies=[Depends(verify_admin)])
-async def get_shows():
+def get_shows(apple_podcast_id: Optional[str] = None):
+    """Every tracked show with its counts for the Shows admin list, or just
+    one (?apple_podcast_id=, so a linked show's panel needn't wait for the
+    whole list). Each count is its own grouped query: counting them through
+    one join of episodes x credits x hosts x suggestions took ~7s."""
     try:
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("""
+            WITH ep AS (
+                SELECT podcast_id, COUNT(*) AS n, MIN(published_date) AS first, MAX(published_date) AS last
+                FROM episodes GROUP BY podcast_id
+            ),
+            guests AS (
+                SELECT e.podcast_id, COUNT(DISTINCT eh.host_id) AS n
+                FROM episode_host eh JOIN episodes e ON e.episode_id = eh.episode_id
+                WHERE eh.is_guest GROUP BY e.podcast_id
+            ),
+            hosts AS (SELECT podcast_id, COUNT(DISTINCT host_id) AS n FROM host_podcast GROUP BY podcast_id),
+            pending AS (
+                SELECT e.podcast_id, COUNT(DISTINCT sug.suggestion_id) AS n
+                FROM suggestions sug JOIN episodes e ON e.episode_id = sug.episode_id
+                WHERE sug.status = 'pending' GROUP BY e.podcast_id
+            )
             SELECT
                 pt.apple_podcast_id,
                 pt.podcast_title,
@@ -4887,23 +4925,21 @@ async def get_shows():
                 pt.error_message,
                 pt.total_episodes AS itunes_total_episodes,
                 p.cover_art_url,
-                COUNT(DISTINCT e.episode_id) AS episode_count,
-                MIN(e.published_date) AS earliest_episode_date,
-                MAX(e.published_date) AS latest_episode_date,
-                COUNT(DISTINCT hp.host_id) AS host_count,
-                COUNT(DISTINCT CASE WHEN eh.is_guest = true THEN eh.host_id END) AS guest_count,
-                COUNT(DISTINCT CASE WHEN sug.status = 'pending' THEN sug.suggestion_id END) AS pending_suggestion_count
+                COALESCE(ep.n, 0) AS episode_count,
+                ep.first AS earliest_episode_date,
+                ep.last AS latest_episode_date,
+                COALESCE(hosts.n, 0) AS host_count,
+                COALESCE(guests.n, 0) AS guest_count,
+                COALESCE(pending.n, 0) AS pending_suggestion_count
             FROM podcast_tracking pt
             LEFT JOIN podcasts p ON p.apple_podcast_id = pt.apple_podcast_id
-            LEFT JOIN episodes e ON e.podcast_id = p.podcast_id
-            LEFT JOIN episode_host eh ON eh.episode_id = e.episode_id
-            LEFT JOIN host_podcast hp ON hp.podcast_id = p.podcast_id
-            LEFT JOIN suggestions sug ON sug.episode_id = e.episode_id
-            GROUP BY pt.tracking_id, pt.apple_podcast_id, pt.podcast_title,
-                     pt.status, pt.last_scraped_at, pt.error_message, pt.total_episodes,
-                     p.cover_art_url
+            LEFT JOIN ep ON ep.podcast_id = p.podcast_id
+            LEFT JOIN guests ON guests.podcast_id = p.podcast_id
+            LEFT JOIN hosts ON hosts.podcast_id = p.podcast_id
+            LEFT JOIN pending ON pending.podcast_id = p.podcast_id
+            WHERE %(a)s::text IS NULL OR pt.apple_podcast_id = %(a)s
             ORDER BY pt.podcast_title;
-        """)
+        """, {'a': apple_podcast_id})
         results = cur.fetchall()
         cur.close()
         conn.close()
@@ -4994,7 +5030,7 @@ class AddShowHostRequest(BaseModel):
 
 
 @app.get("/api/admin/shows/{apple_podcast_id}/hosts", dependencies=[Depends(verify_admin)])
-async def get_show_hosts(apple_podcast_id: str):
+def get_show_hosts(apple_podcast_id: str):
     """Show-level permanent hosts (host_podcast), distinct from
     per-episode credits (episode_host)."""
     try:
@@ -5018,7 +5054,7 @@ async def get_show_hosts(apple_podcast_id: str):
 
 
 @app.post("/api/admin/shows/{apple_podcast_id}/hosts", dependencies=[Depends(verify_admin)])
-async def add_show_host(apple_podcast_id: str, body: AddShowHostRequest):
+def add_show_host(apple_podcast_id: str, body: AddShowHostRequest):
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -5066,7 +5102,7 @@ async def add_show_host(apple_podcast_id: str, body: AddShowHostRequest):
 
 
 @app.delete("/api/admin/shows/{apple_podcast_id}/hosts/{host_id}", dependencies=[Depends(verify_admin)])
-async def remove_show_host(apple_podcast_id: str, host_id: int):
+def remove_show_host(apple_podcast_id: str, host_id: int):
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -5102,7 +5138,7 @@ class SetNoGuestConfirmedRequest(BaseModel):
 
 
 @app.get("/api/admin/episodes", dependencies=[Depends(verify_admin)])
-async def list_episodes(q: str = "", show: str = "", sort: str = "newest", limit: int = 50, offset: int = 0,
+def list_episodes(q: str = "", show: str = "", sort: str = "newest", limit: int = 50, offset: int = 0,
                          credit_filter: str = ""):
     """List/search episodes with filtering, sorting, and pagination —
     the episode table is far larger than shows or people, so unlike
@@ -5184,7 +5220,7 @@ async def list_episodes(q: str = "", show: str = "", sort: str = "newest", limit
 
 
 @app.get("/api/admin/episodes/{episode_id}", dependencies=[Depends(verify_admin)])
-async def get_episode(episode_id: int):
+def get_episode(episode_id: int):
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -5229,7 +5265,7 @@ async def get_episode(episode_id: int):
 
 
 @app.post("/api/admin/episodes/{episode_id}/no_guest", dependencies=[Depends(verify_admin)])
-async def set_no_guest_confirmed(episode_id: int, body: SetNoGuestConfirmedRequest):
+def set_no_guest_confirmed(episode_id: int, body: SetNoGuestConfirmedRequest):
     """Record a human's statement that this episode genuinely has no guest —
     see migrate_add_no_guest_confirmed.sql for why this needs to be distinct
     from "the scanner hasn't found one yet"."""
@@ -5256,7 +5292,7 @@ async def set_no_guest_confirmed(episode_id: int, body: SetNoGuestConfirmedReque
 
 
 @app.post("/api/admin/episodes/{episode_id}/credits", dependencies=[Depends(verify_admin)])
-async def add_episode_credit(episode_id: int, body: AddCreditRequest):
+def add_episode_credit(episode_id: int, body: AddCreditRequest):
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -5282,7 +5318,7 @@ async def add_episode_credit(episode_id: int, body: AddCreditRequest):
 
 
 @app.delete("/api/admin/episodes/{episode_id}/credits/{host_id}", dependencies=[Depends(verify_admin)])
-async def remove_episode_credit(episode_id: int, host_id: int):
+def remove_episode_credit(episode_id: int, host_id: int):
     try:
         conn = get_db_connection()
         cur = conn.cursor()

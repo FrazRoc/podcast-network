@@ -331,7 +331,7 @@ class TestPeopleListRoles:
         monkeypatch.setattr(main, 'get_db_connection',
                             lambda: __import__('psycopg2').connect(
                                 role_db.dsn, cursor_factory=RealDictCursor))
-        return asyncio.run(main.list_people(**kw))['items']
+        return main.list_people(**kw)['items']
 
     def test_filters_and_sort(self, role_db, monkeypatch):
         cur = role_db.cursor()
@@ -364,16 +364,16 @@ class TestPeopleListRoles:
         self._people(cur, cur.fetchone()[0])
         role_db.commit()
         self._list(role_db, monkeypatch)   # points main at the test database
-        r = asyncio.run(main.list_people(filter='role_title_only'))
+        r = main.list_people(filter='role_title_only')
         assert (r['total'], r['all_total']) == (1, 4)
-        r = asyncio.run(main.list_people())
+        r = main.list_people()
         assert (r['total'], r['all_total']) == (4, 4)
-        assert [i['first_name'] for i in asyncio.run(main.list_people(filter='role_none'))['items']] == ['Dan']
+        assert [i['first_name'] for i in main.list_people(filter='role_none')['items']] == ['Dan']
         # Pages never overlap or skip, even though all four tie on appearances.
-        pages = [asyncio.run(main.list_people(limit=2, offset=o))['items'] for o in (0, 2, 4)]
+        pages = [main.list_people(limit=2, offset=o)['items'] for o in (0, 2, 4)]
         assert sorted(i['first_name'] for p in pages for i in p) == ['Ann', 'Bob', 'Cat', 'Dan']
         assert pages[2] == []
-        assert asyncio.run(main.list_people(limit=2))['total'] == 4   # total ignores the page size
+        assert main.list_people(limit=2)['total'] == 4   # total ignores the page size
 
     def test_list_shows_the_tidied_title(self, role_db, monkeypatch):
         cur = role_db.cursor()
