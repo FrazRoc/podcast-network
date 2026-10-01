@@ -3660,6 +3660,11 @@ async def get_org_profile(org_id: int):
                 'org_name': r['org_name'], 'former': r['is_former'], 'appearances': 0,
                 'last_date': r['published_date']})
             pp['appearances'] += 1
+            # Rows come newest first; a newer mention can name only the
+            # company ("Alfred Johnson of Crux"), so keep looking for the most
+            # recent one that states a title.
+            if not pp['title'] and r['title']:
+                pp['title'] = display_title(r['title'], r['title_kind'])
             if r['published_date']:
                 by_year[r['published_date'].year] = by_year.get(r['published_date'].year, 0) + 1
             sh = shows.setdefault(r['podcast_id'], {'podcast_id': r['podcast_id'], 'title': r['podcast_title'],
