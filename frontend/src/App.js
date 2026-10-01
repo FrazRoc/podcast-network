@@ -10,6 +10,7 @@ import AdminDuplicates from './components/AdminDuplicates';
 import AdminDiagnostics from './components/AdminDiagnostics';
 import AdminLoginGate from './components/AdminLoginGate';
 import Stats from './components/Stats';
+import SiteHeader from './components/SiteHeader';
 import PersonPage from './components/PersonPage';
 import OrgPage from './components/OrgPage';
 import ShowPage from './components/ShowPage';
@@ -56,8 +57,11 @@ function App() {
   if (path === '/admin' || path.startsWith('/admin/'))
     return <AdminLoginGate><div className="w-full min-h-screen"><AdminSuggestions /></div></AdminLoginGate>;
   return (
-    <div className="w-full h-screen overflow-hidden">
-      <PodcastHostNetwork />
+    <div className="w-full h-screen overflow-hidden flex flex-col">
+      <SiteHeader />
+      <div className="flex-1 min-h-0">
+        <PodcastHostNetwork />
+      </div>
     </div>
   );
 }

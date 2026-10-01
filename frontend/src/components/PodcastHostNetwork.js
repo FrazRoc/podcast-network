@@ -1015,14 +1015,19 @@ const PodcastHostNetwork = () => {
     viewMode === 'shows' ? (showGraph?.nodes || []) : graphData.nodes
   );
 
-  // Window resize
+  // The canvas fills its box, which sits under the site header and beside
+  // the sidebar; measured rather than taken from the window so both count.
+  const graphBoxRef = useRef(null);
   useEffect(() => {
-    const onResize = () => setDimensions({
-      width: getGraphWidth(),
-      height: window.innerHeight,
-    });
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
+    const box = graphBoxRef.current;
+    if (!box || typeof ResizeObserver === 'undefined') return undefined;
+    const measure = () => setDimensions(d => (
+      d.width === box.clientWidth && d.height === box.clientHeight
+        ? d : { width: box.clientWidth, height: box.clientHeight }));
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(box);
+    return () => observer.disconnect();
   }, []);
 
   // Data fetch
@@ -1408,15 +1413,15 @@ const PodcastHostNetwork = () => {
   }, []);
 
   return (
-    <div className="flex h-screen w-full relative">
-      {/* Mobile menu toggle */}
-      <button
+    <div className="flex h-full w-full relative">
+      {/* Mobile menu toggle (hidden while the drawer it opens is showing) */}
+      {!sidebarOpen && <button
         onClick={() => setSidebarOpen(true)}
         className="md:hidden absolute top-4 left-4 z-30 bg-white rounded-lg shadow-lg p-2 text-gray-700"
         aria-label="Open menu"
       >
         ☰
-      </button>
+      </button>}
 
       {/* Mobile backdrop */}
       {sidebarOpen && (
@@ -1432,32 +1437,16 @@ const PodcastHostNetwork = () => {
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        <div className="mb-3 flex items-start justify-between">
-          <div>
-            <h1 className="text-xl font-bold text-gray-800">Podcast Network</h1>
-            <p className="text-gray-500 text-xs">Explore host connections</p>
-          </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <a
-              href="/stats"
-              className="text-xs text-gray-400 hover:text-gray-600 border border-gray-200 rounded px-2 py-1 mt-1"
-            >
-              📊 Stats
-            </a>
-            <a
-              href="/admin"
-              className="text-xs text-gray-400 hover:text-gray-600 border border-gray-200 rounded px-2 py-1 mt-1"
-            >
-              ⚙ Admin
-            </a>
-            <button
-              onClick={() => setSidebarOpen(false)}
-              className="md:hidden text-gray-400 hover:text-gray-600 border border-gray-200 rounded px-2 py-1 mt-1"
-              aria-label="Close menu"
-            >
-              ✕
-            </button>
-          </div>
+        {/* The site header carries the title and navigation; on a phone the
+            sidebar is a drawer and needs its own close button. */}
+        <div className="md:hidden mb-3 flex justify-end">
+          <button
+            onClick={() => setSidebarOpen(false)}
+            className="text-gray-400 hover:text-gray-600 border border-gray-200 rounded px-2 py-1"
+            aria-label="Close menu"
+          >
+            ✕
+          </button>
         </div>
 
         {selectedNode && selectedNode.isShow ? (
@@ -1513,7 +1502,7 @@ const PodcastHostNetwork = () => {
       </div>
 
       {/* Graph */}
-      <div className="flex-1 relative">
+      <div ref={graphBoxRef} className="flex-1 min-w-0 relative overflow-hidden">
         {loading && (
           <div className="absolute inset-0 flex items-center justify-center bg-white">
             <div className="text-lg font-medium text-gray-500">Loading network data…</div>

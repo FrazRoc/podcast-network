@@ -1,6 +1,5 @@
 import { useState } from 'react';
-import Credits from './Credits';
-import ProfileSearch from './ProfileSearch';
+import { SiteShell } from './SiteHeader';
 import { avatarUrl, proxied } from '../profileUtils';
 
 // A show's cover art (episodes have none of their own, so their rows use it
@@ -70,26 +69,18 @@ export function ShowMore({ items, initial = 10, render, more = 'Show all' }) {
 export default function ProfileLayout({ state, kindLabel, children }) {
   const { data, error } = state;
   return (
-    <div className="h-screen overflow-y-auto bg-gray-100 font-sans text-left">
-      <header className="bg-white border-b border-gray-200 px-4 py-3 sm:px-6 flex flex-wrap items-center gap-x-4 gap-y-2">
-        <a href="/" className="text-gray-400 hover:text-gray-600 text-sm">← Network</a>
-        <a href="/stats" className="text-gray-400 hover:text-gray-600 text-sm">Stats</a>
-        <ProfileSearch className="w-full sm:w-80 sm:ml-auto" />
-      </header>
-      <main className="max-w-4xl mx-auto p-4 sm:p-6 space-y-5">
-        {error === 'not_found' && (
-          <div className="bg-white rounded-2xl border border-gray-200 p-8 text-center">
-            <p className="text-lg font-semibold text-gray-900">{kindLabel} not found</p>
-            <p className="text-sm text-gray-500 mt-1">It may have been merged into another record. Try searching above.</p>
-          </div>
-        )}
-        {error === 'error' && (
-          <p className="text-center text-sm text-gray-500 py-12">Couldn't load this page. Please try again in a moment.</p>
-        )}
-        {!data && !error && <p className="text-center text-sm text-gray-500 py-12">Loading…</p>}
-        {data && children(data)}
-        <Credits className="text-center pt-2" />
-      </main>
-    </div>
+    <SiteShell>
+      {error === 'not_found' && (
+        <div className="bg-white rounded-2xl border border-gray-200 p-8 text-center">
+          <p className="text-lg font-semibold text-gray-900">{kindLabel} not found</p>
+          <p className="text-sm text-gray-500 mt-1">It may have been merged into another record. Try searching above.</p>
+        </div>
+      )}
+      {error === 'error' && (
+        <p className="text-center text-sm text-gray-500 py-12">Couldn't load this page. Please try again in a moment.</p>
+      )}
+      {!data && !error && <p className="text-center text-sm text-gray-500 py-12">Loading…</p>}
+      {data && children(data)}
+    </SiteShell>
   );
 }
