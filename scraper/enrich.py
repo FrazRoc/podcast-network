@@ -1133,6 +1133,103 @@ def apply_show_orgs(conn, plan: list) -> Counter:
     return stats
 
 
+# ------------------------------------------------------------------
+# People: Bluesky accounts (public search, no account needed)
+# ------------------------------------------------------------------
+
+BSKY_SEARCH = 'https://public.api.bsky.app/xrpc/app.bsky.actor.searchActors?'
+
+
+def _domain(url: str) -> str:
+    host = urllib.parse.urlparse(url if '://' in (url or '') else f'https://{url}').hostname or ''
+    return host.lower().removeprefix('www.')
+
+
+def bsky_confirms(person: dict, actor: dict) -> str | None:
+    """Why this Bluesky account is this person, or None. The display name
+    must be theirs, and the account must say where they work: its bio names
+    one of their organisations, or its handle is on one of their
+    organisations' web domains (jane.fervoenergy.com)."""
+    if not x_name_matches(person['first_name'], person['last_name'], actor.get('displayName'), ''):
+        return None
+    handle = (actor.get('handle') or '').lower()
+    for site in person.get('websites') or []:
+        d = _domain(site)
+        if d and (handle == d or handle.endswith('.' + d)):
+            return f'handle on {d}'
+    bio = actor.get('description') or ''
+    for org in person.get('orgs') or []:
+        if org and bio_names_org(bio, org):
+            return f'bio names {org}'
+    return None
+
+
+def plan_people_bsky(cur, fetch: Fetcher, limit: int = None) -> tuple:
+    cur.execute("""
+        SELECT h.host_id, h.first_name, h.last_name, h.profile_image_url, h.twitter_handle, h.linkedin_url,
+               h.field_sources,
+               array_agg(DISTINCT o.name) FILTER (WHERE o.name IS NOT NULL) AS org_names,
+               array_agg(DISTINCT ha.company) FILTER (WHERE ha.company IS NOT NULL) AS companies,
+               array_agg(DISTINCT o.website_url) FILTER (WHERE o.website_url IS NOT NULL) AS websites,
+               (SELECT COUNT(*) FROM episode_host eh WHERE eh.host_id = h.host_id) AS appearances
+        FROM hosts h
+        JOIN host_affiliations ha ON ha.host_id = h.host_id
+        LEFT JOIN organization_aliases a ON a.normalized_name = ha.company_key
+        LEFT JOIN organizations o ON o.org_id = a.org_id AND NOT o.not_an_org
+        WHERE h.bluesky_handle IS NULL
+        GROUP BY h.host_id
+        ORDER BY appearances DESC, h.host_id
+    """)
+    people = cur.fetchall()
+    if limit:
+        people = people[:limit]
+    plan, review = [], []
+    for i, p in enumerate(people):
+        if i and i % 250 == 0:
+            log.info('people-bsky: %d/%d searched (%d requests)', i, len(people), fetch.requests)
+        name = f"{p['first_name']} {p['last_name']}"
+        p['orgs'] = [n for n in (p['org_names'] or []) + (p['companies'] or []) if n]
+        res = fetch.json(BSKY_SEARCH + urllib.parse.urlencode({'q': name, 'limit': 10}))
+        actors = (res or {}).get('actors') or []
+        confirmed = [(a, why) for a in actors for why in [bsky_confirms(p, a)] if why]
+        if len({a['handle'] for a, _ in confirmed}) > 1:
+            # Someone's old and new accounts ("Go visit @jessedjenkins.com"
+            # beside "Jesse D. Jenkins"): keep the one named as them in words.
+            words = lambda a: set(re.sub(r'[^a-z0-9 ]', ' ', ascii_fold(a.get('displayName'))).split())  # noqa: E731
+            first, last = ascii_fold(p['first_name']).split()[:1], ascii_fold(p['last_name']).split()[-1:]
+            named = [(a, w) for a, w in confirmed if set(first) <= words(a) and set(last) <= words(a)]
+            if len(named) == 1:
+                confirmed = named
+        if len({a['handle'] for a, _ in confirmed}) > 1:
+            review.append({'host_id': p['host_id'], 'name': name, 'why': 'several confirmed accounts',
+                           'candidates': ' | '.join(f"{a['handle']} ({w})" for a, w in confirmed)})
+            continue
+        if not confirmed:
+            same = [a for a in actors if squash(a.get('displayName')) == squash(name)]
+            if len(same) == 1 and p['appearances'] >= 3:
+                a = same[0]
+                review.append({'host_id': p['host_id'], 'name': name, 'why': 'name matches; bio names none of their organisations',
+                               'candidates': f"{a['handle']}: {(a.get('description') or '')[:150]}",
+                               'our_orgs': '; '.join(p['orgs'][:4])})
+            continue
+        a, why = confirmed[0]
+        if p['field_sources'].get('bluesky_handle') in _PROTECTED:
+            continue
+        change = {'host_id': p['host_id'], 'name': name, 'bluesky_handle': a['handle'],
+                  'bsky_name': a.get('displayName'), 'confirmed_by': why}
+        if a.get('avatar') and not p['profile_image_url']:
+            change['profile_image_url'] = a['avatar']
+        bio = a.get('description') or ''
+        tw = _LINK_RE['twitter_handle'].search(bio)
+        if tw and not p['twitter_handle'] and tw.group(1).lower() not in _X_RESERVED:
+            change['twitter_handle'] = tw.group(1)
+        li = _LINK_RE['linkedin_url'].search(bio)
+        if li and not p['linkedin_url']:
+            change['linkedin_url'] = 'https://www.linkedin.com/in/' + urllib.parse.unquote(li.group(1)).strip('/')
+        plan.append(change)
+    return plan, review
+
+
 def apply_people(conn, plan: list, source: str) -> Counter:
     cur = conn.cursor()
     cur.execute("SET lock_timeout = '10s'")
@@ -1261,7 +1358,7 @@ def write(out_dir: str, name: str, plan: list, review: list):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('command', choices=['orgs', 'people-links', 'people-wiki', 'people-x', 'people-x-wiki', 'show-orgs'])
+    ap.add_argument('command', choices=['orgs', 'people-links', 'people-wiki', 'people-x', 'people-x-wiki', 'people-bsky', 'show-orgs'])
     ap.add_argument('--out', required=True, help='directory for the plan and review files')
     ap.add_argument('--cache', default=os.path.join(os.path.dirname(os.path.abspath(__file__)), '.enrich_cache'))
     ap.add_argument('--limit', type=int, help='only the first N (most-booked) — for trying it out')
@@ -1283,13 +1380,15 @@ def main():
         plan, review = plan_people_x_wiki(cur, fetch, args.cache, args.limit)
     elif args.command == 'show-orgs':
         plan, review = plan_show_orgs(cur)
+    elif args.command == 'people-bsky':
+        plan, review = plan_people_bsky(cur, fetch, args.limit)
     else:
         plan, review = plan_people_wiki(cur, fetch, args.limit)
     write(args.out, args.command, plan, review)
     log.info('%s: %d planned, %d to review, %d web requests', args.command, len(plan), len(review), fetch.requests)
     if args.apply:
         stats = apply_orgs(conn, plan) if args.command == 'orgs' else apply_show_orgs(conn, plan) if args.command == 'show-orgs' else \
-            apply_people(conn, plan, {'people-links': 'show_notes', 'people-x': 'show_notes_x', 'people-x-wiki': 'wikidata_x'}.get(args.command, 'wikidata'))
+            apply_people(conn, plan, {'people-links': 'show_notes', 'people-x': 'show_notes_x', 'people-x-wiki': 'wikidata_x', 'people-bsky': 'bluesky'}.get(args.command, 'wikidata'))
         log.info('applied: %s', dict(stats))
 
 

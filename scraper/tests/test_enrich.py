@@ -244,3 +244,31 @@ class TestShowOrgs:
         assert not looks_like_company({'titles': []})
         # A website or Wikidata entry isn't evidence: shows have those too.
         assert not looks_like_company({'website_url': 'https://climateone.org', 'titles': ['co-host']})
+
+
+# --- people-bsky ---
+
+from enrich import bsky_confirms  # noqa: E402
+
+
+class TestBskyConfirms:
+    _JESSE = {'first_name': 'Jesse', 'last_name': 'Jenkins', 'orgs': ['Princeton University', 'ZERO Lab'], 'websites': []}
+
+    def test_bio_names_an_organisation(self):
+        a = {'handle': 'jessedjenkins.com', 'displayName': 'Jesse D. Jenkins',
+             'description': 'Macro-energy systems. Associate professor at Princeton University.'}
+        assert bsky_confirms(self._JESSE, a) == 'bio names Princeton University'
+
+    def test_namesake_rejected(self):
+        old = {'handle': 'jessejenkins.bsky.social', 'displayName': 'Go visit @jessedjenkins.com',
+               'description': 'Assistant professor at Princeton University.'}
+        namesake = {'handle': 'jj.bsky.social', 'displayName': 'Jesse Jenkins', 'description': 'Drummer. Cats.'}
+        # The old account is his too (it points at the new one); the plan
+        # prefers the account named "Jesse D. Jenkins" in words.
+        assert bsky_confirms(self._JESSE, old) is not None
+        assert bsky_confirms(self._JESSE, namesake) is None
+
+    def test_handle_on_their_organisations_domain(self):
+        p = {'first_name': 'Jane', 'last_name': 'Doe', 'orgs': ['Fervo Energy'], 'websites': ['https://www.fervoenergy.com']}
+        assert bsky_confirms(p, {'handle': 'jane.fervoenergy.com', 'displayName': 'Jane Doe', 'description': ''}) \
+            == 'handle on fervoenergy.com'
