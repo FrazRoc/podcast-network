@@ -2,7 +2,7 @@
 image_enricher.py
 
 Finds profile images for hosts missing a profile_image_url.
-Tries sources in order: Wikipedia → Google Knowledge Graph → Twitter/unavatar
+Tries sources in order: Wikipedia → Google Knowledge Graph → X (Twitter)
 
 Results go into the image_suggestions table for human review via /admin/images.
 
@@ -11,6 +11,7 @@ Usage:
     python3 image_enricher.py run --limit 50   # limit number of people to search
     python3 image_enricher.py run --source wikipedia  # only try one source
     python3 image_enricher.py status           # show coverage stats
+    python3 image_enricher.py refresh-x        # re-resolve X pictures that stopped loading
 
 Requirements:
     pip install requests
@@ -26,7 +27,12 @@ import requests
 import time
 import logging
 import argparse
+import os
+import sys
 from typing import Optional
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'backend'))
+import x_avatars  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
@@ -167,23 +173,17 @@ def search_twitter(name: str) -> Optional[dict]:
     ]
 
     for handle in candidates:
-        try:
-            # unavatar.io fetches the Twitter avatar without requiring API access
-            url = f'https://unavatar.io/twitter/{handle}?json'
-            resp = requests.get(url, headers=HEADERS, timeout=8)
-            if resp.status_code == 200:
-                data = resp.json()
-                img_url = data.get('url', '')
-                # Skip the default Twitter egg/placeholder
-                if img_url and 'default_profile' not in img_url and 'abs.twimg.com/sticky' not in img_url:
-                    return {
-                        'image_url': img_url,
-                        'source': 'twitter',
-                        'source_url': f'https://x.com/{handle}',
-                    }
-            time.sleep(0.3)
-        except Exception:
-            continue
+        # The account's own picture URL (x_avatars.py); None for no such
+        # account or the default "egg" picture. The lookup rate-limits quick
+        # repeats, hence the pause.
+        status, img_url = x_avatars.lookup(handle)
+        if img_url:
+            return {
+                'image_url': img_url,
+                'source': 'twitter',
+                'source_url': f'https://x.com/{handle}',
+            }
+        time.sleep(3)
 
     return None
 
@@ -336,6 +336,62 @@ def status():
     print(f"  Rejected:          {row[4]}")
 
 
+def _loads(url: str) -> Optional[bool]:
+    """Whether an image URL still serves an image; None if we couldn't tell."""
+    try:
+        r = requests.head(url, headers=HEADERS, timeout=10, allow_redirects=True)
+    except Exception:
+        return None
+    if r.status_code in (404, 410, 403):
+        return False
+    return r.status_code == 200 and r.headers.get('content-type', '').startswith('image/')
+
+
+def refresh_x(db: str, pause: float = 4.0, dry_run: bool = False):
+    """Re-resolve X profile pictures: stored pbs.twimg.com URLs that no longer
+    load (the person changed their picture) and any left on unavatar.io.
+    A picture that still loads is left alone, and nothing is ever cleared:
+    api.fxtwitter.com sometimes answers "User not found" for accounts that
+    exist (seemingly when it's throttling), so only a successful lookup
+    changes a row. Stops early if the service starts refusing outright."""
+    conn = psycopg2.connect(db)
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT host_id, first_name || ' ' || last_name, twitter_handle, profile_image_url
+        FROM hosts
+        WHERE twitter_handle IS NOT NULL
+          AND (profile_image_url LIKE 'https://pbs.twimg.com/%%' OR profile_image_url LIKE 'https://unavatar.io/%%')
+        ORDER BY host_id
+    """)
+    rows = cur.fetchall()
+    counts = {'still_fine': 0, 'updated': 0, 'unresolved': 0, 'unsure': 0}
+    for host_id, name, handle, url in rows:
+        if x_avatars.is_x_avatar(url):
+            ok = _loads(url)
+            if ok is not False:
+                counts['still_fine' if ok else 'unsure'] += 1
+                continue
+        status, new = x_avatars.lookup(handle)
+        time.sleep(pause)
+        if status in ('rate_limited', 'error'):
+            logger.warning(f"Lookup refused/failed at @{handle} ({status}); stopping, will retry next run")
+            break
+        if new and new != url:
+            logger.info(f"✅ {name} @{handle}: {url} → {new}")
+            if not dry_run:
+                cur.execute("UPDATE hosts SET profile_image_url = %s WHERE host_id = %s", (new, host_id))
+            counts['updated'] += 1
+        elif not new:
+            logger.info(f"⚪ {name} @{handle}: not resolved this run (kept as is)")
+            counts['unresolved'] += 1
+    if not dry_run:
+        conn.commit()
+    cur.close()
+    conn.close()
+    print(f"refresh-x{' (dry run)' if dry_run else ''}: {counts}")
+    return counts
+
+
 # ------------------------------------------------------------------
 # ENTRY POINT
 # ------------------------------------------------------------------
@@ -355,7 +411,10 @@ examples:
   python3 image_enricher.py run --source twitter
         """
     )
-    parser.add_argument('command', choices=['run', 'status'])
+    parser.add_argument('command', choices=['run', 'status', 'refresh-x'])
+    parser.add_argument('--db', default=os.getenv('DATABASE_URL', DB),
+                        help='Database URL (refresh-x; default $DATABASE_URL)')
+    parser.add_argument('--dry-run', action='store_true', help='refresh-x: report only')
     parser.add_argument('--limit', type=int, default=None,
                         help='Max number of people to search')
     parser.add_argument('--source', choices=['wikipedia', 'twitter'], default=None,
@@ -366,3 +425,5 @@ examples:
         status()
     elif args.command == 'run':
         run(limit=args.limit, source_filter=args.source)
+    elif args.command == 'refresh-x':
+        refresh_x(args.db, dry_run=args.dry_run)

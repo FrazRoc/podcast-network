@@ -37,6 +37,7 @@ import org_stats
 from org_suggestions import refresh_suggestions
 from similar_people import find_possible_matches, index_people
 import profiles
+import x_avatars
 
 load_dotenv()
 
@@ -61,12 +62,12 @@ def verify_admin(x_admin_password: str = Header(default=None)):
         raise HTTPException(status_code=401, detail="Invalid or missing admin password")
 
 # Hosts /api/proxy/image is allowed to fetch from — every domain profile
-# images actually come from (Apple's CDN, Twitter avatars via unavatar.io,
-# Bluesky avatars). Anything else is rejected to prevent the endpoint being
+# images actually come from (Apple's CDN, X avatars on pbs.twimg.com, older
+# X avatars via unavatar.io, Bluesky avatars). Anything else is rejected to prevent the endpoint being
 # used as an open proxy / SSRF vector.
 # wikimedia.org: people's photos from Wikidata (commons.wikimedia.org's
 # Special:FilePath redirects to upload.wikimedia.org) — scraper/enrich.py.
-ALLOWED_IMAGE_HOST_SUFFIXES = ('mzstatic.com', 'unavatar.io', 'bsky.app', 'wikimedia.org')
+ALLOWED_IMAGE_HOST_SUFFIXES = ('mzstatic.com', 'twimg.com', 'unavatar.io', 'bsky.app', 'wikimedia.org')
 
 # Whether /api/host-connections returns {nodes, links} (about a quarter of the
 # size) or the legacy row-per-edge array. On since the deployed frontend was
@@ -1958,6 +1959,11 @@ class TwitterHandleRequest(BaseModel):
     twitter_url: str
 
 
+def twitter_avatar_url(handle: str) -> Optional[str]:
+    """The X account's own picture URL (x_avatars.py), or None."""
+    return x_avatars.x_avatar_url(handle)
+
+
 @app.post("/api/admin/images/{host_id}/set_twitter", dependencies=[Depends(verify_admin)])
 def set_twitter_handle(host_id: int, body: TwitterHandleRequest):
     """
@@ -1972,7 +1978,7 @@ def set_twitter_handle(host_id: int, body: TwitterHandleRequest):
             raise HTTPException(status_code=400, detail="Could not extract Twitter handle from URL")
 
         handle = match.group(1)
-        image_url = f'https://unavatar.io/twitter/{handle}'
+        image_url = twitter_avatar_url(handle)   # None: the page says it found no picture
 
         # Store the handle — image saved on approve
         conn = get_db_connection()
@@ -2010,9 +2016,14 @@ def approve_image(host_id: int):
         )
         row = cur.fetchone()
         if not row or not row['twitter_handle']:
+            conn.close()
             raise HTTPException(status_code=400, detail="No Twitter handle set for this host")
 
-        image_url = f"https://unavatar.io/twitter/{row['twitter_handle']}"
+        image_url = twitter_avatar_url(row['twitter_handle'])
+        if not image_url:
+            conn.close()
+            raise HTTPException(status_code=502, detail=f"Couldn't get @{row['twitter_handle']}'s X profile picture "
+                                                        "(no such account, no picture set, or the lookup failed)")
         cur.execute(
             "UPDATE hosts SET profile_image_url = %s WHERE host_id = %s",
             (image_url, host_id)
@@ -2255,7 +2266,7 @@ async def create_person(body: CreatePersonRequest):
                         image_url = resp.json().get('avatar')
 
         if not image_url and twitter_handle:
-            image_url = f'https://unavatar.io/twitter/{twitter_handle}'
+            image_url = await asyncio.to_thread(twitter_avatar_url, twitter_handle)
 
         # Create host record
         linkedin_url = body.linkedin_url.strip() if body.linkedin_url else None
@@ -3195,7 +3206,7 @@ async def update_person(host_id: int, body: CreatePersonRequest):
 
         # Fall back to Twitter for image if no Bluesky image
         if not image_url and twitter_handle:
-            image_url = f'https://unavatar.io/twitter/{twitter_handle}'
+            image_url = await asyncio.to_thread(twitter_avatar_url, twitter_handle)
 
         linkedin_url = body.linkedin_url.strip() if body.linkedin_url else None
 

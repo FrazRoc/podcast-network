@@ -1,0 +1,36 @@
+name: Refresh X profile pictures
+
+# Stored X pictures (pbs.twimg.com URLs, see backend/x_avatars.py) stop
+# loading when someone changes their picture. This re-resolves those, and
+# any left on unavatar.io, once a week. Pictures that still load are left
+# alone, so a normal run makes a HEAD request per picture and few lookups.
+
+on:
+  schedule:
+    # Mondays, offset from the top of the hour (GitHub's most congested slot).
+    - cron: '23 9 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install scraper dependencies
+        working-directory: scraper
+        run: pip install -r requirements.txt
+
+      - name: Refresh X profile pictures
+        working-directory: scraper
+        run: python3 image_enricher.py refresh-x --db "$DATABASE_URL"
