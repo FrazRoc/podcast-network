@@ -1164,6 +1164,10 @@ def bsky_confirms(person: dict, actor: dict) -> str | None:
     return None
 
 
+# Accounts a person reviewed and said aren't them ({host_id: [handles]}).
+_REJECTED_BSKY = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'enrich_rejected_bluesky.json')
+
+
 def plan_people_bsky(cur, fetch: Fetcher, limit: int = None) -> tuple:
     cur.execute("""
         SELECT h.host_id, h.first_name, h.last_name, h.profile_image_url, h.twitter_handle, h.linkedin_url,
@@ -1183,14 +1187,16 @@ def plan_people_bsky(cur, fetch: Fetcher, limit: int = None) -> tuple:
     people = cur.fetchall()
     if limit:
         people = people[:limit]
+    rejected = json.load(open(_REJECTED_BSKY)) if os.path.exists(_REJECTED_BSKY) else {}
     plan, review = [], []
     for i, p in enumerate(people):
         if i and i % 250 == 0:
             log.info('people-bsky: %d/%d searched (%d requests)', i, len(people), fetch.requests)
+        not_them = {h.lower() for h in rejected.get(str(p['host_id']), [])}
         name = f"{p['first_name']} {p['last_name']}"
         p['orgs'] = [n for n in (p['org_names'] or []) + (p['companies'] or []) if n]
         res = fetch.json(BSKY_SEARCH + urllib.parse.urlencode({'q': name, 'limit': 10}))
-        actors = (res or {}).get('actors') or []
+        actors = [a for a in (res or {}).get('actors') or [] if (a.get('handle') or '').lower() not in not_them]
         confirmed = [(a, why) for a in actors for why in [bsky_confirms(p, a)] if why]
         if len({a['handle'] for a, _ in confirmed}) > 1:
             # Someone's old and new accounts ("Go visit @jessedjenkins.com"
