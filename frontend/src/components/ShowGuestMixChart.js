@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { API_BASE_URL } from '../config';
 import { ORG_TYPE_COLORS, ORG_TYPE_LABELS } from '../chartUtils';
+import { showHref, slugify } from '../profileUtils';
 import StackedShareBars from './StackedShareBars';
 
 // Who each show books: its guests split by the kind of organisation they
@@ -19,7 +20,8 @@ export default function ShowGuestMixChart() {
   if (error) return <p className="text-sm text-red-500">Couldn't load this chart: {error}</p>;
   if (!data) return <p className="text-sm text-gray-400">Loading…</p>;
 
-  const rows = data.items.map(s => ({ id: s.podcast_id, label: s.title, counts: s.counts, total: s.typed }));
+  const rows = data.items.map(s => ({ id: s.podcast_id, label: s.title, counts: s.counts, total: s.typed,
+                                      href: showHref(s.podcast_id, slugify(s.title)) }));
   return (
     <>
       <StackedShareBars rows={rows} keys={data.types} colors={ORG_TYPE_COLORS} labels={ORG_TYPE_LABELS} />

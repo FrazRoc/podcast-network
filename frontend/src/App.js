@@ -10,12 +10,22 @@ import AdminDuplicates from './components/AdminDuplicates';
 import AdminDiagnostics from './components/AdminDiagnostics';
 import AdminLoginGate from './components/AdminLoginGate';
 import Stats from './components/Stats';
+import PersonPage from './components/PersonPage';
+import OrgPage from './components/OrgPage';
+import ShowPage from './components/ShowPage';
 
 function App() {
   const path = window.location.pathname;
 
   if (path === '/stats' || path.startsWith('/stats/'))
     return <Stats />;
+  // Public profile pages: /people/<id>-<slug>, /orgs/<id>-<slug>, /shows/<id>-<slug>.
+  if (path.startsWith('/people/'))
+    return <PersonPage />;
+  if (path.startsWith('/orgs/'))
+    return <OrgPage />;
+  if (path.startsWith('/shows/'))
+    return <ShowPage />;
   if (path === '/admin/suggestions/list')
     return <AdminLoginGate><div className="w-full min-h-screen"><AdminSuggestionsList /></div></AdminLoginGate>;
   if (path === '/admin/images' || path.startsWith('/admin/images/'))

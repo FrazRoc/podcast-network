@@ -37,7 +37,9 @@ export default function StackedShareBars({ rows, keys, colors, labels, initialLi
       <div className="space-y-1" onMouseLeave={() => setHover(null)}>
         {shown.map(r => (
           <div key={r.id} className="flex items-center gap-2">
-            <span className="w-40 sm:w-52 flex-shrink-0 text-xs text-gray-700 truncate text-right" title={r.label}>{r.label}</span>
+            <span className="w-40 sm:w-52 flex-shrink-0 text-xs text-gray-700 truncate text-right" title={r.label}>
+              {r.href ? <a href={r.href} className="hover:text-teal-700 hover:underline">{r.label}</a> : r.label}
+            </span>
             <div className="flex-1 flex h-4 rounded overflow-hidden bg-gray-100">
               {keys.map(k => (r.counts[k] ? (
                 <div key={k} style={{ width: `${(100 * r.counts[k]) / r.total}%`, background: colors[k] }}

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { personHref, showHref, slugify } from '../profileUtils';
 // The 2D entry point, not the 'react-force-graph' barrel: that one imports all
 // four renderers at module scope, so three.js, A-Frame and AR.js were bundled
 // and shipped on every load despite nothing here being able to reach them.
@@ -313,7 +314,10 @@ const ShowProfileCard = ({ show, connections, onClose, weighting, allLinks, name
                className="w-full h-full object-cover"
                onError={e => { e.target.onerror = null; e.target.src = getAvatarUrl(show.name); }} />
         </div>
-        <h3 className="text-xl font-bold text-center leading-tight">{show.name}</h3>
+        <a href={showHref(show.id, slugify(show.name))}
+           className="text-xl font-bold text-center leading-tight hover:text-teal-600 hover:underline">
+          {show.name}
+        </a>
         <p className="text-gray-500 text-sm mt-1">
           {connections.length} connected show{connections.length === 1 ? '' : 's'}
         </p>
@@ -409,13 +413,14 @@ const HostProfileCard = ({ host, connections, onClose, isAdmin }) => {
             />
           </div>
         </div>
-        {isAdmin ? (
-          <a href={`/admin/people?host_id=${host.id}`}
-             className="text-xl font-bold text-center hover:text-teal-600 hover:underline">
-            {host.name}
+        <a href={personHref(host.id, slugify(host.name))}
+           className="text-xl font-bold text-center hover:text-teal-600 hover:underline">
+          {host.name}
+        </a>
+        {isAdmin && (
+          <a href={`/admin/people?host_id=${host.id}`} className="text-[11px] text-gray-400 hover:text-teal-600 hover:underline">
+            edit in admin
           </a>
-        ) : (
-          <h3 className="text-xl font-bold text-center">{host.name}</h3>
         )}
         {role && (role.title || role.company) && (
           <p className="text-sm text-gray-700 mt-1 flex items-center justify-center gap-1.5">
@@ -466,14 +471,10 @@ const HostProfileCard = ({ host, connections, onClose, isAdmin }) => {
               const other = conn.source.id === host.id ? conn.target : conn.source;
               return (
                 <div key={idx} className="bg-gray-50 p-2 rounded text-sm">
-                  {isAdmin ? (
-                    <a href={`/admin/people?host_id=${other.id}`}
-                       className="font-medium hover:text-teal-600 hover:underline">
-                      {other.name}
-                    </a>
-                  ) : (
-                    <p className="font-medium">{other.name}</p>
-                  )}
+                  <a href={personHref(other.id, slugify(other.name))}
+                     className="font-medium hover:text-teal-600 hover:underline">
+                    {other.name}
+                  </a>
                   <p className="text-gray-500 text-xs">
                     {conn.value} episode{conn.value !== 1 ? 's' : ''} together on {conn.podcast}
                   </p>
