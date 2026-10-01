@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { API_BASE_URL } from '../config';
 import OrgLogo from './OrgLogo';
-import { personHref, orgHref, showHref, avatarUrl, proxied, plural } from '../profileUtils';
+import { personHref, orgHref, showHref, avatarUrl, proxied, coverUrl, plural } from '../profileUtils';
 
 // Name search across people, organisations and shows (/api/search).
 export default function ProfileSearch({ className = '' }) {
@@ -59,7 +59,7 @@ export default function ProfileSearch({ className = '' }) {
           {results.shows.length > 0 && <p className={heading}>Shows</p>}
           {results.shows.map(s => (
             <a key={`s${s.podcast_id}`} href={showHref(s.podcast_id, s.slug)} className={row}>
-              <img src={s.cover_art_url ? proxied(s.cover_art_url) : avatarUrl(s.title)} alt="" className="w-6 h-6 rounded object-cover" />
+              <img src={s.cover_art_url ? coverUrl(s.cover_art_url, 80) : avatarUrl(s.title)} alt="" className="w-6 h-6 rounded object-cover" />
               <span className="flex-1 truncate">{s.title}</span>
             </a>
           ))}

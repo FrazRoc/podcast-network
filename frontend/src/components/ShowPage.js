@@ -3,7 +3,7 @@ import OrgLogo from './OrgLogo';
 import AdminEditLink from './AdminEditLink';
 import { ORG_TYPE_LABELS, ORG_TYPE_COLORS } from '../chartUtils';
 import { stripHtmlForDisplay } from '../adminUtils';
-import { useProfile, personHref, orgHref, showHref, avatarUrl, proxied, fmtDate, fmtMonthYear, plural } from '../profileUtils';
+import { useProfile, personHref, orgHref, showHref, avatarUrl, proxied, coverUrl, fmtDate, fmtMonthYear, plural } from '../profileUtils';
 
 const describe = (s) => [s.title,
   `${s.title}: ${plural(s.totals.episodes, 'episode')} since ${fmtMonthYear(s.totals.first_date)}, who it books, `
@@ -50,7 +50,7 @@ export default function ShowPage() {
         return (
           <>
             <section className="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6 flex flex-col sm:flex-row gap-4 sm:gap-6 items-center sm:items-start">
-              <img src={s.cover_art_url ? proxied(s.cover_art_url) : avatarUrl(s.title)} alt={s.title}
+              <img src={s.cover_art_url ? coverUrl(s.cover_art_url, 300) : avatarUrl(s.title)} alt={s.title}
                 onError={e => { e.target.onerror = null; e.target.src = avatarUrl(s.title); }}
                 className="w-32 h-32 rounded-xl object-cover bg-gray-100 flex-shrink-0" />
               <div className="flex-1 min-w-0 text-center sm:text-left">
@@ -158,7 +158,7 @@ export default function ShowPage() {
                   <ul className="space-y-2">
                     {s.overlap.map(x => (
                       <li key={x.podcast_id} className="flex items-center gap-2 text-sm">
-                        <img src={x.cover_art_url ? proxied(x.cover_art_url) : avatarUrl(x.title)} alt="" className="w-7 h-7 rounded object-cover bg-gray-100" />
+                        <img src={x.cover_art_url ? coverUrl(x.cover_art_url, 80) : avatarUrl(x.title)} alt="" className="w-7 h-7 rounded object-cover bg-gray-100" />
                         <a href={showHref(x.podcast_id, x.slug)} className="flex-1 truncate text-gray-900 hover:text-teal-700 hover:underline">{x.title}</a>
                         <span className="text-xs text-gray-400">{plural(x.shared, 'shared guest')}</span>
                       </li>

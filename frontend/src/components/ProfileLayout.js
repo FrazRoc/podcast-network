@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { SiteShell } from './SiteHeader';
-import { avatarUrl, proxied } from '../profileUtils';
+import { avatarUrl, coverUrl } from '../profileUtils';
 
 // A show's cover art (episodes have none of their own, so their rows use it
 // too), falling back to an initials tile.
 export function ShowThumb({ show, size = 'w-10 h-10' }) {
   return (
-    <img src={show.cover_art_url ? proxied(show.cover_art_url) : avatarUrl(show.title)} alt=""
+    <img src={show.cover_art_url ? coverUrl(show.cover_art_url, 80) : avatarUrl(show.title)} alt=""
       onError={e => { e.target.onerror = null; e.target.src = avatarUrl(show.title); }}
       className={`${size} rounded object-cover bg-gray-100 flex-shrink-0`} />
   );

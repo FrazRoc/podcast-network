@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { SiteShell } from './SiteHeader';
 import { useUrlParams, SearchBox, SortSelect, DirectoryHeading } from './Directory';
 import { API_BASE_URL } from '../config';
-import { showHref, avatarUrl, proxied, fmtMonthYear, plural, setMeta, slugify } from '../profileUtils';
+import { showHref, avatarUrl, coverUrl, fmtMonthYear, plural, setMeta, slugify } from '../profileUtils';
 
 const SORTS = [['guests', 'Most guests'], ['recent', 'Most recent'], ['episodes', 'Most episodes'], ['name', 'A–Z']];
 const byName = (a, b) => a.title.localeCompare(b.title);
@@ -44,19 +44,21 @@ export default function ShowDirectory() {
       {state.rows && (
         <>
           <p className="text-xs text-gray-400">{plural(shown.length, 'show')}</p>
-          <ul className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
+          <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3">
             {shown.map(s => (
-              <li key={s.podcast_id}>
-                <a href={showHref(s.podcast_id, s.slug)}
-                   className="block h-full bg-white rounded-xl border border-gray-200 overflow-hidden hover:border-teal-400 hover:shadow-sm transition">
-                  <img src={s.cover_art_url ? proxied(s.cover_art_url) : avatarUrl(s.title)} alt="" loading="lazy"
+              <li key={s.podcast_id} className="min-w-0">
+                <a href={showHref(s.podcast_id, s.slug)} title={s.title}
+                   className="h-full flex items-center gap-3 bg-white rounded-xl border border-gray-200 p-2 pr-3 hover:border-teal-400 hover:shadow-sm transition">
+                  <img src={s.cover_art_url ? coverUrl(s.cover_art_url, 160) : avatarUrl(s.title)} alt="" loading="lazy"
                     onError={e => { e.target.onerror = null; e.target.src = avatarUrl(s.title); }}
-                    className="w-full aspect-square object-cover bg-gray-100" />
-                  <div className="p-3">
-                    <p className="text-sm font-semibold text-gray-900 line-clamp-2">{s.title}</p>
+                    className="w-16 h-16 rounded-lg object-cover bg-gray-100 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-gray-900 truncate">{s.title}</p>
                     {s.channel && s.channel !== s.title && <p className="text-xs text-gray-500 truncate">{s.channel}</p>}
-                    <p className="mt-1 text-xs text-gray-600">{plural(s.episodes, 'episode')} · {plural(s.guests, 'guest')}</p>
-                    {s.last_date && <p className="text-xs text-gray-400">Latest {fmtMonthYear(s.last_date)}</p>}
+                    <p className="text-xs text-gray-600 truncate">
+                      {plural(s.episodes, 'episode')} · {plural(s.guests, 'guest')}
+                      {s.last_date && <span className="text-gray-400"> · {fmtMonthYear(s.last_date)}</span>}
+                    </p>
                   </div>
                 </a>
               </li>

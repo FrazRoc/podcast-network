@@ -23,6 +23,16 @@ export const avatarUrl = (name) =>
   `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name || '?')}&backgroundColor=65c9ff,92a1c6,dd6b7f,58c9b9,ade498`;
 
 // Remote images go through the backend proxy, as on the Network page.
+// A show's cover for an <img>. Apple's artwork (every show's, today) loads
+// straight from Apple at the size asked for (the proxy is only needed where
+// the graph draws images on a canvas); anything else goes through the proxy.
+const APPLE_ART_RE = /^(https:\/\/is\d+-ssl\.mzstatic\.com\/.+\/)\d+x\d+(bb\.(?:jpg|png|webp))$/;
+export const coverUrl = (url, size = 160) => {
+  if (!url) return null;
+  const m = url.match(APPLE_ART_RE);
+  return m ? `${m[1]}${size}x${size}${m[2]}` : proxied(url);
+};
+
 export const proxied = (url) => (url ? `${API_BASE_URL}/api/proxy/image?url=${encodeURIComponent(url)}` : null);
 
 // A DATE ("2026-09-10") parsed as local, not UTC, so it isn't a day off
