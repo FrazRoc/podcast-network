@@ -2,12 +2,13 @@ import { useEffect } from 'react';
 import { SiteShell } from './SiteHeader';
 import { useUrlParams, useDirectory, SearchBox, SortSelect, FilterChips, DirectoryHeading, DirectoryList } from './Directory';
 import { ROLE_COLORS } from '../chartUtils';
-import { personHref, orgHref, avatarUrl, fmtMonthYear, plural, setMeta, imageUrl, imageFallback } from '../profileUtils';
+import { personHref, orgHref, avatarUrl, fmtMonthYear, plural, setMeta, imageUrl, imageFallback, useShowOrgs } from '../profileUtils';
 
 const SORTS = [['appearances', 'Most episodes'], ['recent', 'Most recent'], ['name', 'A–Z']];
 const COLORS = { ...ROLE_COLORS, host: '#0d9488' };
 
 export default function PeopleDirectory() {
+  useShowOrgs();
   useEffect(() => setMeta('People · Podcast Network',
     'Everyone who has hosted or been a guest on a clean-energy podcast, with their current role and appearances.'), []);
   const [params, set] = useUrlParams({ q: '', kind: '', sort: 'appearances' });

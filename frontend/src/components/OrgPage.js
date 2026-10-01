@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import ProfileLayout, { Section, Stat, MiniBars, ShowMore, ShowThumb } from './ProfileLayout';
 import OrgLogo from './OrgLogo';
 import AdminEditLink from './AdminEditLink';
@@ -10,6 +11,12 @@ const describe = (o) => [o.name,
 
 export default function OrgPage() {
   const state = useProfile('orgs', '/orgs/', describe);
+  // "Drilled" the organisation is the show Drilled: its page is the show's.
+  const show = state.data?.is_show;
+  useEffect(() => {
+    if (show) window.location.replace(showHref(show.podcast_id, show.slug));
+  }, [show]);
+  if (show) return null;
   return (
     <ProfileLayout state={state} kindLabel="Organisation">
       {(o) => {
@@ -48,6 +55,16 @@ export default function OrgPage() {
                   {where && <span>· {where}</span>}
                   {o.founded_year && <span>· founded {o.founded_year}</span>}
                 </p>
+                {o.podcasts?.length > 0 && (
+                  <p className="mt-1 text-sm text-gray-600 flex flex-wrap justify-center sm:justify-start items-center gap-x-2 gap-y-1">
+                    {o.podcasts.length === 1 ? 'Podcast:' : 'Podcasts:'}
+                    {o.podcasts.map(p => (
+                      <a key={p.podcast_id} href={showHref(p.podcast_id, p.slug)} className="inline-flex items-center gap-1.5 text-teal-700 hover:underline">
+                        <ShowThumb show={p} size="w-5 h-5" />{p.title}
+                      </a>
+                    ))}
+                  </p>
+                )}
                 {o.parent && (
                   <p className="mt-1 text-sm text-gray-600">
                     Part of <a href={orgHref(o.parent.org_id, o.parent.slug)} className="text-teal-700 hover:underline">{o.parent.name}</a>

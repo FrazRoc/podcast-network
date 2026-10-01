@@ -208,6 +208,71 @@ function OrgFacts({ org }) {
   );
 }
 
+// Which show this organisation is ("Drilled" from "host of Drilled": its
+// links then go to the show) or which shows it publishes (podcasts.org_id).
+function PodcastLinks({ orgId, podcasts, onChanged }) {
+  const [shows, setShows] = useState(null);
+  const [pick, setPick] = useState('');
+  const [isShow, setIsShow] = useState(() => !podcasts.some(p => p.org_is_show));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const loadShows = () => {
+    if (shows) return;
+    fetch(`${API_BASE_URL}/api/directory/shows`).then(r => r.json())
+      .then(d => setShows([...d.rows].sort((a, b) => a.title.localeCompare(b.title))))
+      .catch(() => setShows([]));
+  };
+  const act = async (fn) => {
+    setBusy(true); setError('');
+    try { await fn(); onChanged(); } catch (e) { setError(e.message); } finally { setBusy(false); }
+  };
+  const link = () => act(async () => {
+    await call(`${API}/companies/${orgId}/podcasts/${pick}`, jsonBody('PUT', { is_show: isShow }));
+    setPick('');
+  });
+  const unlink = (podcastId) => act(() => call(`${API}/companies/${orgId}/podcasts/${podcastId}`, { method: 'DELETE' }));
+  const isAShow = podcasts.some(p => p.org_is_show);
+  return (
+    <div>
+      <p className="text-xs font-medium text-gray-500 mb-1">Podcast</p>
+      {podcasts.length > 0 ? (
+        <ul className="space-y-1 mb-2">
+          {podcasts.map(p => (
+            <li key={p.podcast_id} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-1.5 text-sm">
+              <span className="truncate">
+                <span className="text-gray-500">{p.org_is_show ? 'Is the show' : 'Publishes'} </span>
+                <a href={`/shows/${p.podcast_id}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{p.title}</a>
+              </span>
+              <button onClick={() => unlink(p.podcast_id)} disabled={busy}
+                className="text-xs text-gray-400 hover:text-red-600 ml-2 disabled:opacity-50">Remove</button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-xs text-gray-400 mb-2">
+          If this "organisation" is really a show (people introduced as "host of …"), link it: its page and
+          links then go to the show. A company that publishes a show can be linked too.
+        </p>
+      )}
+      <div className="flex flex-wrap items-center gap-2">
+        <select value={pick} onFocus={loadShows} onMouseDown={loadShows} onChange={e => setPick(e.target.value)}
+          className="flex-1 min-w-0 rounded-lg border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none">
+          <option value="">{shows ? 'Pick a show…' : 'Pick a show… (loading)'}</option>
+          {(shows || []).map(s => <option key={s.podcast_id} value={s.podcast_id}>{s.title}</option>)}
+        </select>
+        <select value={isShow ? 'show' : 'publisher'} onChange={e => setIsShow(e.target.value === 'show')}
+          className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none">
+          <option value="show" disabled={isAShow}>is the show</option>
+          <option value="publisher">publishes it</option>
+        </select>
+        <button onClick={link} disabled={!pick || busy}
+          className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50">Link</button>
+      </div>
+      {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+    </div>
+  );
+}
+
 function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
   const [data, setData] = useState(null);
   const [form, setForm] = useState(null);
@@ -382,6 +447,8 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
       </div>
 
       <OrgFacts org={org} />
+
+      <PodcastLinks key={orgId} orgId={orgId} podcasts={data.podcasts || []} onChanged={() => { load(); onChanged?.(); }} />
 
       {suggestions.length > 0 && (
         <div className="bg-amber-50 rounded-lg p-3">

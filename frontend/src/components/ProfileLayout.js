@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { SiteShell } from './SiteHeader';
-import { avatarUrl, coverUrl } from '../profileUtils';
+import { avatarUrl, coverUrl, useShowOrgs } from '../profileUtils';
 
 // A show's cover art (episodes have none of their own, so their rows use it
 // too), falling back to an initials tile.
@@ -68,6 +68,7 @@ export function ShowMore({ items, initial = 10, render, more = 'Show all' }) {
 
 export default function ProfileLayout({ state, kindLabel, children }) {
   const { data, error } = state;
+  useShowOrgs();   // links to show-organisations point at their show
   return (
     <SiteShell>
       {error === 'not_found' && (

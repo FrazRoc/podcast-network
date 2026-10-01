@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { API_BASE_URL } from '../config';
 import { ORG_TYPE_COLORS, ORG_TYPE_LABELS } from '../chartUtils';
 import OrgLogo from './OrgLogo';
-import { orgHref, slugify } from '../profileUtils';
+import { orgHref, slugify, useShowOrgs } from '../profileUtils';
 
 // The organisations whose people are booked most, counted by distinct
 // guests or by distinct shows, with sub-organisations under their parent.
@@ -13,6 +13,7 @@ const PAGE = 15;
 const TYPE_ORDER = ['company', 'investor', 'nonprofit', 'research', 'academic', 'government', 'media', 'association'];
 
 export default function TopOrganizationsChart() {
+  useShowOrgs();
   const [by, setBy] = useState('guests');
   const [excludeHouse, setExcludeHouse] = useState(true);
   const [orgType, setOrgType] = useState('');

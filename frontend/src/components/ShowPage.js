@@ -59,7 +59,12 @@ export default function ShowPage() {
                   {s.apple_podcast_id && <AdminEditLink href={`/admin/shows?apple_podcast_id=${s.apple_podcast_id}`} />}
                   <AdminEditLink href={`/admin/episodes?show=${encodeURIComponent(s.title)}`}>episodes in admin</AdminEditLink>
                 </div>
-                {s.channel && s.channel !== s.title && <p className="text-sm text-gray-500 mt-0.5">{s.channel}</p>}
+                {s.publisher ? (
+                  <p className="text-sm text-gray-500 mt-0.5 flex items-center justify-center sm:justify-start gap-1.5">
+                    From <OrgLogo orgId={s.publisher.org_id} name={s.publisher.name} size={16} />
+                    <a href={orgHref(s.publisher.org_id, s.publisher.slug)} className="text-teal-700 hover:underline">{s.publisher.name}</a>
+                  </p>
+                ) : (s.channel && s.channel !== s.title && <p className="text-sm text-gray-500 mt-0.5">{s.channel}</p>)}
                 {s.hosts.length > 0 && (
                   <p className="mt-2 text-sm text-gray-700">
                     Hosted by{' '}

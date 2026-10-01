@@ -8,7 +8,37 @@ import { getAdminPassword } from './adminAuth';
 // loaded with an old one rewrites it to the current one.
 
 export const personHref = (id, slug) => `/people/${id}${slug ? `-${slug}` : ''}`;
-export const orgHref = (id, slug) => `/orgs/${id}${slug ? `-${slug}` : ''}`;
+// Organisations that are really a show ("host of Drilled"): links and logos
+// for them go to the show. Loaded once per page view; anything rendered
+// before it arrives still gets there, via the org page's redirect.
+let showOrgs = {};
+let showOrgsLoad = null;
+const showOrgListeners = new Set();
+export function loadShowOrgs() {
+  if (!showOrgsLoad) {
+    showOrgsLoad = fetch(`${API_BASE_URL}/api/show-orgs`)
+      .then(r => (r.ok ? r.json() : {}))
+      .then(m => { showOrgs = m || {}; showOrgListeners.forEach(f => f()); })
+      .catch(() => {});
+  }
+  return showOrgsLoad;
+}
+export const showForOrg = (id) => (id ? showOrgs[String(id)] : undefined);
+// Re-renders the calling component once the map has loaded.
+export function useShowOrgs() {
+  const [, bump] = useState(0);
+  useEffect(() => {
+    const f = () => bump(n => n + 1);
+    showOrgListeners.add(f);
+    loadShowOrgs();
+    return () => { showOrgListeners.delete(f); };
+  }, []);
+  return showOrgs;
+}
+export const orgHref = (id, slug) => {
+  const show = showForOrg(id);
+  return show ? `/shows/${show.podcast_id}-${show.slug}` : `/orgs/${id}${slug ? `-${slug}` : ''}`;
+};
 export const showHref = (id, slug) => `/shows/${id}${slug ? `-${slug}` : ''}`;
 
 // Same client-side slug rule as the backend's profiles.slugify, for links
