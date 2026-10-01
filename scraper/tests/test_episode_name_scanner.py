@@ -214,6 +214,26 @@ class TestCleanDescription:
         assert "Roston" not in result
         assert "clean energy policy" in result
 
+    def test_cities_15_thanks_and_crew_block_stripped(self):
+        # Real incident: Cities 1.5 lists its featured guests, then thanks the
+        # series consultants and a clip's source, then the production crew.
+        # Chiara Morfeo (communications support) was credited as a guest on 45
+        # episodes; Rob Dietz, Peter Victor and Nate Hagens on a few each.
+        text = ("We follow Herman Daly into the World Bank, hearing his story.\n"
+                "Featured in this episode:\n"
+                "Kate Raworth, DEAL co-founder\n"
+                "Thank you to the Daly family for sharing Herman's story.\n"
+                "Thanks also to: Nate Hagens and the team behind The Great "
+                "Simplification podcast for granting us permission to use a clip.\n"
+                "Thank you also to our series consultants and fact checkers, "
+                "Peter Harnik, Rob Dietz, and Peter Victor.\n"
+                "Cities 1.5 is produced by the University of Toronto Press.\n"
+                "Narrative and communications support by Chiara Morfeo.")
+        result = clean_description(text)
+        assert "Kate Raworth" in result
+        for name in ("Nate Hagens", "Rob Dietz", "Peter Victor", "Chiara Morfeo"):
+            assert name not in result
+
     def test_bbc_production_credits_block_stripped(self):
         # Real incident: The Climate Question's end-of-description production
         # block ("Reporter: X", "Producers: X, Y", "Researcher: X", "Sound

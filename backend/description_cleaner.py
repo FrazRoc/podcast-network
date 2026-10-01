@@ -117,6 +117,13 @@ STRIP_AFTER_PATTERNS = [
     r'\nMentioned:',                                     # Shift Key's linked-articles reference section
     r'Episode production and content support provided by',  # The Carbon Curve
     r'A huge thanks to [^.\n]{0,40} for (?:his|her|their) support',  # The Carbon Curve
+    # Cities 1.5 ends every episode with a thanks block, then the crew
+    # ("Narrative and communications support by Chiara Morfeo"), and its
+    # series consultants are thanked as "our series consultants and fact
+    # checkers". Together they credited Chiara Morfeo as a guest 45 times and
+    # Rob Dietz / Peter Victor / Nate Hagens (a clip from his show) as guests.
+    r'\nThank(?:s| you) also to\b',
+    r'\nCities 1\.5 is produced by',
 ]
 
 
