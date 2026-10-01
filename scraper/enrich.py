@@ -1145,6 +1145,38 @@ def _domain(url: str) -> str:
     return host.lower().removeprefix('www.')
 
 
+# Words too common in roles and bios to say anything about who someone is.
+_ROLE_STOPWORDS = set("""a an the and or of for to in on at by with from as is are be my our your their his her
+its this that i we you me us who what where when how all any not no but so just about into over more most very
+also than then out up new former current ex co vice senior junior chief head lead executive director manager
+founder cofounder president ceo cto coo cfo vp partner member board chair chairman officer staff team host cohost
+guest author writer editor here there views own opinions mine personal tweets posts he him she her they
+them""".split())
+
+
+def role_words(text: str) -> set:
+    """Distinctive words in a role, organisation name or bio: 4+ letters, not
+    a stopword or a generic job word, plural folded ("institutes" ~
+    "institute")."""
+    out = set()
+    for w in re.findall(r"[a-z][a-z\-]{2,}", ascii_fold(text or '')):
+        for part in w.split('-'):
+            if len(part) >= 4 and part not in _ROLE_STOPWORDS:
+                out.add(part[:-1] if part.endswith('s') and len(part) > 4 else part)
+    return out
+
+
+def shared_role_words(person: dict, bio: str) -> set:
+    """Words our roles and organisations for someone share with an account's
+    bio, leaving out their own name ("Jane Goodall" in "Jane Goodall
+    Institute" says nothing)."""
+    ours = set()
+    for t in (person.get('titles') or []) + (person.get('orgs') or []):
+        ours |= role_words(t)
+    name = role_words(f"{person['first_name']} {person['last_name']}")
+    return (ours & role_words(bio)) - name
+
+
 def bsky_confirms(person: dict, actor: dict) -> str | None:
     """Why this Bluesky account is this person, or None. The display name
     must be theirs, and the account must say where they work: its bio names
@@ -1161,6 +1193,13 @@ def bsky_confirms(person: dict, actor: dict) -> str | None:
     for org in person.get('orgs') or []:
         if org and bio_names_org(bio, org):
             return f'bio names {org}'
+    # How a person matches them by eye: the bio describes the roles we have
+    # for them. Two distinctive shared words, checked against a hand review
+    # of 255 accounts (Oct 2026): accepts 59 of 141 approved, 3 of 114
+    # declined-or-unsure; one shared word goes to review.
+    shared = shared_role_words(person, bio)
+    if len(shared) >= 2:
+        return 'bio shares role words: ' + ', '.join(sorted(shared))
     return None
 
 
@@ -1175,6 +1214,7 @@ def plan_people_bsky(cur, fetch: Fetcher, limit: int = None) -> tuple:
                array_agg(DISTINCT o.name) FILTER (WHERE o.name IS NOT NULL) AS org_names,
                array_agg(DISTINCT ha.company) FILTER (WHERE ha.company IS NOT NULL) AS companies,
                array_agg(DISTINCT o.website_url) FILTER (WHERE o.website_url IS NOT NULL) AS websites,
+               array_agg(DISTINCT ha.title) FILTER (WHERE ha.title IS NOT NULL) AS titles,
                (SELECT COUNT(*) FROM episode_host eh WHERE eh.host_id = h.host_id) AS appearances
         FROM hosts h
         JOIN host_affiliations ha ON ha.host_id = h.host_id
@@ -1214,9 +1254,12 @@ def plan_people_bsky(cur, fetch: Fetcher, limit: int = None) -> tuple:
             same = [a for a in actors if squash(a.get('displayName')) == squash(name)]
             if len(same) == 1 and p['appearances'] >= 3:
                 a = same[0]
-                review.append({'host_id': p['host_id'], 'name': name, 'why': 'name matches; bio names none of their organisations',
+                shared = shared_role_words(p, a.get('description') or '')
+                review.append({'host_id': p['host_id'], 'name': name,
+                               'why': f"name matches; bio shares one role word ({', '.join(shared)})" if shared
+                               else 'name matches; bio names none of their organisations',
                                'candidates': f"{a['handle']}: {(a.get('description') or '')[:150]}",
-                               'our_orgs': '; '.join(p['orgs'][:4])})
+                               'our_orgs': '; '.join(p['orgs'][:4]), 'shared_words': len(shared)})
             continue
         a, why = confirmed[0]
         if p['field_sources'].get('bluesky_handle') in _PROTECTED:
@@ -1233,6 +1276,8 @@ def plan_people_bsky(cur, fetch: Fetcher, limit: int = None) -> tuple:
         if li and not p['linkedin_url']:
             change['linkedin_url'] = 'https://www.linkedin.com/in/' + urllib.parse.unquote(li.group(1)).strip('/')
         plan.append(change)
+    # Rows sharing a role word first: the likeliest to be them.
+    review.sort(key=lambda r: -int(r.get('shared_words') or 0))
     return plan, review
 
 

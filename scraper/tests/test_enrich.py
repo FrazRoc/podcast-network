@@ -272,3 +272,22 @@ class TestBskyConfirms:
         p = {'first_name': 'Jane', 'last_name': 'Doe', 'orgs': ['Fervo Energy'], 'websites': ['https://www.fervoenergy.com']}
         assert bsky_confirms(p, {'handle': 'jane.fervoenergy.com', 'displayName': 'Jane Doe', 'description': ''}) \
             == 'handle on fervoenergy.com'
+
+
+from enrich import shared_role_words  # noqa: E402
+
+
+class TestRoleWords:
+    def test_bio_describing_their_roles_confirms(self):
+        p = {'first_name': 'Tim', 'last_name': 'Donaghy', 'titles': ['senior climate scientist', 'research and policy'],
+             'orgs': ['UCS'], 'websites': []}
+        a = {'handle': 'td.bsky.social', 'displayName': 'Tim Donaghy',
+             'description': 'Climate research and policy person. Lapsed astrophysicist.'}
+        assert bsky_confirms(p, a) == 'bio shares role words: climate, policy, research'
+
+    def test_name_and_generic_words_dont_count(self):
+        p = {'first_name': 'Jane', 'last_name': 'Goodall', 'titles': ['founder'], 'orgs': ['Jane Goodall Institute']}
+        assert shared_role_words(p, 'Official account of Jane Goodall, founder') == set()
+        # One shared word is review only (a teacher's bio mentioning Amazon).
+        assert shared_role_words({'first_name': 'Sarah', 'last_name': 'Read', 'titles': ['Director'], 'orgs': ['Amazon']},
+                                 'I teach 7th grade. Amazon wishlist below') == {'amazon'}
