@@ -2181,11 +2181,13 @@ async def proxy_image(url: str, w: Optional[int] = None):
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to fetch image: {e}")
     content, media_type = resp.content, resp.headers.get('content-type', 'image/jpeg')
-    if width and resp.status_code == 200:
+    if width and resp.status_code == 200 and media_type.startswith('image/'):
         small = await asyncio.to_thread(_shrink_image, content, width)
         if small:
             content, media_type = small, 'image/webp'
-    if resp.status_code == 200 and len(content) <= _IMAGE_CACHE_ITEM_MAX:
+    # Only real images: unavatar.io answers a rate-limited request with a
+    # 200 and a JSON error, which mustn't stick for the life of the process.
+    if resp.status_code == 200 and media_type.startswith('image/') and len(content) <= _IMAGE_CACHE_ITEM_MAX:
         _IMAGE_CACHE[key] = (content, media_type)
         if len(_IMAGE_CACHE) > _IMAGE_CACHE_MAX:
             _IMAGE_CACHE.popitem(last=False)
@@ -3731,14 +3733,14 @@ async def get_org_profile(org_id: int):
     conn = get_db_connection()
     cur = conn.cursor()
     try:
+        chain_joins, chain_top = org_stats.parent_chain('o', 'op')
         cur.execute(f"""
-            WITH {org_stats._ORG_TOP}
             SELECT o.org_id, o.name, COALESCE(o.org_type, t.org_type) AS org_type, o.website_url,
                    o.hq_city, o.country, o.founded_year, o.wikipedia_url, o.linkedin_url,
                    o.not_an_org, o.parent_org_id, par.name AS parent_name
             FROM organizations o
-            LEFT JOIN org_top ot ON ot.org_id = o.org_id
-            LEFT JOIN organizations t ON t.org_id = ot.top
+            {chain_joins}
+            LEFT JOIN organizations t ON t.org_id = {chain_top}
             LEFT JOIN organizations par ON par.org_id = o.parent_org_id AND NOT par.not_an_org
             WHERE o.org_id = %s
         """, (org_id,))
@@ -3847,15 +3849,23 @@ async def get_show_profile(podcast_id: int):
         if not show:
             raise HTTPException(status_code=404, detail="Show not found")
 
+        # The show's listed hosts plus anyone credited as host on its episodes
+        # (started from the show's own rows, not a scan of every person).
         cur.execute("""
+            WITH hosted AS (
+                SELECT eh.host_id, COUNT(DISTINCT eh.episode_id) AS n
+                FROM episode_host eh JOIN episodes e ON e.episode_id = eh.episode_id
+                WHERE e.podcast_id = %(p)s AND NOT eh.is_guest
+                GROUP BY eh.host_id
+            ),
+            who AS (
+                SELECT host_id FROM host_podcast WHERE podcast_id = %(p)s
+                UNION SELECT host_id FROM hosted
+            )
             SELECT h.host_id, h.first_name || ' ' || h.last_name AS name, h.profile_image_url,
-                   COUNT(DISTINCT eh.episode_id) FILTER (WHERE NOT eh.is_guest) AS episodes_hosted
-            FROM hosts h
-            LEFT JOIN host_podcast hp ON hp.host_id = h.host_id AND hp.podcast_id = %(p)s
-            LEFT JOIN episode_host eh ON eh.host_id = h.host_id
-                 AND eh.episode_id IN (SELECT episode_id FROM episodes WHERE podcast_id = %(p)s)
-            WHERE hp.host_id IS NOT NULL OR (eh.host_id IS NOT NULL AND NOT eh.is_guest)
-            GROUP BY h.host_id, h.first_name, h.last_name, h.profile_image_url
+                   COALESCE(hosted.n, 0) AS episodes_hosted
+            FROM who JOIN hosts h ON h.host_id = who.host_id
+            LEFT JOIN hosted ON hosted.host_id = who.host_id
             ORDER BY episodes_hosted DESC, name
         """, {'p': podcast_id})
         hosts = [{**r, 'slug': profiles.slugify(r['name'])} for r in cur.fetchall()]

@@ -22,41 +22,37 @@ ORG_TYPES = ('company', 'investor', 'nonprofit', 'research', 'academic',
 # sits under it is its own top (the hidden "California" once collected three
 # state agencies in Most-Booked Organisations).
 _ORG_TOP_DEPTH = 8
-# Walked as a fixed number of parent joins rather than WITH RECURSIVE: the
-# recursive form made Postgres compare every organisation with every other on
-# each step (~200ms, on every Stats chart and org/show page); this is ~2ms and
-# gives the same answer while no chain is deeper than _ORG_TOP_DEPTH (the
-# deepest is 3 as of Oct 2026, checked against the recursive version then).
-_ORG_TOP = """
+
+
+def parent_chain(alias: str, prefix: str) -> tuple:
+    """SQL for the organisation at the top of `alias`'s parent chain: the
+    LEFT JOINs to add after it, and the expression for the top's org_id.
+    Joined from just the organisations a query is about, this costs a few
+    index lookups each, where the full org_top table costs ~150ms to build.
+    Walks _ORG_TOP_DEPTH parents (the deepest chain is 3 as of Oct 2026; it
+    matched the old WITH RECURSIVE version for every organisation then)."""
+    joins, prev = [], alias
+    for i in range(1, _ORG_TOP_DEPTH + 1):
+        joins.append(f"LEFT JOIN organizations {prefix}{i} ON {prefix}{i}.org_id = {prev}.parent_org_id")
+        prev = f"{prefix}{i}"
+    cases = [f"WHEN {prefix}{i}.org_id IS NULL OR {prefix}{i}.not_an_org THEN "
+             f"{alias if i == 1 else f'{prefix}{i - 1}'}.org_id" for i in range(1, _ORG_TOP_DEPTH + 1)]
+    top = f"(CASE {' '.join(cases)} ELSE {prefix}{_ORG_TOP_DEPTH}.org_id END)"
+    return '\n'.join(joins), top
+
+
+_CHAIN_JOINS, _CHAIN_TOP = parent_chain('o', 'op')
+_ORG_TOP = f"""
     org_top AS (
-        SELECT o.org_id,
-               CASE
-                    WHEN p1.org_id IS NULL OR p1.not_an_org THEN o.org_id
-                    WHEN p2.org_id IS NULL OR p2.not_an_org THEN p1.org_id
-                    WHEN p3.org_id IS NULL OR p3.not_an_org THEN p2.org_id
-                    WHEN p4.org_id IS NULL OR p4.not_an_org THEN p3.org_id
-                    WHEN p5.org_id IS NULL OR p5.not_an_org THEN p4.org_id
-                    WHEN p6.org_id IS NULL OR p6.not_an_org THEN p5.org_id
-                    WHEN p7.org_id IS NULL OR p7.not_an_org THEN p6.org_id
-                    WHEN p8.org_id IS NULL OR p8.not_an_org THEN p7.org_id
-                    ELSE p8.org_id
-               END AS top
+        SELECT o.org_id, {_CHAIN_TOP} AS top
         FROM organizations o
-        LEFT JOIN organizations p1 ON p1.org_id = o.parent_org_id
-        LEFT JOIN organizations p2 ON p2.org_id = p1.parent_org_id
-        LEFT JOIN organizations p3 ON p3.org_id = p2.parent_org_id
-        LEFT JOIN organizations p4 ON p4.org_id = p3.parent_org_id
-        LEFT JOIN organizations p5 ON p5.org_id = p4.parent_org_id
-        LEFT JOIN organizations p6 ON p6.org_id = p5.parent_org_id
-        LEFT JOIN organizations p7 ON p7.org_id = p6.parent_org_id
-        LEFT JOIN organizations p8 ON p8.org_id = p7.parent_org_id
+        {_CHAIN_JOINS}
     )
 """
 
 # One row per guest role linked to a real organisation.
 _GUEST_ROLES = f"""
-    WITH {_ORG_TOP},
-    guest_roles AS (
+    WITH guest_roles AS (
         SELECT ha.affiliation_id, ha.host_id, ha.episode_id, ha.title, ha.is_former,
                e.podcast_id, e.published_date,
                o.org_id, o.name AS org_name, t.org_id AS top_id, t.name AS top_name,
@@ -66,8 +62,8 @@ _GUEST_ROLES = f"""
         JOIN episodes e ON e.episode_id = ha.episode_id
         JOIN organization_aliases a ON a.normalized_name = ha.company_key
         JOIN organizations o ON o.org_id = a.org_id AND NOT o.not_an_org
-        JOIN org_top ot ON ot.org_id = o.org_id
-        JOIN organizations t ON t.org_id = ot.top
+        {_CHAIN_JOINS}
+        JOIN organizations t ON t.org_id = {_CHAIN_TOP}
     )
 """
 
@@ -106,7 +102,7 @@ def revolving_door(cur, people_per_flow: int = 40) -> dict:
     cur.execute(_GUEST_ROLES + """
         SELECT host_id, org_type, org_name, published_date
         FROM guest_roles WHERE is_former AND org_type IS NOT NULL
-        ORDER BY host_id, published_date NULLS LAST
+        ORDER BY host_id, published_date NULLS LAST, affiliation_id   -- ties broken the same way every time
     """)
     former = defaultdict(list)
     for r in cur.fetchall():
