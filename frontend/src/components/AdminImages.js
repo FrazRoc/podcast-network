@@ -71,6 +71,8 @@ export default function AdminImages() {
         body: JSON.stringify({ image_url: preview.image_url }),
       });
       const data = await res.json();
+      // e.g. no X picture could be fetched: say so and stay on this person.
+      if (!res.ok) { alert(data.detail || 'Could not save the picture'); return; }
       setLastResult({ action: 'approve', ...data });
       await fetchStats();
       await fetchNext(false);
@@ -142,16 +144,20 @@ export default function AdminImages() {
           {preview ? (
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden mb-4">
               <div className="bg-gray-50 flex items-center justify-center p-6">
-                <img
-                  src={preview.image_url}
-                  alt={person.host_name}
-                  className="w-40 h-40 rounded-full object-cover shadow"
-                  onError={e => { e.target.style.display='none'; }}
-                />
+                {preview.image_url ? (
+                  <img
+                    src={preview.image_url}
+                    alt={person.host_name}
+                    className="w-40 h-40 rounded-full object-cover shadow"
+                    onError={e => { e.target.style.display='none'; }}
+                  />
+                ) : (
+                  <p className="text-sm text-gray-500 py-12">No profile picture found for this account (it may not exist, or has no picture set).</p>
+                )}
               </div>
               <div className="px-4 py-3 border-t border-gray-100 text-center">
                 <p className="text-sm text-gray-600"><span className="font-medium">@{preview.handle}</span> on {preview.platform === 'bluesky' ? 'Bluesky' : 'Twitter/X'}</p>
-                <p className="text-xs text-gray-400 mt-0.5">{preview.image_url}</p>
+                {preview.image_url && <p className="text-xs text-gray-400 mt-0.5">{preview.image_url}</p>}
               </div>
             </div>
           ) : (
@@ -196,7 +202,7 @@ export default function AdminImages() {
           <div className="space-y-2">
             <button
               onClick={handleApprove}
-              disabled={!preview || submitting}
+              disabled={!preview?.image_url || submitting}
               className="w-full py-3 px-6 bg-green-600 hover:bg-green-700 disabled:opacity-40 text-white font-semibold rounded-xl transition-colors"
             >
               ✅ Approve Image

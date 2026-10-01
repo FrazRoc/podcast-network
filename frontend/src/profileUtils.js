@@ -27,17 +27,20 @@ export const avatarUrl = (name) =>
 // An image for an <img>, at about the size it's shown (`size` in pixels;
 // pass ~2x the CSS size for sharp screens). Hosts that serve resized copies
 // load straight from the source: Apple's artwork, Bluesky avatars and
-// Wikimedia Commons. Anything else (unavatar.io, mostly) goes through our
+// Wikimedia Commons, X avatars. Anything else (unavatar.io, mostly) goes through our
 // proxy, which the graph also needs for drawing on its canvas.
 const APPLE_ART_RE = /^(https:\/\/is\d+-ssl\.mzstatic\.com\/.+\/)\d+x\d+([a-z]{2}\.(?:jpg|png|webp))$/;
 const BSKY_AVATAR = 'https://cdn.bsky.app/img/avatar/';
 const COMMONS_FILE_RE = /^(https:\/\/commons\.wikimedia\.org\/wiki\/Special:FilePath\/[^?]+)(?:\?.*)?$/;
 const COMMONS_WIDTHS = [60, 120, 250, 500];   // Wikimedia's standard thumbnail steps
+const X_AVATAR_RE = /^(https:\/\/pbs\.twimg\.com\/profile_images\/.+)_(?:normal|bigger|mini|200x200|400x400)(\.\w+)$/;
 export const imageUrl = (url, size = 160) => {
   if (!url) return null;
   let m = url.match(APPLE_ART_RE);
   if (m) return `${m[1]}${size}x${size}${m[2]}`;
   if (url.startsWith(BSKY_AVATAR)) return size <= 128 ? url.replace(BSKY_AVATAR, 'https://cdn.bsky.app/img/avatar_thumbnail/') : url;
+  m = url.match(X_AVATAR_RE);   // X serves 48, 200 and 400px copies
+  if (m) return `${m[1]}${size <= 48 ? '_normal' : size <= 200 ? '_200x200' : '_400x400'}${m[2]}`;
   m = url.match(COMMONS_FILE_RE);
   if (m) return `${m[1]}?width=${COMMONS_WIDTHS.find(w => w >= size) || 500}`;
   return `${proxied(url)}&w=${size}`;   // the proxy shrinks it
