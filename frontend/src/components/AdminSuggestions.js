@@ -25,7 +25,7 @@ const CreditPill = ({ credit }) => {
   const isVerified = credit.data_source === 'apple_verified';
   const color = credit.is_guest ? 'bg-blue-400' : 'bg-green-500';
   return (
-    <div className="flex items-center gap-2 py-1.5 px-3 bg-gray-50 rounded-lg text-sm">
+    <div className="inline-flex items-center gap-2 py-1 px-2.5 bg-gray-50 rounded-lg text-sm">
       {credit.profile_image_url ? (
         <img
           src={credit.profile_image_url}
@@ -303,10 +303,10 @@ export default function AdminSuggestions() {
         <div className="flex flex-col md:flex-row md:h-[calc(100vh-57px)]">
 
           {/* LEFT — Episode context */}
-          <div className="w-full md:w-1/2 border-b md:border-b-0 md:border-r border-gray-200 bg-white flex flex-col">
+          <div className="w-full md:w-1/2 border-b md:border-b-0 md:border-r border-gray-200 bg-white flex flex-col md:min-h-0 md:overflow-hidden">
 
             {/* Podcast + episode header */}
-            <div className="px-6 py-5 border-b border-gray-100">
+            <div className="px-6 py-5 border-b border-gray-100 flex-shrink-0">
               <div className="flex items-start gap-3">
                 {suggestion.podcast_cover_art && (
                   <img
@@ -335,13 +335,14 @@ export default function AdminSuggestions() {
               </div>
             </div>
 
-            {/* Existing credits */}
-            <div className="px-6 py-4 border-b border-gray-100">
+            {/* Existing credits — capped so an episode with dozens of credits cannot
+                push the description out of view */}
+            <div className="px-6 py-4 border-b border-gray-100 flex-shrink-0 max-h-48 overflow-y-auto">
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
                 Already Credited
               </p>
               {suggestion.existing_credits?.length > 0 ? (
-                <div className="space-y-1.5">
+                <div className="flex flex-wrap gap-1.5">
                   {suggestion.existing_credits.map((c, i) => (
                     <CreditPill key={i} credit={c} />
                   ))}
