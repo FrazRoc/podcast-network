@@ -13,12 +13,23 @@ import Stats from './components/Stats';
 import PersonPage from './components/PersonPage';
 import OrgPage from './components/OrgPage';
 import ShowPage from './components/ShowPage';
+import PeopleDirectory from './components/PeopleDirectory';
+import OrgDirectory from './components/OrgDirectory';
+import ShowDirectory from './components/ShowDirectory';
 
 function App() {
   const path = window.location.pathname;
 
   if (path === '/stats' || path.startsWith('/stats/'))
     return <Stats />;
+  // Public directories: /people, /orgs, /shows (a trailing slash too).
+  const dir = path.replace(/\/+$/, '');
+  if (dir === '/people')
+    return <PeopleDirectory />;
+  if (dir === '/orgs')
+    return <OrgDirectory />;
+  if (dir === '/shows')
+    return <ShowDirectory />;
   // Public profile pages: /people/<id>-<slug>, /orgs/<id>-<slug>, /shows/<id>-<slug>.
   if (path.startsWith('/people/'))
     return <PersonPage />;

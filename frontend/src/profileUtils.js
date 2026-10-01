@@ -33,7 +33,7 @@ export const fmtDate = (d, opts = { year: 'numeric', month: 'short', day: 'numer
   return new Date(y, (m || 1) - 1, day || 1).toLocaleDateString(undefined, opts);
 };
 export const fmtMonthYear = (d) => fmtDate(d, { year: 'numeric', month: 'short' });
-export const plural = (n, word, many) => `${n} ${n === 1 ? word : (many || `${word}s`)}`;
+export const plural = (n, word, many) => `${Number(n).toLocaleString()} ${n === 1 ? word : (many || `${word}s`)}`;
 
 export const idFromPath = (prefix) => {
   const rest = window.location.pathname.slice(prefix.length).split('/')[0];
@@ -41,7 +41,7 @@ export const idFromPath = (prefix) => {
   return Number.isFinite(id) ? id : null;
 };
 
-function setMeta(title, description) {
+export function setMeta(title, description) {
   document.title = title;
   let tag = document.querySelector('meta[name="description"]');
   if (!tag) {
