@@ -489,6 +489,33 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   confirm), the no-link fallback needs a 2+ word name and organisation
   claims on the entry, and `scraper/enrich_rejected_wikidata.json` (by
   org_id) keeps rejected entries from ever being re-applied.
+- **Organisations that are shows** (`podcasts.org_id` + `org_is_show`,
+  `migrate_add_podcast_orgs.sql`, Oct 2026): "Host of Drilled" makes Drilled
+  an organisation; `org_is_show` says that record *is* the show (links,
+  logo and its org page go to the show; out of the Organisations directory,
+  search, and Stats self-bookings). `org_is_show = false` means the
+  organisation publishes the show ("From Norton Rose Fulbright" on the show
+  page, "Podcast: …" on the org page). One show per organisation; merges
+  carry links. Set in Company Admin's Podcast section, or planned by
+  `enrich.py show-orgs`: a same-named organisation is the show unless people
+  there hold company roles and none hold show roles (a website/Wikidata entry
+  isn't evidence — Climate One has both), and a show's Apple channel that is
+  one of our organisations publishes it. A show-organisation's parent is its
+  publisher (Energy Gang under Wood Mackenzie). First run: 44 shows, 26
+  publishers, 14 parents (6 parents by hand); undo snapshot kept.
+- **X profile pictures and handles** (`backend/x_avatars.py`): pictures are
+  stored as pbs.twimg.com URLs looked up once via api.fxtwitter.com, never
+  unavatar.io (its anonymous quota ran out from Render's shared IPs, Oct
+  2026: 180 fixed). fxtwitter throttles quick repeats and then answers "User
+  not found" for real accounts — never delete or clear anything on a "not
+  found"; pause ~4s between lookups. `image_enricher.py refresh-x`
+  (weekly, refresh-avatars.yml) re-resolves pictures that stop loading.
+  `enrich.py people-x` takes handles from show notes (link text is the
+  name, "Name (@handle)", the handle spells the name, or a generic link in
+  a paragraph/guest card naming one credited person), accepted only when
+  the X account's display name is the person's; `people-x-wiki` takes
+  namesake Wikidata entries' handles only when the X bio names one of the
+  person's organisations.
 - **Company logos** (`/api/logo/{org_id}`, `OrgLogo.js`): logo.dev by the
   organisation's website with `LOGO_DEV_TOKEN` (the same logo.dev account as
   Colorado Current; set it on the Render backend), else its Wikimedia

@@ -1067,7 +1067,7 @@ def plan_show_orgs(cur) -> tuple:
                    FROM podcasts p LEFT JOIN channels c ON c.channel_id = p.channel_id""")
     shows = cur.fetchall()
     cur.execute("""
-        SELECT o.org_id, o.name, o.org_type, o.website_url, o.wikidata_id, o.not_an_org,
+        SELECT o.org_id, o.name, o.org_type, o.website_url, o.wikidata_id, o.not_an_org, o.parent_org_id,
                (SELECT COUNT(DISTINCT ha.host_id) FROM organization_aliases a
                 JOIN host_affiliations ha ON ha.company_key = a.normalized_name WHERE a.org_id = o.org_id) AS people,
                (SELECT array_agg(DISTINCT ha.title) FROM organization_aliases a
@@ -1091,8 +1091,15 @@ def plan_show_orgs(cur) -> tuple:
         row = {'podcast_id': s['podcast_id'], 'show': s['title'], 'channel': s['channel']}
         if len(bare) == 1 and not real:
             o = bare[0]
-            plan.append({**row, 'org_id': o['org_id'], 'org': o['name'], 'relation': 'show',
-                         'why': f"named like the show, nothing behind it ({o['people']} people)"})
+            link = {**row, 'org_id': o['org_id'], 'org': o['name'], 'relation': 'show',
+                    'why': f"named like the show, nothing behind it ({o['people']} people)"}
+            # The show's publisher (its Apple channel, when that's one of
+            # ours) becomes the show-organisation's parent: Energy Gang
+            # under Wood Mackenzie.
+            ch = by_key.get(show_key(s['channel'])) if s['channel'] else None
+            if ch and len(ch) == 1 and ch[0]['org_id'] != o['org_id'] and not o['parent_org_id']:
+                link.update(parent_org_id=ch[0]['org_id'], parent=ch[0]['name'])
+            plan.append(link)
             continue
         if len(real) == 1 and not bare:
             o = real[0]
@@ -1118,6 +1125,10 @@ def apply_show_orgs(conn, plan: list) -> Counter:
         cur.execute("UPDATE podcasts SET org_id = %s, org_is_show = %s WHERE podcast_id = %s AND org_id IS NULL",
                     (p['org_id'], p['relation'] == 'show', p['podcast_id']))
         stats[p['relation']] += cur.rowcount
+        if p.get('parent_org_id'):
+            cur.execute("""UPDATE organizations SET parent_org_id = %s, updated_at = now()
+                           WHERE org_id = %s AND parent_org_id IS NULL""", (p['parent_org_id'], p['org_id']))
+            stats['parent'] += cur.rowcount
     conn.commit()
     return stats
 
