@@ -445,13 +445,16 @@ export default function AdminShows() {
 
   useEffect(() => { fetchShows(); }, [fetchShows]);
 
-  // Deep-link support: /admin/shows?apple_podcast_id=X auto-opens that show
+  // Deep-link support: /admin/shows?apple_podcast_id=X auto-opens that show,
+  // fetched on its own so the panel doesn't wait for the whole list.
   useEffect(() => {
     const targetId = new URLSearchParams(window.location.search).get('apple_podcast_id');
-    if (!targetId || shows.length === 0) return;
-    const match = shows.find(s => s.apple_podcast_id === targetId);
-    if (match) setSelected(match);
-  }, [shows]);
+    if (!targetId) return;
+    adminFetch(`${API}/shows?apple_podcast_id=${encodeURIComponent(targetId)}`)
+      .then(r => (r.ok ? r.json() : []))
+      .then(rows => { if (rows[0]) setSelected(cur => cur || rows[0]); })
+      .catch(() => {});
+  }, []);
 
   const visibleShows = useMemo(() => {
     let items = shows;
