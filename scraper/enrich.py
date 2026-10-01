@@ -340,17 +340,33 @@ def one_word(name: str) -> bool:
     return len(w) <= 5 or w in _WORDS or not _WORDS
 
 
+# Claims only an organisation's Wikidata entry tends to carry: official
+# website, headquarters, industry, legal form, parent, subsidiary, CEO,
+# chairperson. A word or concept that happens to share a company's name
+# ("Nori" the dwarf, "WattTime" -> watt-hour, "Greenpeace" -> a tugboat)
+# has none of them.
+_ORG_CLAIMS = ('P856', 'P159', 'P452', 'P1454', 'P749', 'P355', 'P169', 'P488')
+
+
+def looks_like_an_organisation(entity: dict) -> bool:
+    return any(entity.get('claims', {}).get(p) for p in _ORG_CLAIMS)
+
+
 def trusted_entity(org: dict, entities: list, note_domains, clearbit: str | None):
     """The Wikidata entry that is this organisation, or None. Search finds
     namesakes ("UxC" a railway section, "The Telegraph" the Indian paper), so:
-    one whose website agrees with the show notes or Clearbit is trusted;
-    otherwise only the sole exact-name entry, with a Wikipedia article, for a
-    name that isn't a short acronym."""
-    # The show notes, when they have a link, are the only thing to check
-    # against: Clearbit's guess can agree with a namesake ("Terra" -> the
-    # Brazilian portal, while the show linked terra.do).
-    ours = {registrable(d) for d in note_domains} if note_domains else \
-        ({registrable(clearbit)} if clearbit else set())
+    one whose website agrees with a link in the show notes is trusted;
+    otherwise only the sole exact-name entry, with a Wikipedia article and
+    the claims an organisation carries, for a name of two or more words.
+
+    The Sep 30 2026 audit found 98 wrong matches of 1,466, from two holes:
+    a Clearbit guess counted as confirmation, but Clearbit guesses from the
+    name too, so it agreed with namesakes ("Crux" -> the online newspaper,
+    "Kraken" -> the crypto exchange); and the sole-entry fallback accepted
+    words and concepts ("Nori" -> a Tolkien dwarf, "Persefoni" -> the Greek
+    goddess). Clearbit can still veto a match whose website disagrees."""
+    ours = {registrable(d) for d in note_domains} if note_domains else set()
+    guessed = {registrable(clearbit)} if clearbit else set()
 
     def sites(e):
         return {registrable(h) for h in (host_of(v) for v in wd_claim_values(e, 'P856') if isinstance(v, str)) if h}
@@ -361,16 +377,34 @@ def trusted_entity(org: dict, entities: list, note_domains, clearbit: str | None
     if len(entities) != 1:
         return None
     e = entities[0]
-    if ours and sites(e) and not (sites(e) & ours):
+    known = ours or guessed
+    if known and sites(e) and not (sites(e) & known):
         return None                             # a different organisation's website
     acronym = len(squash(org['name'])) <= 5 and org['name'].strip().upper() == org['name'].strip()
     if acronym or 'enwiki' not in e.get('sitelinks', {}):
         return None
+    if len(org['name'].split()) < 2 or not looks_like_an_organisation(e):
+        return None
     return e
+
+
+# Wikidata matches a person has rejected as a different organisation, by
+# org_id (the Sep 30 2026 audit), so no later run re-applies them. Edit by
+# hand; the --manual no_wikidata list works by name for a single run.
+REJECTED_WIKIDATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'enrich_rejected_wikidata.json')
+
+
+def load_rejected_wikidata() -> dict:
+    try:
+        with open(REJECTED_WIKIDATA_FILE) as f:
+            return {int(k): set(v['wikidata_ids']) for k, v in json.load(f).items()}
+    except FileNotFoundError:
+        return {}
 
 
 def plan_orgs(cur, fetch: Fetcher, limit: int | None = None, manual: dict | None = None) -> tuple:
     manual = manual or {}
+    rejected = load_rejected_wikidata()
     wd = Wikidata(fetch)
     cur.execute("""
         SELECT o.org_id, o.name, o.org_type, o.parent_org_id, o.website_domain, o.website_source, o.wikidata_id,
@@ -394,7 +428,7 @@ def plan_orgs(cur, fetch: Fetcher, limit: int | None = None, manual: dict | None
         hits = [h for h in wd.search(o['name'])
                 if squash(h.get('label')) == squash(o['name'])
                 or any(squash(a) == squash(o['name']) for a in h.get('aliases', []))]
-        cands[o['org_id']] = [h['id'] for h in hits]
+        cands[o['org_id']] = [h['id'] for h in hits if h['id'] not in rejected.get(o['org_id'], ())]
     wd.prefetch_entities([q for qs in cands.values() for q in qs])
     ents = wd.entities([q for qs in cands.values() for q in qs])
     # Labels for the things claims point at (country, HQ, parent, types).

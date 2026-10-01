@@ -83,3 +83,48 @@ def test_people_links_never_overwrite():
         person(1, 'Jane', 'Doe', desc, linkedin_url='https://www.linkedin.com/in/jane-typed',
                field_sources={'twitter_handle': 'admin'})]))
     assert plan == []
+
+
+# ---- trusted_entity (Sep 30 2026 audit: 98 of 1,466 Wikidata matches wrong) ----
+from enrich import trusted_entity, load_rejected_wikidata  # noqa: E402
+
+
+def _entity(site=None, enwiki=True, org_claims=True):
+    claims = {}
+    if site:
+        claims['P856'] = [{'mainsnak': {'datavalue': {'value': site}}}]
+    if org_claims:
+        claims['P159'] = [{'mainsnak': {'datavalue': {'value': {'id': 'Q1'}}}}]
+    return {'id': 'Q9', 'claims': claims, 'sitelinks': {'enwiki': {'title': 'x'}} if enwiki else {}}
+
+
+def test_show_note_link_confirms():
+    e = _entity(site='https://www.fervoenergy.com')
+    assert trusted_entity({'name': 'Fervo'}, [e], ['fervoenergy.com'], None) is e
+
+
+def test_clearbit_guess_no_longer_confirms_a_one_word_namesake():
+    # "Crux" -> the online newspaper; Clearbit guessed the newspaper's site too.
+    e = _entity(site='https://cruxnow.com')
+    assert trusted_entity({'name': 'Crux'}, [e], None, 'cruxnow.com') is None
+
+
+def test_clearbit_still_vetoes_a_different_site():
+    e = _entity(site='https://other.com')
+    assert trusted_entity({'name': 'Boston Metal'}, [e], None, 'bostonmetal.com') is None
+
+
+def test_word_or_concept_without_org_claims_rejected():
+    # "Third Derivative" -> the calculus concept: Wikipedia article, no org claims.
+    e = _entity(org_claims=False)
+    assert trusted_entity({'name': 'Third Derivative'}, [e], None, None) is None
+
+
+def test_multiword_organisation_fallback_still_trusted():
+    e = _entity()
+    assert trusted_entity({'name': 'Rhodium Group'}, [e], None, None) is e
+
+
+def test_rejected_list_loads():
+    rejected = load_rejected_wikidata()
+    assert 'Q56277981' in rejected.get(311, set())   # Crux -> the online newspaper

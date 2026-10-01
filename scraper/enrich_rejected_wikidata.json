@@ -1,0 +1,688 @@
+{
+ "56": {
+  "name": "Antenna Group",
+  "wikidata_ids": [
+   "Q571837"
+  ],
+  "was": "Antenna Group: Greek mass media company"
+ },
+ "66": {
+  "name": "Arcos Dorados",
+  "wikidata_ids": [
+   "Q8203794"
+  ],
+  "was": "Golden Arches: McDonald's logo"
+ },
+ "87": {
+  "name": "B Team",
+  "wikidata_ids": [
+   "Q31177583"
+  ],
+  "was": "The B-Team: professional wrestling tag team"
+ },
+ "115": {
+  "name": "Blixt",
+  "wikidata_ids": [
+   "Q33741"
+  ],
+  "was": "lightning: weather phenomenon involving electrostatic discharge"
+ },
+ "145": {
+  "name": "Brimstone",
+  "wikidata_ids": [
+   "Q682"
+  ],
+  "was": "sulfur: chemical element with symbol S and atomic number 16"
+ },
+ "272": {
+  "name": "Coastal Bend",
+  "wikidata_ids": [
+   "Q7707582"
+  ],
+  "was": "Texas Coastal Bend: geographical region in Texas, USA"
+ },
+ "296": {
+  "name": "Copper",
+  "wikidata_ids": [
+   "Q753"
+  ],
+  "was": "copper: chemical element with symbol Cu and atomic number 29"
+ },
+ "311": {
+  "name": "Crux",
+  "wikidata_ids": [
+   "Q56277981"
+  ],
+  "was": "Crux: online newspaper"
+ },
+ "344": {
+  "name": "Durban",
+  "wikidata_ids": [
+   "Q1006838"
+  ],
+  "was": "Durban: commune in Gers, France"
+ },
+ "369": {
+  "name": "Endolith",
+  "wikidata_ids": [
+   "Q1340742"
+  ],
+  "was": "endolith: organism living inside a rock"
+ },
+ "437": {
+  "name": "Frontier",
+  "wikidata_ids": [
+   "Q133346"
+  ],
+  "was": "border: legal boundary between two territorial regions"
+ },
+ "588": {
+  "name": "Kelvin",
+  "wikidata_ids": [
+   "Q11579"
+  ],
+  "was": "kelvin: SI unit of thermodynamic temperature"
+ },
+ "592": {
+  "name": "Kraken",
+  "wikidata_ids": [
+   "Q22906202"
+  ],
+  "was": "Kraken: cryptocurrency exchange"
+ },
+ "618": {
+  "name": "Marsh",
+  "wikidata_ids": [
+   "Q30198"
+  ],
+  "was": "marsh: wetland dominated by herbaceous plants"
+ },
+ "696": {
+  "name": "Nori",
+  "wikidata_ids": [
+   "Q6012014"
+  ],
+  "was": "Nori: Middle-earth"
+ },
+ "743": {
+  "name": "Oxy",
+  "wikidata_ids": [
+   "Q1346110"
+  ],
+  "was": "Occidental College: liberal arts college in Los Angeles, California, United States"
+ },
+ "873": {
+  "name": "Solstice",
+  "wikidata_ids": [
+   "Q123524"
+  ],
+  "was": "solstice: solar event"
+ },
+ "882": {
+  "name": "Southern Nevada",
+  "wikidata_ids": [
+   "Q7570176"
+  ],
+  "was": "Southern Nevada: region of Nevada, United States"
+ },
+ "933": {
+  "name": "Tandem Repeat",
+  "wikidata_ids": [
+   "Q3456514"
+  ],
+  "was": "tandem repeat: DNA where one or more nucleotides are repeated and the repetitions are directly adjacent"
+ },
+ "948": {
+  "name": "Third Derivative",
+  "wikidata_ids": [
+   "Q7785054"
+  ],
+  "was": "third derivative: rate of change of the second derivative"
+ },
+ "953": {
+  "name": "Travertine",
+  "wikidata_ids": [
+   "Q187156"
+  ],
+  "was": "travertine: form of terrestrial limestone deposited around mineral springs, especially hot springs"
+ },
+ "1037": {
+  "name": "WattTime",
+  "wikidata_ids": [
+   "Q12831618"
+  ],
+  "was": "watt-hour: unit of energy"
+ },
+ "1148": {
+  "name": "Aalo",
+  "wikidata_ids": [
+   "Q519770"
+  ],
+  "was": "Aalo: census town and headquarters of the West Siang district of the Indian state of Arunachal Pradesh"
+ },
+ "1227": {
+  "name": "Aerial",
+  "wikidata_ids": [
+   "Q131214"
+  ],
+  "was": "antenna: electrical device which converts electric power into radio waves, and vice versa"
+ },
+ "1313": {
+  "name": "Allianz",
+  "wikidata_ids": [
+   "Q683196"
+  ],
+  "was": "Allianz: group of Swiss artists"
+ },
+ "1453": {
+  "name": "Arca",
+  "wikidata_ids": [
+   "Q4826996"
+  ],
+  "was": "autosomal recessive cerebellar ataxia: hereditary ataxia that has material basis in autosomal recessive inheritance"
+ },
+ "1456": {
+  "name": "Archive",
+  "wikidata_ids": [
+   "Q16169166"
+  ],
+  "was": "The LiederNet Archive: online repository of texts and translations of art songs and choral works"
+ },
+ "1495": {
+  "name": "Ashanti",
+  "wikidata_ids": [
+   "Q457341"
+  ],
+  "was": "Asante people: ethnic group in Ghana"
+ },
+ "1588": {
+  "name": "Baltimore",
+  "wikidata_ids": [
+   "Q1493988"
+  ],
+  "was": "Martin Baltimore: US light bomber aircraft"
+ },
+ "1664": {
+  "name": "Bend",
+  "wikidata_ids": [
+   "Q805079"
+  ],
+  "was": "bend: heraldic ordinary"
+ },
+ "1723": {
+  "name": "Blacksheep",
+  "wikidata_ids": [
+   "Q258120"
+  ],
+  "was": "Black Sheep: American hip hop duo from Queens, New York, United States, composed of Andres \"Dres\" Vargas Titus and William \"Mista Lawnge\" McLean"
+ },
+ "1805": {
+  "name": "Boiling Point",
+  "wikidata_ids": [
+   "Q1003183"
+  ],
+  "was": "boiling point: temperature at which a substance changes from liquid into vapor"
+ },
+ "1916": {
+  "name": "Bushnell",
+  "wikidata_ids": [
+   "Q20581233"
+  ],
+  "was": "Bushnell: unincorporated community in Coffee County, Georgia, USA"
+ },
+ "1943": {
+  "name": "Cal",
+  "wikidata_ids": [
+   "Q1348"
+  ],
+  "was": "Kolkata: capital city of West Bengal, India"
+ },
+ "2000": {
+  "name": "Cambrium",
+  "wikidata_ids": [
+   "Q79064"
+  ],
+  "was": "Cambrian: first period of the Paleozoic Era"
+ },
+ "2039": {
+  "name": "Carbo",
+  "wikidata_ids": [
+   "Q3844253"
+  ],
+  "was": "Carbó: municipal seat of Carbó, State of Sonora, Mexico"
+ },
+ "2112": {
+  "name": "Carrier",
+  "wikidata_ids": [
+   "Q1549382"
+  ],
+  "was": "asymptomatic carrier: person or other organism that has become infected with a pathogen without displaying signs or symptoms"
+ },
+ "2148": {
+  "name": "Ceibo",
+  "wikidata_ids": [
+   "Q963556"
+  ],
+  "was": "Ceibo: star in the constellation Chamaeleon"
+ },
+ "2294": {
+  "name": "Christian Democratic Party",
+  "wikidata_ids": [
+   "Q745466"
+  ],
+  "was": "Christian Democratic Party: political party in Australia"
+ },
+ "2299": {
+  "name": "Cipher",
+  "wikidata_ids": [
+   "Q4681865"
+  ],
+  "was": "cipher: algorithm for encrypting and decrypting information"
+ },
+ "2345": {
+  "name": "Clayco",
+  "wikidata_ids": [
+   "Q486150"
+  ],
+  "was": "Clayton County: county in Georgia, United States"
+ },
+ "2426": {
+  "name": "Climate Communication",
+  "wikidata_ids": [
+   "Q82529147"
+  ],
+  "was": "climate change communication: communications field focused on bringing climate change information to a public"
+ },
+ "2465": {
+  "name": "Climate Restoration",
+  "wikidata_ids": [
+   "Q48801980"
+  ],
+  "was": "Climate restoration: goal and actions intended meant to reverse current trends of climate change"
+ },
+ "2526": {
+  "name": "Cocoon",
+  "wikidata_ids": [
+   "Q747071"
+  ],
+  "was": "cocoon: shell made of silk by most kinds of moth caterpillars and other insect larvae"
+ },
+ "2650": {
+  "name": "Coral",
+  "wikidata_ids": [
+   "Q171446"
+  ],
+  "was": "coral: marine invertebrates of the class Anthozoa"
+ },
+ "2666": {
+  "name": "Cotopaxi",
+  "wikidata_ids": [
+   "Q5175454"
+  ],
+  "was": "Cotopaxi: census-designated place in Fremont County, Colorado, United States"
+ },
+ "2800": {
+  "name": "Deep Green",
+  "wikidata_ids": [
+   "Q5250206"
+  ],
+  "was": "Deep Green: US military project"
+ },
+ "2812": {
+  "name": "Delta Charge",
+  "wikidata_ids": [
+   "Q3705215"
+  ],
+  "was": "Delta: horizontally scrolling shooter computer game"
+ },
+ "3093": {
+  "name": "Element 1",
+  "wikidata_ids": [
+   "Q556"
+  ],
+  "was": "hydrogen: chemical element with symbol H and atomic number 1"
+ },
+ "3103": {
+  "name": "Eli",
+  "wikidata_ids": [
+   "Q1956376"
+  ],
+  "was": "Eli: Israeli settlement in occupied the West Bank, Palestine"
+ },
+ "3185": {
+  "name": "Energy Flux",
+  "wikidata_ids": [
+   "Q5377054"
+  ],
+  "was": "energy flux: rate of transfer of energy through a surface"
+ },
+ "3488": {
+  "name": "Focal",
+  "wikidata_ids": [
+   "Q1966202"
+  ],
+  "was": "FOCAL: level programming language for the Lego Mindstorms NXT"
+ },
+ "3593": {
+  "name": "Fusion Power",
+  "wikidata_ids": [
+   "Q641442"
+  ],
+  "was": "fusion power: experimental type of electricity generation using nuclear fusion"
+ },
+ "3595": {
+  "name": "Future",
+  "wikidata_ids": [
+   "Q344"
+  ],
+  "was": "future: events, developments or states in the timeline which have yet to occur"
+ },
+ "3843": {
+  "name": "Greenpeace",
+  "wikidata_ids": [
+   "Q6719575"
+  ],
+  "was": "Elbe: tugboat"
+ },
+ "3995": {
+  "name": "Hess",
+  "wikidata_ids": [
+   "Q15755050"
+  ],
+  "was": "Hydrology and Earth System Sciences: peer reviewed open access scientific journal"
+ },
+ "4106": {
+  "name": "The Hypocrite",
+  "wikidata_ids": [
+   "Q107354153"
+  ],
+  "was": "The Hypocrite: 1768 play"
+ },
+ "4131": {
+  "name": "Identity Group",
+  "wikidata_ids": [
+   "Q568687"
+  ],
+  "was": "trivial group: group with one element"
+ },
+ "4449": {
+  "name": "Karbone",
+  "wikidata_ids": [
+   "Q24489"
+  ],
+  "was": "coal: combustible sedimentary rock composed primarily of carbon"
+ },
+ "4477": {
+  "name": "Khepra",
+  "wikidata_ids": [
+   "Q215940"
+  ],
+  "was": "Khepri: Egyptian deity of the rising sun"
+ },
+ "4565": {
+  "name": "Leap",
+  "wikidata_ids": [
+   "Q1151752"
+  ],
+  "was": "jumping: form of locomotion or movement"
+ },
+ "4758": {
+  "name": "Martie",
+  "wikidata_ids": [
+   "Q110"
+  ],
+  "was": "March: third month in the Julian and Gregorian calendars"
+ },
+ "4893": {
+  "name": "Modern Synthesis",
+  "wikidata_ids": [
+   "Q337897"
+  ],
+  "was": "modern evolutionary synthesis: early-20th-century scientific theory combining Darwinian evolution and Mendelian inheritance"
+ },
+ "4901": {
+  "name": "Momentum",
+  "wikidata_ids": [
+   "Q41273"
+  ],
+  "was": "momentum: conserved physical quantity related to the motion of a body"
+ },
+ "5079": {
+  "name": "New Consensus",
+  "wikidata_ids": [
+   "Q2342392"
+  ],
+  "was": "new neoclassical synthesis: fusion of new classical macroeconomics/real business cycle theory and early New Keynesian economics into a consensus view on the best way to explain short-run fluctuations in the economy"
+ },
+ "5152": {
+  "name": "Nomea",
+  "wikidata_ids": [
+   "Q9733"
+  ],
+  "was": "Nouméa: capital city of the French special collectivity of New Caledonia"
+ },
+ "5154": {
+  "name": "Nomura",
+  "wikidata_ids": [
+   "Q7048700"
+  ],
+  "was": "Nomura: dissolved municipality in Higashiuwa district, Ehime prefecture, Japan"
+ },
+ "5164": {
+  "name": "Norma",
+  "wikidata_ids": [
+   "Q10582"
+  ],
+  "was": "Norma: constellation in the southern celestial hemisphere"
+ },
+ "5498": {
+  "name": "Patch",
+  "wikidata_ids": [
+   "Q208218"
+  ],
+  "was": "patch: piece of software designed to update a computer program to fix or improve it"
+ },
+ "5529": {
+  "name": "Perfekto",
+  "wikidata_ids": [
+   "Q625420"
+  ],
+  "was": "perfect tense: grammatical tense"
+ },
+ "5534": {
+  "name": "Persefoni",
+  "wikidata_ids": [
+   "Q45967"
+  ],
+  "was": "Persephone: Greek goddess of the seasons and the queen of the underworld; married with Hades"
+ },
+ "5588": {
+  "name": "Planet",
+  "wikidata_ids": [
+   "Q634"
+  ],
+  "was": "planet: celestial body directly orbiting a star or stellar remnant"
+ },
+ "5597": {
+  "name": "Planeta Tierra",
+  "wikidata_ids": [
+   "Q2"
+  ],
+  "was": "Earth: third planet from the Sun in the Solar System"
+ },
+ "5683": {
+  "name": "Precision Fermentation",
+  "wikidata_ids": [
+   "Q122678693"
+  ],
+  "was": "precision fermentation: bio-technical production process"
+ },
+ "5702": {
+  "name": "Priceline",
+  "wikidata_ids": [
+   "Q7242652"
+  ],
+  "was": "Priceline: Australian health and beauty retailer"
+ },
+ "5731": {
+  "name": "Protium",
+  "wikidata_ids": [
+   "Q12830437"
+  ],
+  "was": "protium: isotope of hydrogen with 0 neutrons"
+ },
+ "5735": {
+  "name": "Prudential",
+  "wikidata_ids": [
+   "Q821342"
+  ],
+  "was": "Hotel Warszawa: architectural structure"
+ },
+ "5833": {
+  "name": "RE TECH",
+  "wikidata_ids": [
+   "Q28135512"
+  ],
+  "was": "real estate technology: application of IT and economics to real estate"
+ },
+ "5890": {
+  "name": "Remora",
+  "wikidata_ids": [
+   "Q239771"
+  ],
+  "was": "Echeneidae: family of fishes"
+ },
+ "5974": {
+  "name": "Ripple Effect",
+  "wikidata_ids": [
+   "Q7335725"
+  ],
+  "was": "ripple effect: disturbance that propagates through a system"
+ },
+ "6133": {
+  "name": "Seabound",
+  "wikidata_ids": [
+   "Q104936975"
+  ],
+  "was": "Seabound: 14th season of Ninjago TV-series"
+ },
+ "6148": {
+  "name": "Securities and Exchange Commission",
+  "wikidata_ids": [
+   "Q7444918"
+  ],
+  "was": "Securities and Exchange Commission: government agency of the Philippines"
+ },
+ "6176": {
+  "name": "Seoul",
+  "wikidata_ids": [
+   "Q8684"
+  ],
+  "was": "Seoul: capital and largest city of South Korea"
+ },
+ "6434": {
+  "name": "Stand",
+  "wikidata_ids": [
+   "Q1510380"
+  ],
+  "was": "grove: small group of trees of less than 5,000 m²"
+ },
+ "6601": {
+  "name": "Switch",
+  "wikidata_ids": [
+   "Q5320"
+  ],
+  "was": "electrical switch: electrical component that can break an electrical circuit"
+ },
+ "6667": {
+  "name": "Tempo",
+  "wikidata_ids": [
+   "Q189214"
+  ],
+  "was": "tempo: musical concept indicating to the speed of interpretation"
+ },
+ "6703": {
+  "name": "Tesi",
+  "wikidata_ids": [
+   "Q1266946"
+  ],
+  "was": "thesis: work by academic candidate"
+ },
+ "6849": {
+  "name": "Twelve",
+  "wikidata_ids": [
+   "Q36977"
+  ],
+  "was": "None: natural number"
+ },
+ "7217": {
+  "name": "Verne",
+  "wikidata_ids": [
+   "Q905822"
+  ],
+  "was": "Verne: commune in Doubs, France"
+ },
+ "7240": {
+  "name": "Vistra",
+  "wikidata_ids": [
+   "Q18657386"
+  ],
+  "was": "Vistra: Market research organizations"
+ },
+ "7248": {
+  "name": "Vocero",
+  "wikidata_ids": [
+   "Q17221"
+  ],
+  "was": "spokesperson: someone engaged or elected to speak on behalf of others"
+ },
+ "7348": {
+  "name": "West Monroe",
+  "wikidata_ids": [
+   "Q727095"
+  ],
+  "was": "West Monroe: suburb city of Monroe, located in Ouachita Parish, Louisiana, United States"
+ },
+ "7379": {
+  "name": "Wild Earth",
+  "wikidata_ids": [
+   "Q8000622"
+  ],
+  "was": "Wild Earth: magazine"
+ },
+ "7387": {
+  "name": "Wind",
+  "wikidata_ids": [
+   "Q8094"
+  ],
+  "was": "wind: flow of gases or air on a large scale"
+ },
+ "7391": {
+  "name": "Winnow",
+  "wikidata_ids": [
+   "Q8025857"
+  ],
+  "was": "Winnow: technique from machine learning for learning a linear classifier from labeled examples"
+ },
+ "7459": {
+  "name": "Wren",
+  "wikidata_ids": [
+   "Q420841"
+  ],
+  "was": "Maluridae: family of birds"
+ },
+ "7558": {
+  "name": "Amasia",
+  "wikidata_ids": [
+   "Q455417"
+  ],
+  "was": "Amasia: possible future supercontinent"
+ },
+ "7626": {
+  "name": "Meridian",
+  "wikidata_ids": [
+   "Q32099"
+  ],
+  "was": "meridian: line between the poles with the same longitude"
+ }
+}

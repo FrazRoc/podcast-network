@@ -481,6 +481,14 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   logos), ~400 newly typed, 51 parent links; people — LinkedIn 8 → 914,
   X 186 → 407, photos 246 → 401, Wikipedia 0 → 193. Undo snapshots of
   every touched row were kept from that session.
+  **Audit (Sep 30 2026): 98 of 1,466 Wikidata matches were another
+  organisation** — words and concepts ("Nori" a Tolkien dwarf, "WattTime"
+  the watt-hour) and namesakes Clearbit also guessed ("Crux" the online
+  newspaper, "Kraken" the crypto exchange). Cleared, with undo kept. Since
+  then only a show-note link confirms a match (Clearbit can veto, not
+  confirm), the no-link fallback needs a 2+ word name and organisation
+  claims on the entry, and `scraper/enrich_rejected_wikidata.json` (by
+  org_id) keeps rejected entries from ever being re-applied.
 - **Company logos** (`/api/logo/{org_id}`, `OrgLogo.js`): logo.dev by the
   organisation's website with `LOGO_DEV_TOKEN` (the same logo.dev account as
   Colorado Current; set it on the Render backend), else its Wikimedia
