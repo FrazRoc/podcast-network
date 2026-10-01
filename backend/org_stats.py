@@ -21,18 +21,35 @@ ORG_TYPES = ('company', 'investor', 'nonprofit', 'research', 'academic',
 # A company marked not an organisation never counts as a parent: whatever
 # sits under it is its own top (the hidden "California" once collected three
 # state agencies in Most-Booked Organisations).
+_ORG_TOP_DEPTH = 8
+# Walked as a fixed number of parent joins rather than WITH RECURSIVE: the
+# recursive form made Postgres compare every organisation with every other on
+# each step (~200ms, on every Stats chart and org/show page); this is ~2ms and
+# gives the same answer while no chain is deeper than _ORG_TOP_DEPTH (the
+# deepest is 3 as of Oct 2026, checked against the recursive version then).
 _ORG_TOP = """
     org_top AS (
-        WITH RECURSIVE up AS (
-            SELECT o.org_id, o.org_id AS top FROM organizations o
-            LEFT JOIN organizations p ON p.org_id = o.parent_org_id
-            WHERE o.parent_org_id IS NULL OR p.not_an_org
-            UNION ALL
-            SELECT o.org_id, up.top FROM organizations o
-            JOIN up ON o.parent_org_id = up.org_id
-            JOIN organizations p ON p.org_id = o.parent_org_id AND NOT p.not_an_org
-        )
-        SELECT up.org_id, up.top FROM up
+        SELECT o.org_id,
+               CASE
+                    WHEN p1.org_id IS NULL OR p1.not_an_org THEN o.org_id
+                    WHEN p2.org_id IS NULL OR p2.not_an_org THEN p1.org_id
+                    WHEN p3.org_id IS NULL OR p3.not_an_org THEN p2.org_id
+                    WHEN p4.org_id IS NULL OR p4.not_an_org THEN p3.org_id
+                    WHEN p5.org_id IS NULL OR p5.not_an_org THEN p4.org_id
+                    WHEN p6.org_id IS NULL OR p6.not_an_org THEN p5.org_id
+                    WHEN p7.org_id IS NULL OR p7.not_an_org THEN p6.org_id
+                    WHEN p8.org_id IS NULL OR p8.not_an_org THEN p7.org_id
+                    ELSE p8.org_id
+               END AS top
+        FROM organizations o
+        LEFT JOIN organizations p1 ON p1.org_id = o.parent_org_id
+        LEFT JOIN organizations p2 ON p2.org_id = p1.parent_org_id
+        LEFT JOIN organizations p3 ON p3.org_id = p2.parent_org_id
+        LEFT JOIN organizations p4 ON p4.org_id = p3.parent_org_id
+        LEFT JOIN organizations p5 ON p5.org_id = p4.parent_org_id
+        LEFT JOIN organizations p6 ON p6.org_id = p5.parent_org_id
+        LEFT JOIN organizations p7 ON p7.org_id = p6.parent_org_id
+        LEFT JOIN organizations p8 ON p8.org_id = p7.parent_org_id
     )
 """
 

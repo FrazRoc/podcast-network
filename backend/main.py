@@ -6,6 +6,8 @@
 import re
 import secrets
 import threading
+import asyncio
+import io
 import time
 
 from fastapi import FastAPI, HTTPException, Header, Depends, BackgroundTasks
@@ -13,6 +15,8 @@ from pydantic import BaseModel
 from typing import Optional
 from fastapi.middleware.cors import CORSMiddleware
 import psycopg2
+import psycopg2.pool
+import psycopg2.extensions
 from psycopg2.extras import RealDictCursor
 import os
 import json
@@ -360,6 +364,26 @@ DEFAULT_ALLOWED_ORIGINS = [
 ]
 extra_origins = [o.strip() for o in os.getenv("ADDITIONAL_ALLOWED_ORIGINS", "").split(",") if o.strip()]
 
+# Public pages that can be cached by the browser for a few minutes (back and
+# forth between pages is then instant). Admins' pages fetch with no-cache, so
+# an edit shows up on the next load.
+_PUBLIC_CACHEABLE_RE = re.compile(r'^/api/(?:(?:people|orgs|shows)/\d+/profile|directory/[a-z]+|search)$')
+
+
+@app.middleware("http")
+async def _cache_headers_and_freshness(request, call_next):
+    response = await call_next(request)
+    if (request.method == 'GET' and response.status_code == 200
+            and 'cache-control' not in response.headers
+            and _PUBLIC_CACHEABLE_RE.match(request.url.path)):
+        response.headers['Cache-Control'] = 'public, max-age=300'
+    # An admin edit can change any directory row: have the next request
+    # rebuild them (it is still served the old list meanwhile).
+    if request.method != 'GET' and request.url.path.startswith('/api/admin/') and response.status_code < 400:
+        _expire_directories()
+    return response
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=DEFAULT_ALLOWED_ORIGINS + extra_origins,
@@ -368,14 +392,66 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def get_db_connection():
-    return psycopg2.connect(
+def _connect_kwargs() -> dict:
+    return dict(
         host=os.getenv("DB_HOST", "localhost"),
         database=os.getenv("DB_NAME", "podcast_db"),
         user=os.getenv("DB_USER", ""),
         password=os.getenv("DB_PASSWORD", ""),
-        cursor_factory=RealDictCursor
+        cursor_factory=RealDictCursor,
     )
+
+
+class _PooledConnection(psycopg2.extensions.connection):
+    """A connection whose close() hands it back to the pool (which rolls back
+    anything left open) instead of closing it, so every endpoint's existing
+    conn.close() keeps working unchanged."""
+    _home = None
+
+    def close(self):
+        home, self._home = self._home, None
+        if home is not None and not self.closed:
+            try:
+                home.putconn(self)   # really closes it when the pool is full
+                return
+            except Exception:
+                pass
+        super().close()
+
+
+# Opening a connection (TCP + TLS + auth) cost more than most queries;
+# reusing them takes that off every request. Lazily built so importing main
+# (tests, scripts) never connects.
+_POOL = None
+_POOL_LOCK = threading.Lock()
+_POOL_KEEP = 4      # idle connections kept open
+_POOL_MAX = 12      # beyond this, requests get a one-off connection
+
+
+def get_db_connection():
+    global _POOL
+    with _POOL_LOCK:
+        if _POOL is None:
+            _POOL = psycopg2.pool.ThreadedConnectionPool(
+                0, _POOL_MAX, connection_factory=_PooledConnection, **_connect_kwargs())
+            _POOL.minconn = _POOL_KEEP   # putconn keeps up to this many; none opened up front
+    for _ in range(2):
+        try:
+            conn = _POOL.getconn()
+        except psycopg2.pool.PoolError:
+            break
+        try:
+            # A connection the database dropped while idle only says so when used.
+            if not conn.closed:
+                with conn.cursor() as c:
+                    c.execute("SELECT 1")
+                conn.rollback()
+                conn._home = _POOL
+                return conn
+        except psycopg2.Error:
+            pass
+        _POOL.putconn(conn, close=True)
+    return psycopg2.connect(**_connect_kwargs())
 
 @app.get("/api/host-connections")
 async def get_host_connections():
@@ -2049,30 +2125,71 @@ async def company_logo(org_id: int):
                     headers={'Cache-Control': 'public, max-age=604800', 'Access-Control-Allow-Origin': '*'})
 
 
+# One client for every proxied image (keeps connections to the image hosts
+# open), and the most recent ~400 small images in memory (~15MB at most).
+_IMAGE_CLIENT = None
+_IMAGE_CACHE: "OrderedDict[tuple, tuple]" = OrderedDict()
+_IMAGE_CACHE_MAX = 400
+_IMAGE_CACHE_ITEM_MAX = 150_000
+
+
+def _shrink_image(content: bytes, width: int):
+    """A copy at most `width` pixels across, as WebP; None when it can't be
+    read (SVG, say) or is already that small."""
+    from PIL import Image, ImageOps
+    try:
+        img = Image.open(io.BytesIO(content))
+        if img.width <= width and img.height <= width:
+            return None
+        img = ImageOps.exif_transpose(img)
+        img.thumbnail((width, width))
+        if img.mode not in ('RGB', 'RGBA'):
+            img = img.convert('RGBA' if 'transparency' in img.info or img.mode in ('LA', 'P') else 'RGB')
+        out = io.BytesIO()
+        img.save(out, 'WEBP', quality=82)
+        return out.getvalue()
+    except Exception:
+        return None
+
+
 @app.get("/api/proxy/image")
-async def proxy_image(url: str):
+async def proxy_image(url: str, w: Optional[int] = None):
     """
     Proxy external images to avoid CORS issues in canvas rendering.
     Usage: /api/proxy/image?url=https://unavatar.io/twitter/drvolts
     """
-    import httpx
     from fastapi.responses import Response
 
     if not is_allowed_image_url(url):
         raise HTTPException(status_code=400, detail="URL host is not an allowed image source")
 
+    headers = {'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=86400'}
+    # w: shrink to this width (the public pages ask for about twice the size
+    # they show; the graph asks for the original).
+    width = max(16, min(w, 512)) if w else None
+    key = (url, width)
+    hit = _IMAGE_CACHE.get(key)
+    if hit:
+        _IMAGE_CACHE.move_to_end(key)
+        return Response(content=hit[0], media_type=hit[1], headers=headers)
+    global _IMAGE_CLIENT
+    if _IMAGE_CLIENT is None:
+        _IMAGE_CLIENT = httpx.AsyncClient(follow_redirects=True, timeout=10, headers={
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'})
     try:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=10) as client:
-            resp = await client.get(url, headers={
-                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
-            })
-            return Response(
-                content=resp.content,
-                media_type=resp.headers.get('content-type', 'image/jpeg'),
-                headers={'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=86400'},
-            )
+        resp = await _IMAGE_CLIENT.get(url)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to fetch image: {e}")
+    content, media_type = resp.content, resp.headers.get('content-type', 'image/jpeg')
+    if width and resp.status_code == 200:
+        small = await asyncio.to_thread(_shrink_image, content, width)
+        if small:
+            content, media_type = small, 'image/webp'
+    if resp.status_code == 200 and len(content) <= _IMAGE_CACHE_ITEM_MAX:
+        _IMAGE_CACHE[key] = (content, media_type)
+        if len(_IMAGE_CACHE) > _IMAGE_CACHE_MAX:
+            _IMAGE_CACHE.popitem(last=False)
+    return Response(content=content, media_type=media_type, headers=headers)
 
 
 # ==================================================================
@@ -3812,26 +3929,34 @@ async def get_show_profile(podcast_id: int):
         # Shows sharing the most guests with this one (distinct guest people),
         # with Jaccard overlap so a huge show doesn't top every list.
         cur.execute("""
-            WITH g AS (
-                SELECT DISTINCT e.podcast_id, eh.host_id
+            WITH mine AS (
+                SELECT DISTINCT eh.host_id
                 FROM episode_host eh JOIN episodes e ON e.episode_id = eh.episode_id
-                WHERE eh.is_guest
+                WHERE eh.is_guest AND e.podcast_id = %(p)s
             ),
-            sizes AS (SELECT podcast_id, COUNT(*) AS n FROM g GROUP BY podcast_id),
+            -- Only this show's guests, rather than every pair of shows.
             shared AS (
-                SELECT b.podcast_id, COUNT(*) AS shared
-                FROM g a JOIN g b ON b.host_id = a.host_id AND b.podcast_id <> a.podcast_id
-                WHERE a.podcast_id = %(p)s
-                GROUP BY b.podcast_id
+                SELECT e.podcast_id, COUNT(DISTINCT eh.host_id) AS shared
+                FROM episode_host eh JOIN episodes e ON e.episode_id = eh.episode_id
+                WHERE eh.is_guest AND e.podcast_id <> %(p)s AND eh.host_id IN (SELECT host_id FROM mine)
+                GROUP BY e.podcast_id
+            ),
+            top AS (
+                SELECT shared.podcast_id, shared.shared, p.title, p.cover_art_url
+                FROM shared JOIN podcasts p ON p.podcast_id = shared.podcast_id
+                ORDER BY shared.shared DESC, p.title
+                LIMIT 8
+            ),
+            sizes AS (
+                SELECT e.podcast_id, COUNT(DISTINCT eh.host_id) AS n
+                FROM episode_host eh JOIN episodes e ON e.episode_id = eh.episode_id
+                WHERE eh.is_guest AND e.podcast_id IN (SELECT podcast_id FROM top)
+                GROUP BY e.podcast_id
             )
-            SELECT p.podcast_id, p.title, p.cover_art_url, shared.shared,
-                   ROUND(shared.shared::numeric / NULLIF(sa.n + sb.n - shared.shared, 0), 3) AS jaccard
-            FROM shared
-            JOIN podcasts p ON p.podcast_id = shared.podcast_id
-            JOIN sizes sb ON sb.podcast_id = shared.podcast_id
-            JOIN sizes sa ON sa.podcast_id = %(p)s
-            ORDER BY shared.shared DESC, p.title
-            LIMIT 8
+            SELECT top.podcast_id, top.title, top.cover_art_url, top.shared,
+                   ROUND(top.shared::numeric / NULLIF((SELECT COUNT(*) FROM mine) + sb.n - top.shared, 0), 3) AS jaccard
+            FROM top JOIN sizes sb ON sb.podcast_id = top.podcast_id
+            ORDER BY top.shared DESC, top.title
         """, {'p': podcast_id})
         overlap = [{**r, 'slug': profiles.slugify(r['title'])} for r in cur.fetchall()]
 
@@ -3868,6 +3993,11 @@ async def get_show_profile(podcast_id: int):
 _DIRECTORY_TTL = 900
 _DIRECTORY_CACHE: dict = {}
 _DIRECTORY_REBUILDING: set = set()
+
+
+def _expire_directories():
+    for kind, (_, rows) in list(_DIRECTORY_CACHE.items()):
+        _DIRECTORY_CACHE[kind] = (float('-inf'), rows)
 
 
 def _rebuild_directory(kind: str, build):
