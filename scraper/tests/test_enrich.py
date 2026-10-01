@@ -128,3 +128,119 @@ def test_multiword_organisation_fallback_still_trusted():
 def test_rejected_list_loads():
     rejected = load_rejected_wikidata()
     assert 'Q56277981' in rejected.get(311, set())   # Crux -> the online newspaper
+
+
+# --- people-x: X handles from show notes ---
+
+from enrich import x_link_candidates, x_name_matches  # noqa: E402
+
+_ZACK = {'host_id': 1, 'first_name': 'Zack', 'last_name': 'Colman'}
+_HANNAH = {'host_id': 2, 'first_name': 'Hannah', 'last_name': 'Ritchie'}
+_HOST = {'host_id': 3, 'first_name': 'Amy', 'last_name': 'Westervelt'}
+
+
+class TestXLinkCandidates:
+    def test_link_text_is_the_name(self):
+        d = '<p>He took a role regulating it.</p><p><a href="https://twitter.com/zcolman?lang=en">Zack Colman</a></p>'
+        assert x_link_candidates(d, [_ZACK, _HOST]) == [(1, 'zcolman', 'link_text')]
+
+    def test_generic_link_in_one_guests_paragraph(self):
+        d = ('<p>Hannah Ritchie | <a href="https://ourworldindata.org/">Our World in Data</a> | '
+             '<a href="https://twitter.com/_hannahritchie?lang=en">Twitter (X)</a></p>')
+        assert x_link_candidates(d, [_HANNAH, _HOST]) == [(2, '_hannahritchie', 'handle_name')]
+
+    def test_generic_link_without_name_in_handle(self):
+        d = '<p>Guest: Hannah Ritchie, data scientist. <a href="https://x.com/hrdata">Twitter</a></p>'
+        assert x_link_candidates(d, [_HANNAH]) == [(2, 'hrdata', 'same_paragraph')]
+
+    def test_name_then_handle(self):
+        d = 'Today we talk to Zack Colman (@zcolman) about the EPA.'
+        assert x_link_candidates(d, [_ZACK]) == [(1, 'zcolman', 'name_then_handle')]
+
+    def test_two_names_in_a_paragraph_is_not_enough(self):
+        d = '<p>Zack Colman and Hannah Ritchie join us. <a href="https://twitter.com/somepod">Twitter</a></p>'
+        assert x_link_candidates(d, [_ZACK, _HANNAH]) == []
+
+    def test_show_account_in_its_own_paragraph_not_attributed(self):
+        d = '<p>Zack Colman joins us.</p><p>Follow us on <a href="https://twitter.com/WeAreDrilled">Twitter.</a></p>'
+        assert x_link_candidates(d, [_ZACK]) == []
+
+    def test_guest_card_over_several_lines(self):
+        d = ('<p dir="ltr">Edwina Floch</p> <p dir="ltr">Founder, The Environmental Music Prize</p> '
+             '<p dir="ltr"><a href="https://au.linkedin.com/in/edwinafloch">LinkedIn</a> | '
+             '<a href="https://twitter.com/EdwinaFloch">Twitter</a></p>')
+        ed = {'host_id': 9, 'first_name': 'Edwina', 'last_name': 'Floch'}
+        assert (9, 'EdwinaFloch', 'handle_name') in x_link_candidates(d, [ed])
+        d2 = d.replace('EdwinaFloch', 'EnvMusicPrize')
+        assert x_link_candidates(d2, [ed]) == [(9, 'EnvMusicPrize', 'same_paragraph')]
+
+    def test_cited_tweets_are_not_profiles(self):
+        d = '<p>Zack Colman on the map: <a href="https://x.com/MichaelFWehner/status/1840894606503821713">this</a></p>'
+        assert x_link_candidates(d, [_ZACK]) == []
+
+    def test_handle_spelling_the_name_anywhere(self):
+        d = '<p>Zack Colman joins.</p><p>Links</p><p>Mentioned:</p><p><a href="https://twitter.com/ZackColman">profile</a></p>'
+        assert (1, 'ZackColman', 'handle_name') in x_link_candidates(d, [_ZACK])
+
+    def test_reserved_paths_and_emails_ignored(self):
+        d = '<p>Zack Colman: <a href="https://twitter.com/intent/tweet?text=hi">share</a> mail zack@example.com</p>'
+        assert x_link_candidates(d, [_ZACK]) == []
+
+
+class TestXNameMatches:
+    def test_plain_and_decorated_names(self):
+        assert x_name_matches('Zack', 'Colman', 'Zack Colman', 'zcolman')
+        assert x_name_matches('Amy', 'Westervelt', 'AmyWestervelt (🔋,🕸)', 'WesterveltAmy')
+        assert x_name_matches('Robinson', 'Meyer', 'Robinson Meyer 🔥', 'robinsonmeyer')
+        assert x_name_matches('Katharine', 'Wilkinson', 'Dr. Katharine Wilkinson', 'DrKWilkinson')
+        assert x_name_matches('Isabel Cavelier', 'Adarve', 'Isabel Cavelier', 'isabelcavelier')
+        assert x_name_matches("Tamara", "Toles O'Laughlin", "Tamara Toles O'Laughlin", 'Tamaraity')
+        assert x_name_matches('Chris', 'Neidl', 'Neidl.c', 'neidl_c')
+
+    def test_initial_yes_nickname_no(self):
+        assert x_name_matches('Jennifer', 'Granholm', 'J. Granholm', 'jgranholm')
+        # Nicknames aren't guessed: "Bob" for Robert is left out (cautious;
+        # nothing is applied for it).
+        assert not x_name_matches('Robert', 'Smith', 'Bob Smith', 'bobsmith')
+
+    def test_other_people_and_companies_rejected(self):
+        assert not x_name_matches('Zack', 'Colman', 'POLITICO', 'politicopro')
+        assert not x_name_matches('Hannah', 'Ritchie', 'Our World in Data', 'OurWorldInData')
+        assert not x_name_matches('Zack', 'Colman', 'Jane Colman', 'janecolman')
+        # The handle can't vouch for itself.
+        assert not x_name_matches('Li', 'Wang', 'lili', 'liwang22')
+
+
+from enrich import bio_names_org  # noqa: E402
+
+
+class TestBioNamesOrg:
+    def test_whole_words_and_mentions(self):
+        assert bio_names_org('Managing Partner at Energy Impact Partners. Views mine.', 'Energy Impact Partners')
+        assert bio_names_org('Editor @Heatmap_News', 'Heatmap')
+        assert bio_names_org('CEO of Fervo Energy', 'Fervo Energy')
+
+    def test_not_inside_other_words_or_too_short(self):
+        assert not bio_names_org('I love metadata', 'Meta')
+        assert not bio_names_org('Bollywood actor and producer', 'Fervo Energy')
+        assert not bio_names_org('Works at IEA', 'IEA')   # too short to be evidence
+
+
+# --- show-orgs ---
+
+from enrich import show_key, looks_like_company  # noqa: E402
+
+
+class TestShowOrgs:
+    def test_show_key_drops_show_words(self):
+        assert show_key('The Pexapark Podcast') == show_key('Pexapark')
+        assert show_key('Catalyst with Shayle Kann') == show_key('Catalyst')
+        assert show_key('Cleaning Up: Leadership in an Age of Climate Change') == show_key('Cleaning Up')
+
+    def test_company_or_show_by_peoples_roles(self):
+        assert looks_like_company({'titles': ['CEO and co-founder', 'COO']})            # Pexapark
+        assert not looks_like_company({'titles': ['founder and co-host', 'co-host']})   # Climate One
+        assert not looks_like_company({'titles': ['creator', 'Florida solar expert']})  # Solar Surge
+        assert not looks_like_company({'titles': []})
+        # A website or Wikidata entry isn't evidence: shows have those too.
+        assert not looks_like_company({'website_url': 'https://climateone.org', 'titles': ['co-host']})

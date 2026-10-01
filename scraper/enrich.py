@@ -44,6 +44,7 @@ from psycopg2.extras import RealDictCursor
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'backend'))
 from org_names import normalize_org_name  # noqa: E402
+import x_avatars  # noqa: E402
 
 log = logging.getLogger('enrich')
 DB = os.getenv('DATABASE_URL', 'postgresql://localhost/podcast_db')
@@ -690,6 +691,437 @@ def plan_people_links(cur) -> tuple:
     return plan, review
 
 
+# ------------------------------------------------------------------
+# People: X handles from show notes, checked against the account's name
+# ------------------------------------------------------------------
+# people-links only trusts a link whose handle spells the person's name.
+# This also reads how show notes pair a name with an account — the link text
+# is the name, "Name (@handle)", or a lone "Twitter" link in the paragraph
+# about one guest — and accepts a handle only when the X account's own
+# display name is that person's (looked up via x_avatars, cached). That check
+# is what nearness alone lacked in Sep 2026: a co-guest's or company's
+# account doesn't carry the guest's name.
+
+_X_RESERVED = {'intent', 'share', 'home', 'search', 'hashtag', 'i', 'login', 'signup', 'explore',
+               'settings', 'messages', 'notifications', 'compose', 'tos', 'privacy', 'about', 'download'}
+_X_URL_RE = re.compile(r'(?:https?://)?(?:www\.|mobile\.)?(?:twitter|x)\.com/(?:#!/)?@?([A-Za-z0-9_]{1,15})(?![A-Za-z0-9_])', re.I)
+_X_AT_RE = re.compile(r'(?<![A-Za-z0-9_@./])@([A-Za-z0-9_]{2,15})(?![A-Za-z0-9_.@])')
+_ANCHOR_RE = re.compile(r'<a\b[^>]*?href\s*=\s*["\']([^"\']+)["\'][^>]*>(.*?)</a>', re.I | re.S)
+_BLOCK_SPLIT_RE = re.compile(r'<br\s*/?>|</p>|<p\b[^>]*>|</li>|<li\b[^>]*>|</div>|\n', re.I)
+_GENERIC_LINK_TEXT = re.compile(r'^(?:twitter|x|twitter\s*\(x\)|x\s*\(twitter\)|x/twitter|twitter/x|tweet\w*|follow\b.*|'
+                                r'on\s+(?:twitter|x)|@?[a-z0-9_]{2,15})$')
+
+
+def _fold_text(s: str) -> str:
+    return ' '.join(ascii_fold(html.unescape(re.sub(r'<[^>]+>', ' ', s or ''))).split())
+
+
+def _x_handle(url_or_text: str):
+    m = _X_URL_RE.search(url_or_text or '')
+    if not m or m.group(1).lower() in _X_RESERVED:
+        return None
+    return m.group(1)
+
+
+def _is_tweet_link(url: str) -> bool:
+    """x.com/someone/status/123: a tweet cited in the notes, not a profile."""
+    return bool(re.search(r'(?:twitter|x)\.com/[A-Za-z0-9_]+/status', url or '', re.I))
+
+
+def x_link_candidates(description: str, people: list) -> list:
+    """(host_id, handle, signal) for each X account the show notes pair with
+    one of `people` (the people credited on the episode: dicts with host_id,
+    first_name, last_name). signal, strongest first: 'link_text' (the link's
+    text is their name), 'name_then_handle' ("Name (@handle)"), 'handle_name'
+    (the handle spells their name, anywhere in the notes), 'same_paragraph'
+    (a generic profile link in a paragraph naming only them, or in a
+    nameless line up to two lines after one: guest cards written as "Name" /
+    "Title" / "LinkedIn | Twitter" lines). Links to single tweets
+    (/status/) only count when their text or handle names the person."""
+    names = []
+    for p in people:
+        first, last = ascii_fold(p['first_name']).strip(), ascii_fold(p['last_name']).strip()
+        if len(last) >= 2 and first:
+            names.append((p['host_id'], f'{first} {last}', first, last))
+    out = set()
+    previous = []   # names in the last two non-empty lines
+    for block in _BLOCK_SPLIT_RE.split(description or ''):
+        plain = _fold_text(block)
+        if not plain:
+            continue
+        in_block = [n for n in names if n[1] in plain]
+        nearby = in_block or next((ns for ns in reversed(previous) if ns), [])
+        previous = (previous + [in_block])[-2:]
+        links = []   # (handle, link text or None, is a tweet)
+        for href, text in _ANCHOR_RE.findall(block):
+            h = _x_handle(href)
+            if h:
+                links.append((h, _fold_text(text), _is_tweet_link(href)))
+        bare_plain = html.unescape(re.sub(r'<[^>]+>', ' ', _ANCHOR_RE.sub(' ', block)))
+        for m in _X_URL_RE.finditer(bare_plain):
+            if m.group(1).lower() not in _X_RESERVED:
+                links.append((m.group(1), None, _is_tweet_link(bare_plain[m.start():m.end() + 8])))
+        for m in _X_AT_RE.finditer(bare_plain):
+            links.append((m.group(1), None, False))
+        for handle, text, tweet in links:
+            folded_handle = re.sub(r'[^a-z0-9]', '', handle.lower())
+            for host_id, full, first, last in names:
+                lastj = re.sub(r'[^a-z0-9]', '', last)
+                if text is not None and text == full:
+                    out.add((host_id, handle, 'link_text'))
+                elif re.search(re.escape(full) + r'[\s,]*(?:\(|-|–|:)?\s*(?:@|(?:https?://)?(?:www\.)?(?:twitter|x)\.com/)'
+                               + re.escape(handle.lower()) + r'\b', plain):
+                    out.add((host_id, handle, 'name_then_handle'))
+                elif len(lastj) >= 3 and lastj in folded_handle and folded_handle.startswith(first[:1]):
+                    out.add((host_id, handle, 'handle_name'))
+            if not tweet and len(nearby) == 1 and (text is None or _GENERIC_LINK_TEXT.match(text)):
+                out.add((nearby[0][0], handle, 'same_paragraph'))
+    # Keep only the strongest signal per (person, handle).
+    rank = {'link_text': 0, 'name_then_handle': 1, 'handle_name': 2, 'same_paragraph': 3}
+    best = {}
+    for host_id, handle, sig in out:
+        key = (host_id, handle.lower())
+        if key not in best or rank[sig] < rank[best[key][1]]:
+            best[key] = (handle, sig)
+    return sorted((k[0], v[0], v[1]) for k, v in best.items())
+
+
+def x_name_matches(first: str, last: str, display_name: str, handle: str) -> bool:
+    """Whether an X account's display name (or handle) is this person's:
+    their surname in it, and their first name or its initial."""
+    first, last = ascii_fold(first).strip(), ascii_fold(last).strip()
+    disp = re.sub(r'[^a-z0-9 ]', ' ', ascii_fold(display_name or ''))
+    words = disp.split()
+    # The display name only: the handle spelling the name is one of the
+    # signals being checked, so it can't also be the check ("Li Wang" vs an
+    # account named "lili" at @liwang22).
+    joined = disp.replace(' ', '')
+    first_words = [w for w in re.split(r"[\s\-']+", first) if w]
+    # Any surname-like word counts: names split differently between our
+    # record and the account ("Isabel Cavelier" + "Adarve" vs "Isabel
+    # Cavelier") still share one.
+    last_parts = [w for w in re.split(r"[\s\-']+", last) + first_words[1:] if len(w) >= 2]
+    if not last_parts or not any(w in words or (len(w) >= 4 and w in joined) for w in last_parts):
+        return False
+    first_word = first_words[0] if first_words else ''
+    return bool(first_word) and (first_word in words or (len(first_word) >= 4 and first_word in joined)
+                                 or any(w.startswith(first_word[:3]) for w in words)
+                                 or first_word[0] in [w[0] for w in words if w not in last_parts])
+
+
+class XUsers:
+    """api.fxtwitter.com user lookups: successes cached on disk (a spurious
+    "not found" — it says that for real accounts when called too often — is
+    retried once after a pause and never cached)."""
+    def __init__(self, cache_dir: str, pause: float = 4.0):
+        self.dir = os.path.join(cache_dir, 'x_users')
+        os.makedirs(self.dir, exist_ok=True)
+        self.pause, self.requests = pause, 0
+
+    def get(self, handle: str):
+        path = os.path.join(self.dir, handle.lower() + '.json')
+        if os.path.exists(path):
+            with open(path) as f:
+                return json.load(f)
+        for attempt in range(2):
+            req = urllib.request.Request(x_avatars.FX_API + handle, headers={'User-Agent': UA})
+            self.requests += 1
+            try:
+                with urllib.request.urlopen(req, timeout=20) as r:
+                    user = (json.load(r) or {}).get('user')
+            except Exception:
+                user = None
+            time.sleep(self.pause)
+            if user:
+                with open(path, 'w') as f:
+                    json.dump(user, f)
+                return user
+            time.sleep(15)
+        return None
+
+
+def plan_people_x(cur, cache_dir: str, limit: int = None) -> tuple:
+    cur.execute(r"""
+        SELECT e.episode_id, e.podcast_id, e.description,
+               json_agg(json_build_object('host_id', h.host_id, 'first_name', h.first_name,
+                                          'last_name', h.last_name)) AS people
+        FROM episodes e
+        JOIN episode_host eh ON eh.episode_id = e.episode_id
+        JOIN hosts h ON h.host_id = eh.host_id
+        WHERE e.description ~* '(twitter\.com/|x\.com/|@[A-Za-z0-9_]{2,15})'
+        GROUP BY e.episode_id
+    """)
+    episodes = cur.fetchall()
+    # A show's own accounts (the show, its network, its hosts) appear on
+    # most of its episodes; for those only a strong signal counts.
+    per_show = defaultdict(Counter)
+    for ep in episodes:
+        for h in {(_x_handle(m.group(0)) or '').lower() for m in _X_URL_RE.finditer(ep['description'] or '')} - {''}:
+            per_show[ep['podcast_id']][h] += 1
+    found = defaultdict(lambda: defaultdict(lambda: {'signals': Counter(), 'episodes': set(), 'handle': None}))
+    for ep in episodes:
+        for host_id, handle, sig in x_link_candidates(ep['description'], ep['people']):
+            if sig == 'same_paragraph' and per_show[ep['podcast_id']][handle.lower()] >= 5:
+                continue
+            f = found[host_id][handle.lower()]
+            f['signals'][sig] += 1
+            f['episodes'].add(ep['episode_id'])
+            f['handle'] = f['handle'] or handle
+    cur.execute("""SELECT host_id, first_name, last_name, twitter_handle, profile_image_url, field_sources
+                   FROM hosts WHERE host_id = ANY(%s)""", (list(found),))
+    people = {r['host_id']: r for r in cur.fetchall()}
+    cur.execute("SELECT lower(twitter_handle) AS h, array_agg(host_id) AS ids FROM hosts "
+                "WHERE twitter_handle IS NOT NULL GROUP BY 1")
+    taken = {r['h']: r['ids'] for r in cur.fetchall()}
+
+    todo = sorted(found, key=lambda h: -sum(len(f['episodes']) for f in found[h].values()))
+    todo = [h for h in todo if not people[h]['twitter_handle']]
+    if limit:
+        todo = todo[:limit]
+    users = XUsers(cache_dir)
+    verified = defaultdict(list)    # host_id -> [(handle, user, signals)]
+    review = []
+    for n, host_id in enumerate(todo):
+        p = people[host_id]
+        name = f"{p['first_name']} {p['last_name']}"
+        for key, f in found[host_id].items():
+            user = users.get(f['handle'])
+            sigs = ', '.join(f'{k}×{v}' for k, v in f['signals'].most_common())
+            if not user:
+                review.append({'host_id': host_id, 'name': name, 'handle': f['handle'], 'x_name': '',
+                               'why': 'lookup failed', 'signals': sigs})
+                continue
+            if x_name_matches(p['first_name'], p['last_name'], user.get('name'), user.get('screen_name')):
+                verified[host_id].append((user.get('screen_name') or f['handle'], user, sigs))
+            elif set(f['signals']) & {'link_text', 'name_then_handle'}:
+                review.append({'host_id': host_id, 'name': name, 'handle': f['handle'], 'x_name': user.get('name'),
+                               'why': "linked by name, but the account's name differs", 'signals': sigs})
+        if n and n % 50 == 0:
+            log.info('people-x: %d/%d people checked, %d lookups', n, len(todo), users.requests)
+
+    claims = Counter(h.lower() for vs in verified.values() for h, _, _ in vs)
+    plan = []
+    for host_id, vs in verified.items():
+        p = people[host_id]
+        name = f"{p['first_name']} {p['last_name']}"
+        distinct = {h.lower() for h, _, _ in vs}
+        problem = None
+        if len(distinct) > 1:
+            problem = 'several verified accounts'
+        elif claims[next(iter(distinct))] > 1:
+            problem = 'account fits several people'
+        elif any(i != host_id for i in taken.get(next(iter(distinct)), [])):
+            problem = 'account already on someone else'
+        elif p['field_sources'].get('twitter_handle') in _PROTECTED:
+            problem = 'handle set by hand'
+        if problem:
+            for h, user, sigs in vs:
+                review.append({'host_id': host_id, 'name': name, 'handle': h, 'x_name': user.get('name'),
+                               'why': problem, 'signals': sigs})
+            continue
+        h, user, sigs = vs[0]
+        change = {'host_id': host_id, 'name': name, 'twitter_handle': h, 'x_name': user.get('name'), 'signals': sigs}
+        photo = x_avatars.avatar_from_fx({'user': user})
+        if photo and not p['profile_image_url']:
+            change['profile_image_url'] = photo
+        plan.append(change)
+    log.info('people-x: %d lookups this run', users.requests)
+    return plan, review
+
+
+def bio_names_org(bio: str, org: str) -> bool:
+    """Whether a profile bio names an organisation: as whole words ("Partner
+    at Energy Impact Partners"), or as an @mention of it ("@Heatmap_News"),
+    never inside another word ("Meta" in "metadata")."""
+    folded, name = ascii_fold(bio or ''), ascii_fold(org or '').strip()
+    if len(squash(name)) < 4:
+        return False
+    if re.search(r'(?<![a-z0-9])' + re.escape(name) + r'(?![a-z0-9])', folded):
+        return True
+    return any(squash(m) in (squash(name), squash(name) + 'news', squash(name) + 'hq')
+               for m in re.findall(r'@([a-z0-9_]{3,15})', folded))
+
+
+def plan_people_x_wiki(cur, fetch: Fetcher, cache_dir: str, limit: int = None) -> tuple:
+    """X handles from Wikidata for people people-wiki couldn't confirm. Their
+    exact-name Wikidata entries are mostly namesakes (an actor, a rugby
+    player), so one is accepted only when its X account says who it is: the
+    display name is the person's and the bio names one of the organisations
+    we have for them. Everything else goes to review with the Wikidata
+    description, the bio and our organisations side by side."""
+    wd = Wikidata(fetch)
+    cur.execute("""
+        SELECT h.host_id, h.first_name, h.last_name, h.profile_image_url, h.field_sources,
+               array_agg(DISTINCT o.name) FILTER (WHERE o.name IS NOT NULL) AS orgs,
+               array_agg(DISTINCT ha.company) FILTER (WHERE ha.company IS NOT NULL) AS companies,
+               COUNT(DISTINCT ha.episode_id) AS mentions
+        FROM hosts h
+        JOIN host_affiliations ha ON ha.host_id = h.host_id
+        LEFT JOIN organization_aliases a ON a.normalized_name = ha.company_key
+        LEFT JOIN organizations o ON o.org_id = a.org_id AND NOT o.not_an_org
+        WHERE h.twitter_handle IS NULL AND h.wikidata_id IS NULL
+        GROUP BY h.host_id
+        ORDER BY mentions DESC
+    """)
+    people = cur.fetchall()
+    fetch.many([Wikidata.search_url(f"{p['first_name']} {p['last_name']}") for p in people])
+    cands = {}
+    for p in people:
+        name = f"{p['first_name']} {p['last_name']}"
+        cands[p['host_id']] = [h['id'] for h in wd.search(name)
+                               if squash(h.get('label')) == squash(name)
+                               or any(squash(a) == squash(name) for a in h.get('aliases', []))]
+    wd.prefetch_entities([q for qs in cands.values() for q in qs])
+    ents = wd.entities([q for qs in cands.values() for q in qs])
+    work = []
+    for p in people:
+        for q in cands[p['host_id']]:
+            e = ents.get(q)
+            if not e or _HUMAN not in wd_ids(e, 'P31') or _historical(e):
+                continue
+            live = [c for c in e.get('claims', {}).get('P2002', [])
+                    if c.get('rank') != 'deprecated' and 'P582' not in c.get('qualifiers', {})]
+            handles = wd_claim_values({'claims': {'P2002': live}}, 'P2002')
+            if handles and isinstance(handles[0], str):
+                work.append((p, e, handles[0]))
+    if limit:
+        work = work[:limit]
+    users = XUsers(cache_dir)
+    plan, review, confirmed = [], [], defaultdict(list)
+    for i, (p, e, handle) in enumerate(work):
+        if i and i % 50 == 0:
+            log.info('people-x-wiki: %d/%d checked, %d lookups', i, len(work), users.requests)
+        name = f"{p['first_name']} {p['last_name']}"
+        ours = [n for n in (p['orgs'] or []) + (p['companies'] or []) if n and len(squash(n)) >= 4]
+        user = users.get(handle)
+        bio = ' '.join(filter(None, [(user or {}).get('description'), (user or {}).get('website') if isinstance((user or {}).get('website'), str) else None]))
+        row = {'host_id': p['host_id'], 'name': name, 'handle': handle, 'wikidata_id': e['id'],
+               'wd_description': Wikidata.description(e), 'x_name': (user or {}).get('name', ''),
+               'x_bio': (bio or '')[:200], 'our_orgs': '; '.join(ours[:4])}
+        if not user:
+            review.append({**row, 'why': 'lookup failed'})
+            continue
+        named_org = next((n for n in ours if bio_names_org(bio, n)), None)
+        if x_name_matches(p['first_name'], p['last_name'], user.get('name'), handle) and named_org:
+            confirmed[p['host_id']].append((row, user, named_org))
+        else:
+            review.append({**row, 'why': 'bio names none of their organisations' if not named_org else "account's name differs"})
+    for host_id, rows in confirmed.items():
+        if len({r['handle'].lower() for r, _, _ in rows}) > 1:
+            review += [{**r, 'why': 'several confirmed accounts'} for r, _, _ in rows]
+            continue
+        row, user, named_org = rows[0]
+        p = next(pp for pp, _, _ in work if pp['host_id'] == host_id)
+        if p['field_sources'].get('twitter_handle') in _PROTECTED:
+            continue
+        change = {'host_id': host_id, 'name': row['name'], 'twitter_handle': row['handle'],
+                  'wikidata_id': row['wikidata_id'], 'confirmed_by': f"X bio names {named_org}",
+                  'wd_description': row['wd_description']}
+        photo = x_avatars.avatar_from_fx({'user': user})
+        if photo and not p['profile_image_url']:
+            change['profile_image_url'] = photo
+        plan.append(change)
+    log.info('people-x-wiki: %d candidates, %d lookups this run', len(work), users.requests)
+    return plan, review
+
+
+# ------------------------------------------------------------------
+# Organisations that are shows, or publish them (podcasts.org_id)
+# ------------------------------------------------------------------
+
+def show_key(name: str) -> str:
+    """A show or organisation name without the words that differ between
+    the two ("The", "Podcast", "with Shayle Kann", a subtitle)."""
+    s = ascii_fold(name or '')
+    s = re.split(r'\s[:|–—]\s|:\s', s)[0]
+    s = re.sub(r'\b(the|podcast|pod|show)\b|\bwith\s+[a-z .\'-]+$', ' ', s)
+    return re.sub(r'[^a-z0-9]', '', s)
+
+
+_SHOW_ROLE_RE = re.compile(r'\b(co-?)?(host|creator|producer|presenter|anchor)s?\b', re.I)
+_COMPANY_ROLE_RE = re.compile(r'\b(ceo|cto|coo|cfo|founder|co-founder|managing director|president|'
+                              r'vice president|vp|partner|director|head of|chief)\b', re.I)
+
+
+def looks_like_company(org: dict) -> bool:
+    """For an organisation named like a show: is it a real company that
+    publishes the show, rather than the show itself?"""
+    # Not a website or Wikidata entry: a show has those too (Climate One,
+    # Mothers of Invention). Only what people do there tells them apart.
+    titles = [t for t in (org.get('titles') or []) if t]
+    if any(_SHOW_ROLE_RE.search(t) for t in titles):
+        return False
+    return any(_COMPANY_ROLE_RE.search(t) for t in titles)
+
+
+def plan_show_orgs(cur) -> tuple:
+    """Proposed podcast <-> organisation links. An organisation named like
+    the show is 'show' (the record is the show: "Host of Drilled") unless it
+    looks like a real company: people holding company roles there (CEO, founder, managing director...) and none holding
+    show roles (host, co-host, creator, producer) — then 'publisher' ("The
+    Pexapark Podcast" by Pexapark). Its type isn't evidence: many were typed
+    "company" by an earlier guess. A show's channel on Apple Podcasts that is
+    one of our organisations is a 'publisher' too ("Currents" by Norton Rose
+    Fulbright). Everything goes to the plan for a person to check first."""
+    cur.execute("""SELECT p.podcast_id, p.title, p.org_id, c.name AS channel
+                   FROM podcasts p LEFT JOIN channels c ON c.channel_id = p.channel_id""")
+    shows = cur.fetchall()
+    cur.execute("""
+        SELECT o.org_id, o.name, o.org_type, o.website_url, o.wikidata_id, o.not_an_org,
+               (SELECT COUNT(DISTINCT ha.host_id) FROM organization_aliases a
+                JOIN host_affiliations ha ON ha.company_key = a.normalized_name WHERE a.org_id = o.org_id) AS people,
+               (SELECT array_agg(DISTINCT ha.title) FROM organization_aliases a
+                JOIN host_affiliations ha ON ha.company_key = a.normalized_name
+                WHERE a.org_id = o.org_id AND ha.title IS NOT NULL) AS titles
+        FROM organizations o WHERE NOT o.not_an_org
+    """)
+    orgs = cur.fetchall()
+    by_key = defaultdict(list)
+    for o in orgs:
+        k = show_key(o['name'])
+        if len(k) >= 4:
+            by_key[k].append(o)
+    plan, review = [], []
+    for s in shows:
+        if s['org_id']:
+            continue
+        named = by_key.get(show_key(s['title']), [])
+        real = [o for o in named if looks_like_company(o)]
+        bare = [o for o in named if o not in real]
+        row = {'podcast_id': s['podcast_id'], 'show': s['title'], 'channel': s['channel']}
+        if len(bare) == 1 and not real:
+            o = bare[0]
+            plan.append({**row, 'org_id': o['org_id'], 'org': o['name'], 'relation': 'show',
+                         'why': f"named like the show, nothing behind it ({o['people']} people)"})
+            continue
+        if len(real) == 1 and not bare:
+            o = real[0]
+            plan.append({**row, 'org_id': o['org_id'], 'org': o['name'], 'relation': 'publisher',
+                         'why': 'a real organisation named like the show'})
+            continue
+        if named:
+            review.append({**row, 'candidates': ' | '.join(f"{o['org_id']} {o['name']} ({o['org_type']})" for o in named)})
+            continue
+        ch = by_key.get(show_key(s['channel'])) if s['channel'] else None
+        if ch and len(ch) == 1 and show_key(s['channel']) != show_key(s['title']):
+            o = ch[0]
+            plan.append({**row, 'org_id': o['org_id'], 'org': o['name'], 'relation': 'publisher',
+                         'why': "the show's channel on Apple Podcasts"})
+    return plan, review
+
+
+def apply_show_orgs(conn, plan: list) -> Counter:
+    cur = conn.cursor()
+    cur.execute("SET lock_timeout = '10s'")
+    stats = Counter()
+    for p in plan:
+        cur.execute("UPDATE podcasts SET org_id = %s, org_is_show = %s WHERE podcast_id = %s AND org_id IS NULL",
+                    (p['org_id'], p['relation'] == 'show', p['podcast_id']))
+        stats[p['relation']] += cur.rowcount
+    conn.commit()
+    return stats
+
+
 def apply_people(conn, plan: list, source: str) -> Counter:
     cur = conn.cursor()
     cur.execute("SET lock_timeout = '10s'")
@@ -818,7 +1250,7 @@ def write(out_dir: str, name: str, plan: list, review: list):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('command', choices=['orgs', 'people-links', 'people-wiki'])
+    ap.add_argument('command', choices=['orgs', 'people-links', 'people-wiki', 'people-x', 'people-x-wiki', 'show-orgs'])
     ap.add_argument('--out', required=True, help='directory for the plan and review files')
     ap.add_argument('--cache', default=os.path.join(os.path.dirname(os.path.abspath(__file__)), '.enrich_cache'))
     ap.add_argument('--limit', type=int, help='only the first N (most-booked) — for trying it out')
@@ -834,13 +1266,19 @@ def main():
         plan, review = plan_orgs(cur, fetch, args.limit, manual)
     elif args.command == 'people-links':
         plan, review = plan_people_links(cur)
+    elif args.command == 'people-x':
+        plan, review = plan_people_x(cur, args.cache, args.limit)
+    elif args.command == 'people-x-wiki':
+        plan, review = plan_people_x_wiki(cur, fetch, args.cache, args.limit)
+    elif args.command == 'show-orgs':
+        plan, review = plan_show_orgs(cur)
     else:
         plan, review = plan_people_wiki(cur, fetch, args.limit)
     write(args.out, args.command, plan, review)
     log.info('%s: %d planned, %d to review, %d web requests', args.command, len(plan), len(review), fetch.requests)
     if args.apply:
-        stats = apply_orgs(conn, plan) if args.command == 'orgs' else \
-            apply_people(conn, plan, 'show_notes' if args.command == 'people-links' else 'wikidata')
+        stats = apply_orgs(conn, plan) if args.command == 'orgs' else apply_show_orgs(conn, plan) if args.command == 'show-orgs' else \
+            apply_people(conn, plan, {'people-links': 'show_notes', 'people-x': 'show_notes_x', 'people-x-wiki': 'wikidata_x'}.get(args.command, 'wikidata'))
         log.info('applied: %s', dict(stats))
 
 

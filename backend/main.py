@@ -368,7 +368,7 @@ extra_origins = [o.strip() for o in os.getenv("ADDITIONAL_ALLOWED_ORIGINS", "").
 # Public pages that can be cached by the browser for a few minutes (back and
 # forth between pages is then instant). Admins' pages fetch with no-cache, so
 # an edit shows up on the next load.
-_PUBLIC_CACHEABLE_RE = re.compile(r'^/api/(?:(?:people|orgs|shows)/\d+/profile|directory/[a-z]+|search)$')
+_PUBLIC_CACHEABLE_RE = re.compile(r'^/api/(?:(?:people|orgs|shows)/\d+/profile|directory/[a-z]+|search|show-orgs)$')
 
 
 @app.middleware("http")
@@ -3843,6 +3843,9 @@ def get_org_profile(org_id: int):
                 ep = episodes[r['episode_id']] = {**_episode_link(r), 'people': []}
             ep['people'].append({'host_id': r['host_id'], 'name': r['name'], 'slug': profiles.slugify(r['name'])})
 
+        cur.execute("""SELECT podcast_id, title, cover_art_url, org_is_show FROM podcasts
+                       WHERE org_id = %s ORDER BY title""", (org_id,))
+        org_podcasts = cur.fetchall()
         return {
             **{k: org[k] for k in ('org_id', 'name', 'org_type', 'website_url', 'hq_city', 'country',
                                    'founded_year', 'wikipedia_url', 'linkedin_url')},
@@ -3855,6 +3858,12 @@ def get_org_profile(org_id: int):
             'by_year': [{'year': y, 'appearances': n} for y, n in sorted(by_year.items())],
             'shows': sorted(shows.values(), key=lambda s: (-s['appearances'], s['title']))[:15],
             'recent_episodes': list(episodes.values())[:20],
+            # The page sends a show-organisation to its show; a publisher
+            # lists its podcasts.
+            'is_show': next(({'podcast_id': r['podcast_id'], 'title': r['title'], 'slug': profiles.slugify(r['title'])}
+                             for r in org_podcasts if r['org_is_show']), None),
+            'podcasts': [{'podcast_id': r['podcast_id'], 'title': r['title'], 'slug': profiles.slugify(r['title']),
+                          'cover_art_url': r['cover_art_url']} for r in org_podcasts if not r['org_is_show']],
         }
     finally:
         cur.close()
@@ -3871,8 +3880,12 @@ def get_show_profile(podcast_id: int):
     try:
         cur.execute("""
             SELECT p.podcast_id, p.title, p.description, p.cover_art_url, p.website_url, p.rss_feed_url,
-                   p.apple_podcast_id, c.name AS channel
+                   p.apple_podcast_id, c.name AS channel,
+                   -- "From <publisher>" (a show-organisation is the show itself, not shown)
+                   CASE WHEN NOT p.org_is_show THEN o.org_id END AS publisher_org_id,
+                   CASE WHEN NOT p.org_is_show THEN o.name END AS publisher_name
             FROM podcasts p LEFT JOIN channels c ON c.channel_id = p.channel_id
+            LEFT JOIN organizations o ON o.org_id = p.org_id AND NOT o.not_an_org
             WHERE p.podcast_id = %s
         """, (podcast_id,))
         show = cur.fetchone()
@@ -4004,6 +4017,8 @@ def get_show_profile(podcast_id: int):
             **show,
             'slug': profiles.slugify(show['title']),
             'apple_url': profiles.apple_show_url(show['apple_podcast_id']),
+            'publisher': ({'org_id': show['publisher_org_id'], 'name': show['publisher_name'],
+                           'slug': profiles.slugify(show['publisher_name'])} if show['publisher_org_id'] else None),
             'hosts': hosts,
             'totals': {
                 'episodes': t['episodes'], 'first_date': t['first_date'], 'last_date': t['last_date'],
@@ -4105,6 +4120,8 @@ def _build_org_directory(cur) -> list:
         LEFT JOIN organizations t ON t.org_id = ot.top
         LEFT JOIN organizations par ON par.org_id = o.parent_org_id AND NOT par.not_an_org
         JOIN episodes e ON e.episode_id = ha.episode_id
+        -- Shows recorded as organisations are listed under Shows instead.
+        WHERE NOT EXISTS (SELECT 1 FROM podcasts sp WHERE sp.org_id = o.org_id AND sp.org_is_show)
         GROUP BY o.org_id, o.name, COALESCE(o.org_type, t.org_type), par.name
     """)
     return [{**r, 'slug': profiles.slugify(r['name'])} for r in cur.fetchall()]
@@ -4150,6 +4167,24 @@ def _build_show_directory(cur) -> list:
 def _chips(counts: dict, labels: dict) -> list:
     return sorted(({'kind': k, 'label': labels.get(k, k), 'count': n} for k, n in counts.items() if k),
                   key=lambda c: -c['count'])
+
+
+@app.get("/api/show-orgs")
+def show_orgs():
+    """Organisations that are a show: {org_id: show}. The pages send links
+    and logos for these to the show (an "organisation" like Drilled exists
+    only because someone was introduced as "host of Drilled")."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""SELECT org_id, podcast_id, title, cover_art_url FROM podcasts
+                       WHERE org_id IS NOT NULL AND org_is_show""")
+        return {str(r['org_id']): {'podcast_id': r['podcast_id'], 'title': r['title'],
+                                   'slug': profiles.slugify(r['title']), 'cover_art_url': r['cover_art_url']}
+                for r in cur.fetchall()}
+    finally:
+        cur.close()
+        conn.close()
 
 
 @app.get("/api/directory/people")
@@ -4207,6 +4242,7 @@ def search_profiles(q: str = "", limit: int = 8):
             JOIN organization_aliases a ON a.org_id = o.org_id
             JOIN host_affiliations ha ON ha.company_key = a.normalized_name
             WHERE o.name ILIKE %s AND NOT o.not_an_org
+              AND NOT EXISTS (SELECT 1 FROM podcasts sp WHERE sp.org_id = o.org_id AND sp.org_is_show)
             GROUP BY o.org_id ORDER BY people DESC, o.name LIMIT %s
         """, (like, limit))
         orgs = [{**r, 'slug': profiles.slugify(r['name'])} for r in cur.fetchall()]
@@ -4471,8 +4507,11 @@ def get_company(org_id: int, include_sub: bool = False):
             counts = {r['org_id']: r['people'] for r in cur.fetchall()}
             for r in suggestions:
                 r['people'] = counts.get(r['org_id'], 0)
+        cur.execute("""SELECT podcast_id, title, org_is_show FROM podcasts
+                       WHERE org_id = %s ORDER BY org_is_show DESC, title""", (org_id,))
+        podcasts = cur.fetchall()
         return {"org": org, "aliases": aliases, "children": children, "people": ordered,
-                "suggestions": suggestions}
+                "suggestions": suggestions, "podcasts": podcasts}
     finally:
         cur.close()
         conn.close()
@@ -4663,9 +4702,62 @@ def merge_companies(keep_id: int, drop_id: int, body: Optional[MergeCompaniesReq
         """, (drop['org_type'], drop['website_domain'],
               # Never inherit a parent from inside the survivor's own family.
               drop['parent_org_id'] if drop['parent_org_id'] not in keep_family else None, keep_id))
+        # Its shows come along; it can only stay "the show" if the survivor
+        # isn't already a show itself (one show per organisation).
+        cur.execute("SELECT 1 FROM podcasts WHERE org_id = %s AND org_is_show", (keep_id,))
+        keep_is_show = bool(cur.fetchone())
+        cur.execute("""UPDATE podcasts SET org_id = %s,
+                           org_is_show = org_is_show AND NOT %s
+                       WHERE org_id = %s""", (keep_id, keep_is_show, drop_id))
         cur.execute("DELETE FROM organizations WHERE org_id = %s", (drop_id,))
         conn.commit()
         return {"success": True, "kept": keep['name'], "merged": drop['name'], "aliases_moved": aliases_moved}
+    finally:
+        cur.close()
+        conn.close()
+
+
+class PodcastLinkRequest(BaseModel):
+    is_show: bool = False
+
+
+@app.put("/api/admin/companies/{org_id}/podcasts/{podcast_id}", dependencies=[Depends(verify_admin)])
+def link_company_podcast(org_id: int, podcast_id: int, body: PodcastLinkRequest):
+    """Say this organisation is a show (is_show: its links go to the show
+    page) or publishes it. Replaces the show's previous organisation."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT 1 FROM organizations WHERE org_id = %s", (org_id,))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Company not found")
+        if body.is_show:
+            cur.execute("SELECT title FROM podcasts WHERE org_id = %s AND org_is_show AND podcast_id <> %s",
+                        (org_id, podcast_id))
+            other = cur.fetchone()
+            if other:
+                raise HTTPException(status_code=409, detail=f"This company is already the show “{other['title']}”")
+        cur.execute("UPDATE podcasts SET org_id = %s, org_is_show = %s WHERE podcast_id = %s RETURNING title",
+                    (org_id, body.is_show, podcast_id))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Show not found")
+        conn.commit()
+        return {"success": True, "title": row['title'], "is_show": body.is_show}
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.delete("/api/admin/companies/{org_id}/podcasts/{podcast_id}", dependencies=[Depends(verify_admin)])
+def unlink_company_podcast(org_id: int, podcast_id: int):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("UPDATE podcasts SET org_id = NULL, org_is_show = false WHERE podcast_id = %s AND org_id = %s",
+                    (podcast_id, org_id))
+        conn.commit()
+        return {"success": True, "unlinked": cur.rowcount}
     finally:
         cur.close()
         conn.close()

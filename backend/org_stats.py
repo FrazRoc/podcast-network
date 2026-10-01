@@ -64,6 +64,9 @@ _GUEST_ROLES = f"""
         JOIN organizations o ON o.org_id = a.org_id AND NOT o.not_an_org
         {_CHAIN_JOINS}
         JOIN organizations t ON t.org_id = {_CHAIN_TOP}
+        -- "Host of Drilled" credited on Drilled isn't Drilled booking a guest.
+        WHERE NOT EXISTS (SELECT 1 FROM podcasts sp WHERE sp.org_id = o.org_id AND sp.org_is_show
+                          AND sp.podcast_id = e.podcast_id)
     )
 """
 

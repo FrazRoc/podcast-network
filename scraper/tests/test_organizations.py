@@ -699,3 +699,48 @@ class TestAmbiguousMerge:
         with pytest.raises(HTTPException) as e:
             _run(org_db, monkeypatch, 'split_company_alias', solar, cur.fetchone()[0])
         assert e.value.status_code == 400
+
+
+class TestPodcastLinks:
+    """Organisations that are a show, or publish one (podcasts.org_id)."""
+
+    def _org(self, cur, name):
+        cur.execute("INSERT INTO organizations (name) VALUES (%s) RETURNING org_id", (name,))
+        return cur.fetchone()[0]
+
+    def _show(self, cur, title):
+        cur.execute("INSERT INTO podcasts (title, apple_podcast_id) VALUES (%s, %s) RETURNING podcast_id",
+                    (title, title.lower().replace(' ', '')))
+        return cur.fetchone()[0]
+
+    def test_link_unlink_and_one_show_per_org(self, org_db, monkeypatch):
+        from fastapi import HTTPException
+        import main
+        cur = org_db.cursor()
+        drilled, pexa = self._org(cur, 'Drilled'), self._org(cur, 'Pexapark')
+        show, other, pexa_show = self._show(cur, 'Drilled'), self._show(cur, 'Hot Take'), self._show(cur, 'The Pexapark Podcast')
+        org_db.commit()
+        _run(org_db, monkeypatch, 'link_company_podcast', drilled, show, main.PodcastLinkRequest(is_show=True))
+        _run(org_db, monkeypatch, 'link_company_podcast', pexa, pexa_show, main.PodcastLinkRequest(is_show=False))
+        with pytest.raises(HTTPException) as e:
+            _run(org_db, monkeypatch, 'link_company_podcast', drilled, other, main.PodcastLinkRequest(is_show=True))
+        assert e.value.status_code == 409
+        assert _run(org_db, monkeypatch, 'show_orgs') == {
+            str(drilled): {'podcast_id': show, 'title': 'Drilled', 'slug': 'drilled', 'cover_art_url': None}}
+        detail = _run(org_db, monkeypatch, 'get_company', pexa)
+        assert [(p['title'], p['org_is_show']) for p in detail['podcasts']] == [('The Pexapark Podcast', False)]
+        _run(org_db, monkeypatch, 'unlink_company_podcast', drilled, show)
+        assert _run(org_db, monkeypatch, 'show_orgs') == {}
+
+    def test_merge_carries_links_and_keeps_one_show(self, org_db, monkeypatch):
+        import main
+        cur = org_db.cursor()
+        keep, drop = self._org(cur, 'Drilled'), self._org(cur, 'Drilled Podcast')
+        a, b = self._show(cur, 'Drilled'), self._show(cur, 'Drilled Extra')
+        cur.execute("UPDATE podcasts SET org_id = %s, org_is_show = true WHERE podcast_id = %s", (keep, a))
+        cur.execute("UPDATE podcasts SET org_id = %s, org_is_show = true WHERE podcast_id = %s", (drop, b))
+        org_db.commit()
+        _run(org_db, monkeypatch, 'merge_companies', keep, drop)
+        cur.execute("SELECT podcast_id, org_id, org_is_show FROM podcasts WHERE podcast_id IN (%s, %s) ORDER BY podcast_id", (a, b))
+        # Both now belong to the survivor; only its own show stays "the show".
+        assert cur.fetchall() == [(a, keep, True), (b, keep, False)]
