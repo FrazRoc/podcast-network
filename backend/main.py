@@ -3496,7 +3496,8 @@ def _episode_link(row) -> dict:
         'published_date': row['published_date'],
         'listen_url': profiles.apple_episode_url(row.get('apple_podcast_id'), row.get('apple_episode_id')),
         'show': {'podcast_id': row['podcast_id'], 'title': row['podcast_title'],
-                 'slug': profiles.slugify(row['podcast_title'])},
+                 'slug': profiles.slugify(row['podcast_title']),
+                 'cover_art_url': row.get('cover_art_url')},
     }
 
 
@@ -3528,7 +3529,7 @@ async def get_person_profile(host_id: int):
 
         cur.execute("""
             SELECT e.episode_id, e.title AS episode_title, e.published_date, e.apple_episode_id,
-                   p.podcast_id, p.title AS podcast_title, p.apple_podcast_id, eh.is_guest
+                   p.podcast_id, p.title AS podcast_title, p.apple_podcast_id, p.cover_art_url, eh.is_guest
             FROM episode_host eh
             JOIN episodes e ON e.episode_id = eh.episode_id
             JOIN podcasts p ON p.podcast_id = e.podcast_id
@@ -3633,7 +3634,7 @@ async def get_org_profile(org_id: int):
             SELECT ha.host_id, h.first_name || ' ' || h.last_name AS name, h.profile_image_url,
                    ha.title, ha.title_kind, ha.is_former, o.name AS org_name,
                    e.episode_id, e.title AS episode_title, e.published_date, e.apple_episode_id,
-                   p.podcast_id, p.title AS podcast_title, p.apple_podcast_id
+                   p.podcast_id, p.title AS podcast_title, p.apple_podcast_id, p.cover_art_url
             FROM host_affiliations ha
             JOIN episode_host eh ON eh.episode_id = ha.episode_id AND eh.host_id = ha.host_id AND eh.is_guest
             JOIN organization_aliases a ON a.normalized_name = ha.company_key
@@ -3668,7 +3669,8 @@ async def get_org_profile(org_id: int):
             if r['published_date']:
                 by_year[r['published_date'].year] = by_year.get(r['published_date'].year, 0) + 1
             sh = shows.setdefault(r['podcast_id'], {'podcast_id': r['podcast_id'], 'title': r['podcast_title'],
-                                                    'slug': profiles.slugify(r['podcast_title']), 'appearances': 0})
+                                                    'slug': profiles.slugify(r['podcast_title']),
+                                                    'cover_art_url': r['cover_art_url'], 'appearances': 0})
             sh['appearances'] += 1
             ep = episodes.get(r['episode_id'])
             if ep is None:
