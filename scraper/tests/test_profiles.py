@@ -78,3 +78,53 @@ class TestCondenseCareer:
 def test_recent_cadence():
     months = [(date(2025, m, 1), 4) for m in range(1, 13)] + [(date(2026, 1, 1), 100)]
     assert recent_cadence(months, today=date(2026, 1, 15)) == 4.0
+
+
+# --- directory pages ---
+
+from profiles import directory_page, person_kind  # noqa: E402
+
+_ROWS = [
+    {'name': 'David Roberts', 'company': 'Volts', 'kind': 'host', 'appearances': 400, 'last_date': date(2026, 9, 1)},
+    {'name': 'Art Berman', 'company': None, 'kind': 'advisor', 'appearances': 88, 'last_date': date(2025, 1, 1)},
+    {'name': 'Jigar Shah', 'company': 'DOE', 'kind': 'official', 'appearances': 61, 'last_date': None},
+    {'name': 'Ólafur Guðnason', 'company': 'Orkuveita', 'kind': 'advisor', 'appearances': 2, 'last_date': date(2026, 1, 1)},
+]
+
+
+class TestDirectoryPage:
+    def test_default_sort_and_counts(self):
+        p = directory_page(_ROWS, group_field='kind')
+        assert [r['name'] for r in p['rows']][:2] == ['David Roberts', 'Art Berman']
+        assert p['total'] == 4 and p['counts'] == {'host': 1, 'advisor': 2, 'official': 1}
+
+    def test_group_filter_keeps_counts_for_all_groups(self):
+        p = directory_page(_ROWS, group_field='kind', group='advisor')
+        assert p['total'] == 2 and p['counts']['host'] == 1
+
+    def test_search_name_and_company_accent_insensitive(self):
+        assert [r['name'] for r in directory_page(_ROWS, q='olafur', fields=('name', 'company'))['rows']] == ['Ólafur Guðnason']
+        assert [r['name'] for r in directory_page(_ROWS, q='doe', fields=('name', 'company'))['rows']] == ['Jigar Shah']
+        assert directory_page(_ROWS, q='nobody')['total'] == 0
+
+    def test_search_narrows_counts(self):
+        assert directory_page(_ROWS, q='ber', group_field='kind')['counts'] == {'host': 1, 'advisor': 1}
+
+    def test_sorts(self):
+        names = lambda s: [r['name'] for r in directory_page(_ROWS, sort=s)['rows']]  # noqa: E731
+        assert names('recent') == ['David Roberts', 'Ólafur Guðnason', 'Art Berman', 'Jigar Shah']
+        assert names('name') == ['Art Berman', 'David Roberts', 'Jigar Shah', 'Ólafur Guðnason']
+        assert names('bogus') == names('appearances')
+
+    def test_paging_bounds(self):
+        assert [r['name'] for r in directory_page(_ROWS, offset=1, limit=2)['rows']] == ['Art Berman', 'Jigar Shah']
+        assert directory_page(_ROWS, offset=10)['rows'] == []
+        assert len(directory_page(_ROWS, offset=-5, limit=0)['rows']) == 1
+
+
+class TestPersonKind:
+    def test_host_vs_role(self):
+        kind = lambda t: 'ceo' if 'CEO' in t else 'other'  # noqa: E731
+        assert person_kind('CEO', as_host=5, as_guest=1, role_kind=kind) == 'host'
+        assert person_kind('CEO', as_host=1, as_guest=5, role_kind=kind) == 'ceo'
+        assert person_kind(None, as_host=0, as_guest=3, role_kind=kind) is None

@@ -132,3 +132,60 @@ def recent_cadence(month_counts: list, today: date | None = None) -> float:
     start = date(end.year - 1, end.month, 1)
     total = sum(n for m, n in month_counts if m and start <= m < end)
     return round(total / 12, 1)
+
+
+# ------------------------------------------------------------------
+# Directory pages (/people, /orgs, /shows): one cached list per kind,
+# searched, grouped, sorted and paged in memory.
+# ------------------------------------------------------------------
+
+def _name_key(r: dict) -> str:
+    return slugify(r.get('name') or r.get('title') or '')
+
+
+def _recency(r: dict) -> int:
+    d = r.get('last_date')
+    return -d.toordinal() if d else 0
+
+
+DIRECTORY_SORTS = {
+    'appearances': lambda r: (-(r.get('appearances') or 0), _name_key(r)),
+    'people': lambda r: (-(r.get('people') or 0), -(r.get('appearances') or 0), _name_key(r)),
+    'guests': lambda r: (-(r.get('guests') or 0), _name_key(r)),
+    'recent': lambda r: (_recency(r), _name_key(r)),
+    'name': _name_key,
+}
+
+
+def directory_page(rows: list, *, q: str = '', fields=('name',), group_field: str | None = None,
+                   group: str = '', sort: str = 'appearances', default_sort: str = 'appearances',
+                   offset: int = 0, limit: int = 50) -> dict:
+    """Search `fields` for `q` (case- and accent-insensitive), count the
+    matches per `group_field` (for the filter chips, so the counts follow the
+    search but not the chosen chip), keep one group, sort and page.
+    Returns {total, rows, counts}."""
+    needle = slugify(q).replace('-', ' ') if (q or '').strip() else ''
+
+    def matches(r):
+        return any(needle in slugify(r.get(f) or '').replace('-', ' ') for f in fields)
+
+    hits = [r for r in rows if matches(r)] if needle else list(rows)
+    counts = {}
+    if group_field:
+        for r in hits:
+            counts[r.get(group_field)] = counts.get(r.get(group_field), 0) + 1
+        if group and group != 'all':
+            hits = [r for r in hits if r.get(group_field) == group]
+    hits.sort(key=DIRECTORY_SORTS.get(sort) or DIRECTORY_SORTS[default_sort])
+    offset = max(0, offset)
+    limit = max(1, min(limit, 200))
+    return {'total': len(hits), 'rows': hits[offset:offset + limit], 'counts': counts}
+
+
+def person_kind(title: str | None, as_host: int, as_guest: int, role_kind) -> str | None:
+    """The People directory's filter group: 'host' for someone credited
+    mostly as a host, otherwise the kind of their current role (role_kind,
+    the Stats page's buckets), None with no role on record."""
+    if as_host and as_host >= as_guest:
+        return 'host'
+    return role_kind(title) if title else None

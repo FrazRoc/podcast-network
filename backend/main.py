@@ -5,6 +5,8 @@
 
 import re
 import secrets
+import threading
+import time
 
 from fastapi import FastAPI, HTTPException, Header, Depends, BackgroundTasks
 from pydantic import BaseModel
@@ -3839,6 +3841,159 @@ async def get_show_profile(podcast_id: int):
     finally:
         cur.close()
         conn.close()
+
+
+# ------------------------------------------------------------------
+# Directory pages: /people, /orgs, /shows. Each list is built once and kept
+# for _DIRECTORY_TTL seconds (the people list needs everyone's current role,
+# a pass over every affiliation), then searched, filtered, sorted and paged
+# in memory by profiles.directory_page.
+# ------------------------------------------------------------------
+
+_DIRECTORY_TTL = 900
+_DIRECTORY_CACHE: dict = {}
+_DIRECTORY_REBUILDING: set = set()
+
+
+def _rebuild_directory(kind: str, build):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        _DIRECTORY_CACHE[kind] = (time.monotonic(), build(cur))
+    finally:
+        cur.close()
+        conn.close()
+        _DIRECTORY_REBUILDING.discard(kind)
+
+
+def _directory_index(kind: str, build):
+    """The cached list; a stale one is still served while a background thread
+    rebuilds it (the people list takes ~5s to build), so only the very first
+    request after a restart waits."""
+    hit = _DIRECTORY_CACHE.get(kind)
+    if hit is None:
+        _rebuild_directory(kind, build)
+        return _DIRECTORY_CACHE[kind][1]
+    if time.monotonic() - hit[0] >= _DIRECTORY_TTL and kind not in _DIRECTORY_REBUILDING:
+        _DIRECTORY_REBUILDING.add(kind)
+        threading.Thread(target=_rebuild_directory, args=(kind, build), daemon=True).start()
+    return hit[1]
+
+
+def _build_people_directory(cur) -> list:
+    cur.execute("""
+        SELECT h.host_id, h.first_name || ' ' || h.last_name AS name, h.profile_image_url,
+               COUNT(DISTINCT eh.episode_id) AS appearances,
+               COUNT(DISTINCT eh.episode_id) FILTER (WHERE eh.is_guest) AS as_guest,
+               COUNT(DISTINCT eh.episode_id) FILTER (WHERE NOT eh.is_guest) AS as_host,
+               COUNT(DISTINCT e.podcast_id) AS shows, MAX(e.published_date) AS last_date
+        FROM hosts h
+        JOIN episode_host eh ON eh.host_id = h.host_id
+        JOIN episodes e ON e.episode_id = eh.episode_id
+        GROUP BY h.host_id, h.first_name, h.last_name, h.profile_image_url
+    """)
+    people = cur.fetchall()
+    roles = _all_current_roles(cur)
+    rows = []
+    for r in people:
+        title, company, org_id = roles.get(r['host_id'], (None, None, None))
+        rows.append({**r, 'slug': profiles.slugify(r['name']),
+                     'title': title, 'company': company, 'org_id': org_id,
+                     'kind': profiles.person_kind(title, r['as_host'], r['as_guest'], org_stats.role_kind)})
+    return rows
+
+
+def _build_org_directory(cur) -> list:
+    # Guests only, like the Stats page; each organisation counted as stored
+    # (not rolled up), so a parent and its children can sit in one list.
+    cur.execute(f"""
+        WITH {org_stats._ORG_TOP}
+        SELECT o.org_id, o.name, COALESCE(o.org_type, t.org_type) AS org_type, par.name AS parent_name,
+               COUNT(DISTINCT ha.host_id) AS people,
+               COUNT(DISTINCT (ha.episode_id, ha.host_id)) AS appearances,
+               COUNT(DISTINCT e.podcast_id) AS shows, MAX(e.published_date) AS last_date
+        FROM host_affiliations ha
+        JOIN episode_host eh ON eh.episode_id = ha.episode_id AND eh.host_id = ha.host_id AND eh.is_guest
+        JOIN organization_aliases a ON a.normalized_name = ha.company_key
+        JOIN organizations o ON o.org_id = a.org_id AND NOT o.not_an_org
+        LEFT JOIN org_top ot ON ot.org_id = o.org_id
+        LEFT JOIN organizations t ON t.org_id = ot.top
+        LEFT JOIN organizations par ON par.org_id = o.parent_org_id AND NOT par.not_an_org
+        JOIN episodes e ON e.episode_id = ha.episode_id
+        GROUP BY o.org_id, o.name, COALESCE(o.org_type, t.org_type), par.name
+    """)
+    return [{**r, 'slug': profiles.slugify(r['name'])} for r in cur.fetchall()]
+
+
+def _build_show_directory(cur) -> list:
+    cur.execute("""
+        SELECT p.podcast_id, p.title, p.cover_art_url, c.name AS channel,
+               COUNT(*) AS episodes, MIN(e.published_date) AS first_date, MAX(e.published_date) AS last_date,
+               COUNT(*) FILTER (WHERE NOT e.no_guest_confirmed) AS guest_eligible,
+               COUNT(*) FILTER (WHERE NOT e.no_guest_confirmed AND EXISTS (
+                   SELECT 1 FROM episode_host eh WHERE eh.episode_id = e.episode_id AND eh.is_guest)) AS with_guest
+        FROM podcasts p
+        LEFT JOIN channels c ON c.channel_id = p.channel_id
+        JOIN episodes e ON e.podcast_id = p.podcast_id
+        GROUP BY p.podcast_id, p.title, p.cover_art_url, c.name
+    """)
+    shows = cur.fetchall()
+    cur.execute("""
+        SELECT e.podcast_id, COUNT(DISTINCT eh.host_id) AS guests
+        FROM episode_host eh JOIN episodes e ON e.episode_id = eh.episode_id
+        WHERE eh.is_guest GROUP BY e.podcast_id
+    """)
+    guests = {r['podcast_id']: r['guests'] for r in cur.fetchall()}
+    cur.execute("""
+        SELECT podcast_id, date_trunc('month', published_date)::date AS month, COUNT(*) AS n
+        FROM episodes WHERE published_date >= (CURRENT_DATE - INTERVAL '14 months')
+        GROUP BY 1, 2
+    """)
+    months = {}
+    for r in cur.fetchall():
+        months.setdefault(r['podcast_id'], []).append((r['month'], r['n']))
+    rows = []
+    for s in shows:
+        eligible = s.pop('guest_eligible')
+        with_guest = s.pop('with_guest')
+        rows.append({**s, 'slug': profiles.slugify(s['title']), 'guests': guests.get(s['podcast_id'], 0),
+                     'per_month': profiles.recent_cadence(months.get(s['podcast_id'], [])),
+                     'guest_named_pct': round(100 * with_guest / eligible) if eligible else None})
+    return rows
+
+
+def _chips(counts: dict, labels: dict) -> list:
+    return sorted(({'kind': k, 'label': labels.get(k, k), 'count': n} for k, n in counts.items() if k),
+                  key=lambda c: -c['count'])
+
+
+@app.get("/api/directory/people")
+async def people_directory(q: str = "", kind: str = "", sort: str = "appearances",
+                           offset: int = 0, limit: int = 50):
+    """Everyone credited on an episode, for the /people directory: search by
+    name or company, filter by the kind of role (or hosts), sort by
+    appearances, most recent or name."""
+    page = profiles.directory_page(
+        _directory_index('people', _build_people_directory), q=q, fields=('name', 'company'),
+        group_field='kind', group=kind, sort=sort, offset=offset, limit=limit)
+    return {'total': page['total'], 'rows': page['rows'],
+            'kinds': _chips(page['counts'], {**org_stats.ROLE_LABELS, 'host': 'Host'})}
+
+
+@app.get("/api/directory/orgs")
+async def org_directory(q: str = "", type: str = "", sort: str = "people",
+                        offset: int = 0, limit: int = 50):
+    """Every organisation a guest has worked for, for the /orgs directory."""
+    page = profiles.directory_page(
+        _directory_index('orgs', _build_org_directory), q=q, fields=('name', 'parent_name'),
+        group_field='org_type', group=type, sort=sort, default_sort='people', offset=offset, limit=limit)
+    return {'total': page['total'], 'rows': page['rows'], 'types': _chips(page['counts'], {})}
+
+
+@app.get("/api/directory/shows")
+async def show_directory():
+    """Every show, for the /shows directory (few enough to send whole)."""
+    return {'rows': sorted(_directory_index('shows', _build_show_directory), key=profiles.DIRECTORY_SORTS['guests'])}
 
 
 @app.get("/api/search")
