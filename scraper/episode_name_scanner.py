@@ -1396,6 +1396,91 @@ def extract_candidate_names(text: str) -> list[tuple[str, str]]:
 _WORD_RE = re.compile(r"[\w'-]+")
 
 
+# ------------------------------------------------------------------
+# Shows whose descriptions are not scanned for names (scan_descriptions =
+# false): news shows that name people constantly. Only someone the text
+# *introduces* as on the episode is credited there.
+# ------------------------------------------------------------------
+
+_U, _L = "A-ZÀ-ÖØ-Þ", "a-zA-Zß-öø-ÿÀ-ÖØ-Þ"
+_IW = rf"(?:[{_U}][{_L}'’\-]+|[{_U}]\.)"
+# A person's name, starting at a word boundary ("POLITICO. Nirmal" is not "O. Nirmal").
+_INAME = rf"(?<![{_L}.])((?:{_IW}) (?:(?:{_IW}|de|van|von|del|da) )?(?:[{_U}][{_L}'’\-]+))"
+_INTRO_VERB = (r"(?:breaks?|explains?|unpacks?|walks?|discuss(?:es)?|reports?|digs?|lays?|takes?|tells?|"
+               r"looks?|has|gives?|previews?|joins?|talks?|analyz(?:es)?|recaps?|weighs?|outlines?|"
+               r"sat|sits?|chats?|chatted|spoke|speaks?|interview(?:s|ed)?)")
+# Words before the name in "sits down with Sen. Jeff Merkley" / "with the
+# premier of Alberta, Jason Kenney": no sentence break, except a title's
+# abbreviation.
+_LEADIN = r"(?:(?:(?:Sen|Rep|Gov|Dr|Mr|Ms|Mrs|Lt|Gen|Col|U\.S)\.|[^.]){0,90}?[ ,])??"
+# Titles between the lead-in and the name: "Energy Secretary Dan Brouillette".
+_TITLED = (r"(?:(?:Energy|Interior|Transportation|Assistant|Deputy|Former|U\.S\.|Secretary|Sen\.|Senator|Rep\.|"
+           r"Representative|Gov\.|Governor|President|Premier|Commissioner|Chair|Chairman|Chairwoman|Administrator|"
+           r"Mayor|Dr\.|EPA|FERC|DOE) )*")
+_GUEST_INTROS = [
+    # "POLITICO's Ben Lefebvre and Annie Snider break down", "E&E News reporter Robin Bravender breaks down"
+    rf"[{_U}][\w&.'’-]*(?: [{_U}][\w&.'’-]*){{0,3}}['’]s?(?: [{_U}&][\w&.'’-]*){{0,3}}?(?: [a-z]+){{0,4}}? {_INAME}"
+    rf"(?:(?:,| and|, and) {_INAME})?(?:(?:,| and|, and) {_INAME})?,? (?:{_INTRO_VERB}\b|on (?:why|how|what|the))",
+    rf"(?:sits?|sat) down (?:for an? (?:\w+ )?interview )?with {_LEADIN}{_TITLED}{_INAME}",
+    rf"(?:chats?|chatted|talks?|talked|speaks?|spoke) (?:with|to) {_LEADIN}{_TITLED}{_INAME}",
+    rf"(?:interview|conversation) with {_LEADIN}{_TITLED}{_INAME}",
+    rf"{_INAME},? (?:a reporter )?(?:from|of|with) [{_U}][^,.]{{0,40}}?,? {_INTRO_VERB}\b",
+]
+_TITLE_WORDS = re.compile(r"^(?:(?:Assistant|Deputy|Energy|Interior|Former|Secretary|Sen|Senator|Rep|Representative|Gov|"
+                          r"Governor|President|Vice|Commissioner|Chair|Chairman|Chairwoman|Administrator|Mayor|Dr|Prof)\.?\s+)+")
+_NOT_A_NAME = re.compile(r"\b(?:GOP|Democrat|Republican|News|Energy|Pro|Europe|Minutes|Translations|Playbook|Daily|"
+                         r"Commission|Department|Administration|Agency|Council|Institute|Corporation|Company|Coalition|"
+                         r"Caucus|Club|Bank|Committee|Senate|House|Congress|Chief|Secretary|Correspondent)\b")
+
+
+def _fold_name(name: str) -> str:
+    import unicodedata
+    return unicodedata.normalize('NFKD', name or '').encode('ascii', 'ignore').decode().lower()
+
+
+def _introduced(raw: str):
+    name = _TITLE_WORDS.sub('', (raw or '').strip(" .,'’"))
+    if len(name.split()) < 2 or _NOT_A_NAME.search(name):
+        return None
+    return name.replace('’', "'")
+
+
+def find_introduced_names(text: str, show_title: str = '') -> list:
+    """(name, 'guest' | 'host') for each person the text introduces as on
+    the episode: a reporter or newsmaker presented ("POLITICO's Zack Colman
+    breaks down", "sits down with Sen. Jeff Merkley", "Mike Lee from E&E
+    News explains"), or the host ("POLITICO Energy host Josh Siegel", "Josh
+    Siegel is the host of POLITICO Energy"). Names only mentioned in the
+    news ("FERC Chair Richard Glick blasted...") are not introductions.
+    A host statement about another show ("host of Morning Energy") doesn't
+    count."""
+    text = re.sub(r'\s+', ' ', text or '')
+    found = {}
+    for m in re.finditer(rf"\bhosts? {_INAME}", text):
+        n = _introduced(m.group(1))
+        if n:
+            found[n] = 'host'
+    for m in re.finditer(rf"{_INAME} is (?:the |a |an |our )?([^.]{{0,160}})", text):
+        role = m.group(2).lower()
+        hm = re.search(r'\bhost\b(?:[- ]producer)?(?: (?:of|for) (?:the )?([^,.;]+))?', role)
+        if hm:
+            about = (hm.group(1) or '').lower()
+            # "host of Morning Energy" is another show; "host of the POLITICO
+            # Energy podcast" or a plain "audio host-producer" is this one.
+            if about and show_title and show_title.lower() not in about and 'audio' not in about:
+                continue
+            n = _introduced(m.group(1))
+            if n:
+                found[n] = 'host'
+    for pat in _GUEST_INTROS:
+        for m in re.finditer(pat, text):
+            for raw in m.groups():
+                n = _introduced(raw) if raw else None
+                if n and found.get(n) != 'host':
+                    found[n] = 'guest'
+    return sorted(found.items())
+
+
 def build_surname_index(hosts: list) -> dict:
     """Group people by surname so an episode only tests plausible candidates.
 
@@ -1464,16 +1549,20 @@ def show_host_first_names(conn) -> dict:
 
 
 def run(dry_run: bool = True, title_only: bool = False, min_length: int = 7,
-        uncredited_only: bool = False):
+        uncredited_only: bool = False, show: str = None):
     conn = psycopg2.connect(DB)
     hosts = get_hosts(conn)
     episodes = get_episodes_to_scan(conn, uncredited_only=uncredited_only)
+    if show:
+        episodes = [e for e in episodes if e['podcast_title'] == show]
     show_hosts = get_show_hosts(conn)
     surname_index = build_surname_index(hosts)
     # Exact lookup for labelled-credit matching (see below) — a name pulled
     # from a "Guest:"/"Connect with" statement is checked directly against
     # this rather than run back through the (truncated-text) surname index.
     known_by_full_name = {h['full_name'].lower(): h for h in hosts if h['full_name']}
+    # The same names without accents: show notes write "Alex Guillen" for Alex Guillén.
+    known_by_folded_name = {_fold_name(h['full_name']): h for h in hosts if h['full_name']}
     host_first_names = show_host_first_names(conn)
     desc_skips = load_desc_scan_skips(conn)
 
@@ -1491,6 +1580,25 @@ def run(dry_run: bool = True, title_only: bool = False, min_length: int = 7,
         description   = episode['description'] or ''
         show_host_ids = show_hosts.get(podcast_id, set())
         clean_desc    = clean_description(description) if not title_only else ''
+
+        # A show whose descriptions are full of people being talked about:
+        # credit only people the title or description introduces as on the
+        # episode, as a guest or (for its listed hosts) as the host.
+        if podcast_title in desc_skips and not title_only:
+            full = clean_description(description, max_chars=None)
+            for name, kind in find_introduced_names(title + '. ' + full, podcast_title):
+                host = known_by_full_name.get(name.lower()) or known_by_folded_name.get(_fold_name(name))
+                if not host or len(host['full_name']) < min_length:
+                    continue
+                if kind == 'host' and host['host_id'] not in show_host_ids:
+                    continue
+                matches.append({
+                    'episode_id': episode_id, 'host_id': host['host_id'],
+                    'full_name': host['full_name'], 'podcast_title': podcast_title,
+                    'episode_title': title, 'source': 'parsed_desc',
+                    'is_show_host': kind == 'host',
+                })
+            continue
 
         # Only people whose surname appears in this episode can possibly match.
         scan_desc = bool(clean_desc) and podcast_title not in desc_skips
@@ -1691,6 +1799,12 @@ def suggest(title_only: bool = False, limit: int = None, show: str = None,
         # DESC_SCAN_MAX_CHARS to avoid Volts-transcript-style over-crediting
         # of people merely mentioned, not present.
         full_desc = truncated_desc = ''
+        if not title_only and podcast_title in desc_skips:
+            # Only people introduced as on the episode (see find_introduced_names).
+            full = clean_description(description, max_chars=None)
+            intro = [('desc_introduced', n, full[:160]) for n, _ in find_introduced_names(title + '. ' + full, podcast_title)]
+        else:
+            intro = []
         if not title_only and podcast_title not in desc_skips:
             full_desc = clean_description(description, max_chars=None)
             truncated_desc = clean_description(description)
@@ -1700,7 +1814,8 @@ def suggest(title_only: bool = False, limit: int = None, show: str = None,
         # extract_candidate_names_tagged()'s docstring and coarse_source()
         # in description_cleaner.py, which un-does this before it reaches
         # episode_host.data_source on approval.
-        candidates = [('title_labelled', n, title[:160]) for n, _ in extract_labelled_credits(title)]
+        candidates = list(intro)
+        candidates += [('title_labelled', n, title[:160]) for n, _ in extract_labelled_credits(title)]
         candidates += [(f'title_{tag}', n, c) for n, c, tag in extract_candidate_names_tagged(title)]
         if episode['podcast_id'] in title_credit_pids:
             title_credit_name = extract_title_name_credit(title)
@@ -1848,7 +1963,7 @@ examples:
     parser.add_argument('--limit', type=int, default=None,
                         help='Limit number of episodes to scan (suggest mode)')
     parser.add_argument('--show', type=str, default=None,
-                        help='Only scan episodes from this podcast title (suggest mode)')
+                        help='Only scan episodes from this podcast title')
     parser.add_argument('--dry-run', action='store_true', default=False,
                         help='suggest mode: report what would be queued without writing')
     args = parser.parse_args()
@@ -1862,4 +1977,5 @@ examples:
             title_only=args.title_only,
             min_length=args.min_length,
             uncredited_only=args.uncredited_only,
+            show=args.show,
         )

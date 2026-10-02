@@ -516,6 +516,20 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   the X account's display name is the person's; `people-x-wiki` takes
   namesake Wikidata entries' handles only when the X bio names one of the
   person's organisations.
+- **News shows (`podcasts.scan_descriptions = false`, only POLITICO Energy
+  as of Oct 2026)**: the scanner doesn't credit any known name it finds
+  there (that credited politicians named in the news, and missed the
+  reporter guest on nearly every episode). It credits only people the title
+  or description *introduces* (`find_introduced_names`): "POLITICO's X breaks
+  down…", "X from E&E News explains…", "sits down with / chats with /
+  interview with [title] X" as guests, and "POLITICO Energy host X" / "X is
+  the host of <this show>" as host for the show's listed hosts. The
+  description footer is a standard team block, not who was on the episode.
+  Oct 1 2026 cleanup: guest coverage 8% → 83%; hosts by stated period
+  (Anthony Adragna Aug 2020–Aug 2021, Nirmal Mulaikal from Sep 2021, Kelsey
+  Tamborrino early 2022, Catherine Morehouse late 2023, Josh Siegel 2024
+  fill-ins and 2025–26, Zack Colman / Manuel Quiñones 2026); 100 reporters
+  created; mention-only and wrong host credits suppressed; snapshot kept.
 - **Company logos** (`/api/logo/{org_id}`, `OrgLogo.js`): logo.dev by the
   organisation's website with `LOGO_DEV_TOKEN` (the same logo.dev account as
   Colorado Current; set it on the Render backend), else its Wikimedia

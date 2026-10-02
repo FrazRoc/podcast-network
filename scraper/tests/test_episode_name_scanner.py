@@ -1542,3 +1542,38 @@ class TestDescriptorIntro:
 
 def test_zero_width_characters_stripped():
     assert clean_candidate_name("​​Nancy Pfund") == "Nancy Pfund"
+
+
+class TestFindIntroducedNames:
+    """News shows (scan_descriptions = false): credit only people the text
+    introduces as on the episode, never people it talks about."""
+
+    from episode_name_scanner import find_introduced_names as _f
+    find = staticmethod(_f)
+
+    def test_reporters_presented_are_guests(self):
+        t = ("POLITICO's Ben Lefebvre and Annie Snider break down the fight. Today, POLITICO's Zack Colman, on why. "
+             "Mike Lee from POLITICO's E&E News breaks down the rule. POLITICO's Alex Guillen and Annie Snider sat down "
+             "with EPA administrator Michael Regan.")
+        got = dict(self.find(t, 'POLITICO Energy'))
+        assert {n for n, k in got.items() if k == 'guest'} == {
+            'Ben Lefebvre', 'Annie Snider', 'Zack Colman', 'Mike Lee', 'Alex Guillen', 'Michael Regan'}
+
+    def test_interviewees_with_titles_are_guests(self):
+        t = ("Josh Siegel chats with the premier of the Canadian province of Alberta, Jason Kenney, about it. "
+             "Josh Siegel sits down with Sen. Jeff Merkley (D-Ore.). POLITICO's Gavin Bade talks with Energy "
+             "Secretary Dan Brouillette. Kelsey Tamborrino sits down for an extended interview with Abigail Ross Hopper.")
+        guests = {n for n, k in self.find(t) if k == 'guest'}
+        assert {'Jason Kenney', 'Jeff Merkley', 'Dan Brouillette', 'Abigail Ross Hopper'} <= guests
+
+    def test_people_in_the_news_are_not_introduced(self):
+        t = ("FERC Chairman Richard Glick blasted a Wall Street Journal editorial. Yesterday Pete Buttigieg was "
+             "introduced as the president-elect's pick for Transportation.")
+        assert self.find(t, 'POLITICO Energy') == []
+
+    def test_hosts_of_this_show_only(self):
+        t = ("Josh Siegel is the host of POLITICO Energy. Nirmal Mulaikal is a POLITICO audio host-producer. "
+             "Catherine Morehouse is the host of Morning Energy. POLITICO Energy host Zack Colman sits down with X.")
+        got = dict(self.find(t, 'POLITICO Energy'))
+        assert got.get('Josh Siegel') == 'host' and got.get('Nirmal Mulaikal') == 'host' and got.get('Zack Colman') == 'host'
+        assert got.get('Catherine Morehouse') is None
