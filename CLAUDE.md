@@ -551,6 +551,38 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   wikimedia.org for people's Commons photos.
 - Not yet: a public company view.
 
+## Topics (what episodes are about)
+
+- **Data**: open-ended topic phrases per episode (`episode_tag`, 2–6 each,
+  one `is_primary`, a verbatim `evidence` quote), each `tags` row filed under
+  one of 12 fixed categories (`backend/topic_names.py` `CATEGORIES`).
+  Spellings are `tag_aliases` keyed by `normalize_topic()` (the organisation
+  pattern), so "SMRs" and "small modular reactors" share a tag. Tagger:
+  `scraper/extract_topics.py` (batch API, or `export`/`import` to read by
+  hand); migration `migrate_add_topics.sql` (applied to production Oct 2026).
+- **Oct 2026 state**: 2,000 random episodes tagged by hand (Claude Code read
+  them; `topic_extractions.batch_id` `manual-pilot1..4`, `episode_tag.data_source`
+  'manual'): 3,225 tags, 4,846 episode rows. The rest of the ~22k episodes
+  wait on API credit. Pilot files and the importer are in
+  `~/Backups/podcast-network/topic-pilots/`. Expect duplicates
+  ("geothermal" vs "geothermal energy") until Topic Admin merges them.
+- **Rollups** (`backend/topics.py`, pure): an episode counts once per topic
+  and its main topic counts twice; a person/show/org "talks about" a topic
+  only at 2+ of their episodes (`MIN_EPISODES`); the public directory lists
+  topics on 2+ episodes (`MIN_PUBLIC_EPISODES`). Shares are out of the
+  episodes actually tagged (`tagged_episodes`), since coverage is partial.
+- **Endpoints**: `/api/topics` (directory, `?q&category&sort&all`),
+  `/api/topics/{tag_id}` (guests and hosts apart, shows with share, orgs from
+  guests' introduced roles, by year, related = co-occurring on 2+ episodes);
+  person profile `talks_about` and per-appearance `topics`; show profile
+  `covers` and per-episode `topics`; org profile `talks_about`;
+  `/api/search` returns `topics`; `/api/directory/people?topic=`. Admin:
+  `GET/PUT /api/admin/topics[/{id}]` (rename refuses another topic's
+  spelling with 409 — merge instead), `POST /api/admin/topics/{keep}/merge/{drop}`.
+- Not yet: frontend (topic pages, "Talks about" chips, Topic Admin tab),
+  topic merge suggestions, the ~47-topic broad layer (draft in the pilot
+  folder's `broad_proposal.csv`).
+
 ## Tests
 
 **`scraper/tests/` has a real pytest suite** (~300 cases) covering
