@@ -1497,13 +1497,15 @@ def _fold_name(name: str) -> str:
 
 def _introduced(raw: str):
     name = _TITLE_WORDS.sub('', (raw or '').strip(" .,'’"))
+    # "POLITICO's Josh Siegel sits down", "Producer Nirmal Mulaikal chats"
+    name = re.sub(r"^(?:[\w&.]+['’]s |Producer |Hosts? )", '', name)
     if len(name.split()) < 2 or _NOT_A_NAME.search(name):
         return None
     return name.replace('’', "'")
 
 
 def find_introduced_names(text: str, show_title: str = '') -> list:
-    """(name, 'guest' | 'host') for each person the text introduces as on
+    """(name, 'guest' | 'host' | 'interviewer') for each person the text introduces as on
     the episode: a reporter or newsmaker presented ("POLITICO's Zack Colman
     breaks down", "sits down with Sen. Jeff Merkley", "Mike Lee from E&E
     News explains"), or the host ("POLITICO Energy host Josh Siegel", "Josh
@@ -1512,11 +1514,16 @@ def find_introduced_names(text: str, show_title: str = '') -> list:
     A host statement about another show ("host of Morning Energy") doesn't
     count."""
     text = re.sub(r'\s+', ' ', text or '')
+    # Feeds often glue sentences together: 'Translations".Ryan Heath is a
+    # host of ...' — put the space back so a sentence-start name matches.
+    text = re.sub(r'([a-z]["”]?\.|\.["”])(?=[A-Z])', r'\1 ', text)
     found = {}
-    for m in re.finditer(rf"\bhosts? {_INAME}", text):
-        n = _introduced(m.group(1))
-        if n:
-            found[n] = 'host'
+    other_hosts = set()
+    for m in re.finditer(rf"\b([Gg]uest |[Ff]ill-in )?[Hh]osts? {_INAME}(?: and {_INAME})?", text):
+        for raw in m.groups()[1:]:
+            n = _introduced(raw) if raw else None
+            if n:
+                found[n] = 'interviewer' if m.group(1) else 'host'
     for m in re.finditer(rf"{_INAME} is (?:the |a |an |our )?([^.]{{0,160}})", text):
         role = m.group(2).lower()
         hm = re.search(r'\bhost\b(?:[- ]producer)?(?: (?:of|for) (?:the )?([^,.;]+))?', role)
@@ -1525,16 +1532,38 @@ def find_introduced_names(text: str, show_title: str = '') -> list:
             # "host of Morning Energy" is another show; "host of the POLITICO
             # Energy podcast" or a plain "audio host-producer" is this one.
             if about and show_title and show_title.lower() not in about and 'audio' not in about:
+                n = _introduced(m.group(1))
+                if n:
+                    other_hosts.add(n)
                 continue
             n = _introduced(m.group(1))
             if n:
                 found[n] = 'host'
+    # "POLITICO Energy reporter Kelsey Tamborrino sits down for an extended
+    # interview with Ho Nieh" (episode 2582): the one asking the questions
+    # hosts this episode, whoever usually hosts the show.
+    # "Gov. Mikie Sherrill sits down for an extended interview with
+    # POLITICO" is the other way round: the newsmaker is the guest.
+    for m in re.finditer(rf"(?:{_INAME} and )?{_INAME},? (?:(?:sits?|sat) down(?: for an? (?:[\w-]+ )?interview)? with|"
+                         rf"(?:chats?|chatted|talks?|talked|speaks?|spoke) (?:with|to)|interviews|interviewed)"
+                         rf"( (?:POLITICO|E&E)\b)?", text):
+        for raw in m.groups()[:2]:
+            n = _introduced(raw) if raw else None
+            if n and not m.group(3):
+                if found.get(n) != 'host':
+                    found[n] = 'interviewer'
+            elif n and found.get(n) not in ('host', 'interviewer'):
+                found[n] = 'guest'
     for pat in _GUEST_INTROS:
         for m in re.finditer(pat, text):
             for raw in m.groups():
                 n = _introduced(raw) if raw else None
-                if n and found.get(n) != 'host':
+                if n and found.get(n) not in ('host', 'interviewer'):
                     found[n] = 'guest'
+    # Another show's host on a cross-posted episode is this one's guest.
+    for n in other_hosts:
+        if n in found:
+            found[n] = 'guest'
     return sorted(found.items())
 
 
@@ -1647,13 +1676,16 @@ def run(dry_run: bool = True, title_only: bool = False, min_length: int = 7,
                 host = known_by_full_name.get(name.lower()) or known_by_folded_name.get(_fold_name(name))
                 if not host or len(host['full_name']) < min_length:
                     continue
+                # A stated host must be one of the show's listed hosts ("host
+                # of Morning Energy" is someone else's show); the person
+                # conducting this episode's interview hosts it either way.
                 if kind == 'host' and host['host_id'] not in show_host_ids:
                     continue
                 matches.append({
                     'episode_id': episode_id, 'host_id': host['host_id'],
                     'full_name': host['full_name'], 'podcast_title': podcast_title,
                     'episode_title': title, 'source': 'parsed_desc',
-                    'is_show_host': kind == 'host',
+                    'is_show_host': kind in ('host', 'interviewer'),
                 })
             continue
 

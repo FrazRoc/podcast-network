@@ -1557,7 +1557,30 @@ class TestFindIntroducedNames:
              "with EPA administrator Michael Regan.")
         got = dict(self.find(t, 'POLITICO Energy'))
         assert {n for n, k in got.items() if k == 'guest'} == {
-            'Ben Lefebvre', 'Annie Snider', 'Zack Colman', 'Mike Lee', 'Alex Guillen', 'Michael Regan'}
+            'Ben Lefebvre', 'Zack Colman', 'Mike Lee', 'Michael Regan'}
+        # Whoever conducts the interview hosts that episode.
+        assert {n for n, k in got.items() if k == 'interviewer'} == {'Alex Guillen', 'Annie Snider'}
+
+    def test_interviewer_and_guest_host(self):
+        got = dict(self.find(
+            "Today, POLITICO Energy reporter Kelsey Tamborrino sits down for an extended interview with Ho Nieh, "
+            "the chairman of the Nuclear Regulatory Commission.", 'POLITICO Energy'))
+        assert got == {'Kelsey Tamborrino': 'interviewer', 'Ho Nieh': 'guest'}
+        got = dict(self.find(
+            "Today, POLITICO Energy guest host Hannah Northey sits down for an extended interview with "
+            "John Jovanovic, the chairman of the Export-Import Bank.", 'POLITICO Energy'))
+        assert got == {'Hannah Northey': 'interviewer', 'John Jovanovic': 'guest'}
+
+    def test_cross_posted_hosts_are_guests(self):
+        got = dict(self.find('Hosts Luiza Savage and Ryan Heath talk to the people trying to make industrial '
+                             'policy cool again. Luiza Savage is the host of "Global Translations". Ryan Heath is '
+                             'the host of "Global Translations".', 'POLITICO Energy'))
+        assert got.get('Ryan Heath') == 'guest'
+
+    def test_newsmaker_sitting_down_with_politico_is_guest(self):
+        got = dict(self.find("Today, Democratic New Jersey Gov. Mikie Sherrill sits down for an extended "
+                             "interview with POLITICO's Josh Siegel.", 'POLITICO Energy'))
+        assert got.get('Mikie Sherrill') == 'guest'
 
     def test_interviewees_with_titles_are_guests(self):
         t = ("Josh Siegel chats with the premier of the Canadian province of Alberta, Jason Kenney, about it. "
