@@ -566,6 +566,17 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   wait on API credit. Pilot files and the importer are in
   `~/Backups/podcast-network/topic-pilots/`. Expect duplicates
   ("geothermal" vs "geothermal energy") until Topic Admin merges them.
+- **Companies and people aren't topics** (Evan, Oct 2026). `tags.is_company`
+  + `org_id` and `tags.is_person` + `host_id` (migrations
+  `migrate_add_topic_companies.sql`, `migrate_add_topic_people.sql`) keep
+  those tags out of every topic list, page, rollup and the tagger's reuse
+  list. Episodes show them as grey chips (`companies` / `people_mentioned`),
+  and org and person pages list "Episodes that discuss X" (`discussed_in`).
+  Regulators, grid operators, agencies, public utilities, events, laws,
+  places, books and products stay topics. Oct 2026: 638 company tags (512
+  linked) and 188 person tags (137 linked); the reviewed lists and undo
+  snapshots are in `~/Backups/podcast-network/topic-pilots/`. Org and
+  person merges carry the tag link to the survivor.
 - **Rollups** (`backend/topics.py`, pure): an episode counts once per topic
   and its main topic counts twice; a person/show/org "talks about" a topic
   only at 2+ of their episodes (`MIN_EPISODES`); the public directory lists
