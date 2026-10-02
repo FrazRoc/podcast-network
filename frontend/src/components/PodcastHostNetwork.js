@@ -1111,8 +1111,24 @@ const PodcastHostNetwork = () => {
 
     const q = searchQuery.toLowerCase().trim();
 
+    // A search shows each match with the people they're linked to. Filtering
+    // to the matches alone left them with almost no links between them, so
+    // the cluster pruning below threw every one away and "ji" found nobody.
+    // The other filters don't apply to a search either: whoever you looked
+    // for should appear even if they fall under the connection threshold.
+    if (q) {
+      const matches = new Set(graphData.nodes
+        .filter(n => n.name.toLowerCase().includes(q)).map(n => n.id));
+      const links = graphData.links.filter(l => {
+        if (l.value < currentFilters.minEpisodes) return false;
+        return matches.has(l.source?.id ?? l.source) || matches.has(l.target?.id ?? l.target);
+      });
+      const ids = new Set(matches);
+      links.forEach(l => { ids.add(l.source?.id ?? l.source); ids.add(l.target?.id ?? l.target); });
+      return { nodes: graphData.nodes.filter(n => ids.has(n.id)), links };
+    }
+
     const filteredNodes = graphData.nodes.filter(node => {
-      if (q && !node.name.toLowerCase().includes(q)) return false;
       if (node.val < currentFilters.minConnections) return false;
       if (node.podcasts.length < currentFilters.minPodcasts) return false;
       if (currentFilters.selectedRoles.length && !currentFilters.selectedRoles.includes(node.role)) return false;
