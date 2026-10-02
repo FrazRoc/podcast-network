@@ -198,6 +198,16 @@ merges and credit deletions carry through without touching that code.
   companies ("Tesla reporter"). On the reviewed data it made no wrong matches
   (121 of 134 found). Existing rows were fixed by a one-off pass, not by
   re-extraction.
+- **Without API credit** (Oct 2 2026): `export --out DIR --batch-id manual-...`
+  writes the unprocessed items in request-sized files and marks them pending
+  under that batch id; Claude Code reads them and writes answers in
+  `OUTPUT_SCHEMA`'s shape; `import --batch-id manual-... FILES` records them
+  through `record_results` (verbatim check, title organisations, org sync).
+  `collect` skips `manual-%` batches. The 3,418-appearance backlog was done
+  this way (2,808 roles; 348 flagged as the show's own host or producer —
+  inspiratia staff on Energy Transition Today, Oscar Boyd on Zero, the Solar
+  Coaster co-host — which feed the separate hosts process). The scheduled
+  `run` had stalled on the empty account and on its $2 cap.
 - Order of operations: `estimate` (read-only) → `pilot --limit 100` (API,
   CSV only, no DB writes) → review → migration → `submit` with approval per
   the quantify-first rule → `collect`. `run` = collect then submit, for cron;
