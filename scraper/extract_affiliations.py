@@ -1024,6 +1024,7 @@ def cmd_collect():
     cur.execute("""
         SELECT DISTINCT batch_id FROM affiliation_extractions
         WHERE status = 'pending' AND batch_id IS NOT NULL
+          AND batch_id NOT LIKE 'manual-%%'   -- read by hand; see cmd_import
     """)
     batch_ids = [r[0] for r in cur.fetchall()]
     if not batch_ids:
@@ -1078,6 +1079,74 @@ def cmd_collect():
         sync_organizations()
 
 
+# ------------------------------------------------------------------
+# READ BY HAND (no API)
+# ------------------------------------------------------------------
+# When the API account has no credit, Claude Code reads the snippets itself:
+# `export` writes the same items a batch would send, in files of
+# ITEMS_PER_REQUEST, and records them as pending under a "manual-..." batch
+# id; `import` takes answers in OUTPUT_SCHEMA's shape and records them
+# through record_results(), so the verbatim check and organisation matching
+# apply exactly as they do to the model's answers.
+
+MANUAL_MODEL = 'claude-code'
+
+
+def cmd_export(out_dir: str, limit=None, batch_id=None):
+    from datetime import datetime
+    batch_id = batch_id or 'manual-' + datetime.now().strftime('%Y%m%d-%H%M')
+    conn = psycopg2.connect(DB)
+    try:
+        appearances, no_mention, items = _load(conn, limit)
+        _report(appearances, no_mention, items, estimate_cost(items))
+        cur = conn.cursor()
+        if no_mention:
+            _upsert_extractions(cur, [
+                (a['episode_id'], a['host_id'], 'no_mention', None, None, None, None) for a in no_mention
+            ])
+        _upsert_extractions(cur, [
+            (a['episode_id'], a['host_id'], 'pending', it['snippet'], it['snippet_hash'], batch_id, MANUAL_MODEL)
+            for it in items for a in it['appearances']
+        ])
+        conn.commit()
+        os.makedirs(out_dir, exist_ok=True)
+        groups = chunk(items)
+        for i, group in enumerate(groups):
+            with open(os.path.join(out_dir, f'items_{i:03d}.xml'), 'w') as f:
+                f.write(render_items(group) + '\n')
+        logger.info(f"{batch_id}: {len(items)} items in {len(groups)} files under {out_dir}")
+    finally:
+        conn.close()
+
+
+def cmd_import(batch_id: str, answer_paths: list):
+    """Record hand-read answers (files of {"results": [...]}) for a manual
+    batch. Items without an answer stay pending, so this can run per file."""
+    conn = psycopg2.connect(DB)
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT episode_id, host_id, snippet, snippet_hash FROM affiliation_extractions
+        WHERE status = 'pending' AND batch_id = %s
+    """, (batch_id,))
+    pending = cur.fetchall()
+    expected = {item_id(h, s_hash) for _, h, _, s_hash in pending}
+    answers = {}
+    for path in answer_paths:
+        with open(path) as f:
+            answers.update(parse_response_text(f.read(), expected))
+    answered = [row for row in pending if item_id(row[1], row[3]) in answers]
+    done, added, retry, dropped = record_results(cur, answered, answers)
+    conn.commit()
+    cur.close()
+    conn.close()
+    logger.info(f"{batch_id}: {done} appearances done, {added} affiliations, "
+                f"{dropped} values dropped as not verbatim; "
+                f"{len(pending) - len(answered)} still pending")
+    if done:
+        from organizations import sync as sync_organizations
+        sync_organizations()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest='command', required=True)
@@ -1111,6 +1180,15 @@ def main():
     p.add_argument('--max-cost', type=float, default=5.00)
     p.add_argument('--dry-run', action='store_true')
 
+    p = sub.add_parser('export', help='Write unprocessed items to files to read by hand (no API)')
+    p.add_argument('--out', required=True)
+    p.add_argument('--limit', type=int)
+    p.add_argument('--batch-id')
+
+    p = sub.add_parser('import', help='Record hand-read answers for a manual batch')
+    p.add_argument('--batch-id', required=True)
+    p.add_argument('answers', nargs='+')
+
     args = parser.parse_args()
     if args.command == 'estimate':
         cmd_estimate(args.limit, args.model)
@@ -1120,6 +1198,10 @@ def main():
         cmd_submit(args.limit, args.max_cost, args.dry_run, args.model, args.random)
     elif args.command == 'collect':
         cmd_collect()
+    elif args.command == 'export':
+        cmd_export(args.out, args.limit, args.batch_id)
+    elif args.command == 'import':
+        cmd_import(args.batch_id, args.answers)
     elif args.command == 'reextract':
         cmd_reextract(args.model, args.max_cost, args.dry_run)
     elif args.command == 'run':
