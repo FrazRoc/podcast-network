@@ -129,6 +129,17 @@ def test_company_tags_leave_topics_for_the_org_page(db_conn, monkeypatch):
     assert o['discussed_in']['episodes'] == 2
     assert [e['episode_id'] for e in o['discussed_in']['recent']] == [eps[3], eps[0]]
 
+    # Once Bo is credited as a Fervo guest on episode 4, it's Fervo talking,
+    # not Fervo being discussed: it leaves the org page and the episode chips.
+    cur.execute("INSERT INTO organization_aliases (org_id, alias_name, normalized_name) VALUES (%s, 'Fervo', 'fervo')",
+                (org,))
+    cur.execute("INSERT INTO host_affiliations (episode_id, host_id, title, company, company_key) "
+                "VALUES (%s, %s, 'CEO', 'Fervo', 'fervo')", (eps[3], people['Bo']))
+    db_conn.commit()
+    o = _run(db_conn, monkeypatch, 'get_org_profile', org)
+    assert [e['episode_id'] for e in o['discussed_in']['recent']] == [eps[0]]
+    assert _run(db_conn, monkeypatch, 'get_person_profile', people['Bo'])['appearances'][0]['companies'] == []
+
 
 def test_person_tags_leave_topics_for_the_person_page(db_conn, monkeypatch):
     """A person tag drops out of the topics, shows on its episodes as a
@@ -146,6 +157,12 @@ def test_person_tags_leave_topics_for_the_person_page(db_conn, monkeypatch):
     assert [(m['name'], m['host_id']) for m in bo['appearances'][0]['people_mentioned']] == [('Ann Lee', people['Ann'])]
     ann = _run(db_conn, monkeypatch, 'get_person_profile', people['Ann'])
     assert [e['episode_id'] for e in ann['discussed_in']['recent']] == [eps[3]]
+    # Hal hosts every episode, so a tag about Hal is never "discussing" him.
+    _run(db_conn, monkeypatch, 'update_topic', tags['permitting reform'],
+         main_body(is_person=True, host_id=people['Hal']))
+    assert _run(db_conn, monkeypatch, 'get_person_profile', people['Hal'])['discussed_in']['episodes'] == 0
+    assert all(not m['host_id'] == people['Hal'] for a in bo['appearances'] for m in
+               _run(db_conn, monkeypatch, 'get_person_profile', people['Bo'])['appearances'][0]['people_mentioned'])
     cur = db_conn.cursor()
     cur.execute("INSERT INTO hosts (first_name, last_name) VALUES ('Ann', 'Lee-Smith') RETURNING host_id")
     dup = cur.fetchone()[0]

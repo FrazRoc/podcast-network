@@ -3732,6 +3732,15 @@ def _mentions(cur, episode_ids) -> tuple:
         LEFT JOIN organizations o ON o.org_id = t.org_id AND t.is_company AND NOT o.not_an_org
         LEFT JOIN hosts h ON h.host_id = t.host_id AND t.is_person
         WHERE et.episode_id = ANY(%s)
+          -- Not when they're on the episode themselves: a person credited on
+          -- it, or a guest who works at the company, isn't being discussed.
+          AND NOT (t.is_person AND EXISTS (
+                SELECT 1 FROM episode_host eh WHERE eh.episode_id = et.episode_id AND eh.host_id = t.host_id))
+          AND NOT (t.is_company AND EXISTS (
+                SELECT 1 FROM host_affiliations ha
+                JOIN episode_host eh ON eh.episode_id = ha.episode_id AND eh.host_id = ha.host_id AND eh.is_guest
+                JOIN organization_aliases a ON a.normalized_name = ha.company_key
+                WHERE ha.episode_id = et.episode_id AND a.org_id = t.org_id))
         ORDER BY et.is_primary DESC, t.name
     """, (episode_ids,))
     for r in cur.fetchall():
@@ -3838,8 +3847,12 @@ def get_person_profile(host_id: int):
             WHERE e.episode_id IN (
                 SELECT et.episode_id FROM tags t JOIN episode_tag et ON et.tag_id = t.tag_id
                 WHERE t.is_person AND NOT t.not_a_topic AND t.host_id = %s)
+              -- Episodes they're on don't count: that's them talking, not
+              -- them being discussed.
+              AND NOT EXISTS (SELECT 1 FROM episode_host eh
+                              WHERE eh.episode_id = e.episode_id AND eh.host_id = %s)
             ORDER BY e.published_date DESC NULLS LAST, e.episode_id DESC
-        """, (host_id,))
+        """, (host_id, host_id))
         mention_rows = cur.fetchall()
         discussed_in = {'episodes': mention_rows[0]['total'] if mention_rows else 0,
                         'recent': [_episode_link(r) for r in mention_rows[:20]]}
@@ -3966,8 +3979,7 @@ def get_org_profile(org_id: int):
         # guests on.
         topic_rows, tagged = _topic_rows(cur, episodes.keys())
 
-        # Episodes that discuss the organisation itself, whether or not
-        # anyone from it was on: its company tags.
+        # Episodes that discuss the organisation itself: its company tags.
         cur.execute("""
             SELECT e.episode_id, e.title AS episode_title, e.published_date, e.apple_episode_id,
                    p.podcast_id, p.title AS podcast_title, p.apple_podcast_id, p.cover_art_url,
@@ -3977,8 +3989,14 @@ def get_org_profile(org_id: int):
             WHERE e.episode_id IN (
                 SELECT et.episode_id FROM tags t JOIN episode_tag et ON et.tag_id = t.tag_id
                 WHERE t.is_company AND NOT t.not_a_topic AND t.org_id = ANY(%s))
+              -- Nor episodes where one of its own people is the guest.
+              AND NOT EXISTS (
+                SELECT 1 FROM host_affiliations ha
+                JOIN episode_host eh ON eh.episode_id = ha.episode_id AND eh.host_id = ha.host_id AND eh.is_guest
+                JOIN organization_aliases a ON a.normalized_name = ha.company_key
+                WHERE ha.episode_id = e.episode_id AND a.org_id = ANY(%s))
             ORDER BY e.published_date DESC NULLS LAST, e.episode_id DESC
-        """, (subtree,))
+        """, (subtree, subtree))
         mention_rows = cur.fetchall()
         discussed_in = {'episodes': mention_rows[0]['total'] if mention_rows else 0,
                         'recent': [_episode_link(r) for r in mention_rows[:20]]}
