@@ -677,7 +677,7 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
 
     <button
       onClick={() => onFiltersChange({
-        minConnections: 2, minPodcasts: 1,
+        minConnections: 5, minPodcasts: 1,
         minEpisodes: 1, minShared: 4, minOverlap: 5, weighting: 'jaccard',
         minClusterSize: 8, repulsion: 60, centering: 8, spacing: 1,
         drawMinEpisodes: 1,
@@ -938,7 +938,7 @@ const PodcastHostNetwork = () => {
     height: window.innerHeight,
   });
   const [currentFilters, setCurrentFilters] = useState({
-    minConnections: 2,
+    minConnections: 5,
     minPodcasts: 1,
     minEpisodes: 1,
     minShared: 4,          // shows view, raw weighting: people two shows must have in common
