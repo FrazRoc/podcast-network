@@ -560,9 +560,9 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   pattern), so "SMRs" and "small modular reactors" share a tag. Tagger:
   `scraper/extract_topics.py` (batch API, or `export`/`import` to read by
   hand); migration `migrate_add_topics.sql` (applied to production Oct 2026).
-- **Oct 2026 state**: 2,000 random episodes tagged by hand (Claude Code read
-  them; `topic_extractions.batch_id` `manual-pilot1..4`, `episode_tag.data_source`
-  'manual'): 3,225 tags, 4,846 episode rows. The rest of the ~22k episodes
+- **Oct 2026 state**: 4,000 random episodes tagged by hand (Claude Code read
+  them; `topic_extractions.batch_id` `manual-pilot1..5`, `episode_tag.data_source`
+  'manual'): 5,871 tags, 9,903 episode rows. The rest of the ~22k episodes
   wait on API credit. Pilot files and the importer are in
   `~/Backups/podcast-network/topic-pilots/`. Expect duplicates
   ("geothermal" vs "geothermal energy") until Topic Admin merges them.
