@@ -147,7 +147,7 @@ export default function ShowPage() {
                           <span key={g.host_id}>{i ? ', ' : ''}<a href={personHref(g.host_id, g.slug)} className="text-teal-700 hover:underline">{g.name}</a></span>
                         ))}
                       </p>
-                      <EpisodeTopics topics={e.topics} companies={e.companies} />
+                      <EpisodeTopics topics={e.topics} companies={e.companies} people={e.people_mentioned} />
                     </div>
                     <AdminEditLink href={`/admin/episodes?episode_id=${e.episode_id}`} className="flex-shrink-0">edit</AdminEditLink>
                     {e.listen_url && <a href={e.listen_url} target="_blank" rel="noopener noreferrer" className="flex-shrink-0 text-xs text-teal-700 hover:underline">Listen ↗</a>}

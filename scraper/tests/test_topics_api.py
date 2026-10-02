@@ -130,6 +130,32 @@ def test_company_tags_leave_topics_for_the_org_page(db_conn, monkeypatch):
     assert [e['episode_id'] for e in o['discussed_in']['recent']] == [eps[3], eps[0]]
 
 
+def test_person_tags_leave_topics_for_the_person_page(db_conn, monkeypatch):
+    """A person tag drops out of the topics, shows on its episodes as a
+    person, lists those episodes on their page, and follows a merge."""
+    from fastapi import HTTPException
+    pid, people, eps, tags = _setup(db_conn)
+    r = _run(db_conn, monkeypatch, 'update_topic', tags['oil prices'],
+             main_body(is_person=True, host_id=people['Ann']))
+    assert (r['topic']['is_person'], r['topic']['host_name']) == (True, 'Ann Lee')
+    with pytest.raises(HTTPException):
+        _run(db_conn, monkeypatch, 'get_topic', tags['oil prices'])
+    assert _run(db_conn, monkeypatch, 'list_topics_admin', view='person')['totals']['person'] == 1
+    bo = _run(db_conn, monkeypatch, 'get_person_profile', people['Bo'])
+    assert [t['name'] for t in bo['appearances'][0]['topics']] == ['permitting reform']
+    assert [(m['name'], m['host_id']) for m in bo['appearances'][0]['people_mentioned']] == [('Ann Lee', people['Ann'])]
+    ann = _run(db_conn, monkeypatch, 'get_person_profile', people['Ann'])
+    assert [e['episode_id'] for e in ann['discussed_in']['recent']] == [eps[3]]
+    cur = db_conn.cursor()
+    cur.execute("INSERT INTO hosts (first_name, last_name) VALUES ('Ann', 'Lee-Smith') RETURNING host_id")
+    dup = cur.fetchone()[0]
+    cur.execute("UPDATE tags SET host_id = %s WHERE tag_id = %s", (dup, tags['oil prices']))
+    db_conn.commit()
+    _run(db_conn, monkeypatch, 'merge_people', people['Ann'], dup)
+    cur.execute("SELECT host_id FROM tags WHERE tag_id = %s", (tags['oil prices'],))
+    assert cur.fetchone()[0] == people['Ann']
+
+
 def main_body(**kw):
     import main
     return main.TopicUpdateRequest(**kw)

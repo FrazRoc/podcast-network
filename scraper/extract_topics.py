@@ -245,7 +245,7 @@ def existing_topic_names(conn, limit: int = PROMPT_TAG_LIMIT) -> list:
         return []
     cur.execute("""
         SELECT t.name FROM tags t JOIN episode_tag et ON et.tag_id = t.tag_id
-        WHERE NOT t.not_a_topic AND NOT t.is_company GROUP BY t.tag_id, t.name
+        WHERE NOT t.not_a_topic AND NOT t.is_company AND NOT t.is_person GROUP BY t.tag_id, t.name
         ORDER BY COUNT(*) DESC, t.name LIMIT %s
     """, (limit,))
     names = [r[0] for r in cur.fetchall()]

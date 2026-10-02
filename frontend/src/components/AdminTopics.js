@@ -5,18 +5,53 @@ import AdminHeader from './AdminHeader';
 import AdminListCount from './AdminListCount';
 import { formatDateOnly } from '../adminUtils';
 import { Swatch, CATEGORIES } from './Topics';
-import { topicHref, orgHref, slugify } from '../profileUtils';
+import { topicHref, orgHref, personHref, slugify } from '../profileUtils';
 import { CompanyPicker } from './AdminCompanies';
 
 // Topic Admin: rename topics, change their category, mark ones that aren't
 // really topics, and merge duplicates ("geothermal" into "geothermal
 // energy"). A merge moves the episodes and every spelling, so the tagger
-// files future mentions under the survivor. Company tags ("Tesla") aren't
-// topics either: flag them and link the company, and they move to its page.
+// files future mentions under the survivor. Company and person tags ("Tesla",
+// "Joe Manchin") aren't topics either: flag them and link the company or
+// person, and they move to that page.
 
 const API = `${API_BASE_URL}/api/admin/topics`;
 
-const VIEWS = [{ id: 'active', label: 'Topics' }, { id: 'company', label: 'Companies' }, { id: 'not_topic', label: 'Not a topic' }];
+const VIEWS = [{ id: 'active', label: 'Topics' }, { id: 'company', label: 'Companies' }, { id: 'person', label: 'People' },
+  { id: 'not_topic', label: 'Not a topic' }];
+
+// Search-as-you-type over people, for linking a person tag to a profile.
+function PersonPicker({ onPick }) {
+  const [q, setQ] = useState('');
+  const [results, setResults] = useState([]);
+  useEffect(() => {
+    if (q.trim().length < 2) { setResults([]); return undefined; }
+    const t = setTimeout(() => {
+      adminFetch(`${API_BASE_URL}/api/admin/people?q=${encodeURIComponent(q.trim())}&limit=8`)
+        .then(r => (r.ok ? r.json() : Promise.reject(r)))
+        .then(d => setResults(d.items || []))
+        .catch(() => setResults([]));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [q]);
+  return (
+    <div className="relative">
+      <input type="text" value={q} onChange={e => setQ(e.target.value)} placeholder="Link to a person in the directory…"
+        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none" />
+      {results.length > 0 && (
+        <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-56 overflow-y-auto">
+          {results.map(h => (
+            <button key={h.host_id} onClick={() => { onPick(h); setQ(''); setResults([]); }}
+              className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center justify-between gap-2">
+              <span className="truncate">{h.first_name} {h.last_name}</span>
+              <span className="text-xs text-gray-400 flex-shrink-0">{h.appearances} episodes</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 const SORTS = [
   { id: 'episodes_desc', label: 'Most episodes' },
   { id: 'name_asc', label: 'Name A–Z' },
@@ -112,7 +147,7 @@ function TopicPanel({ tagId, onChanged, onClose }) {
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="text-xs text-gray-400">Topic #{t.tag_id} · added {formatDateOnly(String(t.created_at).slice(0, 10))}</p>
-          {t.is_company || t.not_a_topic ? <p className="text-lg font-semibold text-gray-900">{t.name}</p> : (
+          {t.is_company || t.is_person || t.not_a_topic ? <p className="text-lg font-semibold text-gray-900">{t.name}</p> : (
             <a href={topicHref(t.tag_id, slugify(t.name))} target="_blank" rel="noopener noreferrer"
               className="text-lg font-semibold text-gray-900 hover:underline">{t.name} ↗</a>
           )}
@@ -158,6 +193,23 @@ function TopicPanel({ tagId, onChanged, onClose }) {
             </p>
           ) : (
             <CompanyPicker placeholder="Link to a company in the directory…" onPick={o => save({ org_id: o.org_id })} />
+          )
+        )}
+        <label className="flex items-center gap-1.5 text-gray-500">
+          <input type="checkbox" checked={t.is_person} disabled={saving}
+            onChange={e => save({ is_person: e.target.checked })} />
+          A person, not a topic
+        </label>
+        {t.is_person && (
+          t.host_id ? (
+            <p className="text-gray-600">
+              Listed on <a href={personHref(t.host_id, slugify(t.host_name))} target="_blank" rel="noopener noreferrer"
+                className="text-teal-700 hover:underline">{t.host_name} ↗</a>
+              <button onClick={() => save({ host_id: 0 })} disabled={saving}
+                className="ml-2 text-xs text-gray-400 hover:text-red-600">unlink</button>
+            </p>
+          ) : (
+            <PersonPicker onPick={h => save({ host_id: h.host_id })} />
           )
         )}
       </div>
@@ -276,6 +328,7 @@ export default function AdminTopics() {
                         <p className="text-xs text-gray-400 pl-4">
                           {t.category || 'No category'}{t.alias_count > 1 && ` · ${t.alias_count} spellings`}
                           {view === 'company' && (t.org_name ? ` · → ${t.org_name}` : ' · not linked')}
+                          {view === 'person' && (t.host_name ? ` · → ${t.host_name}` : ' · not linked')}
                         </p>
                       </div>
                     ))}

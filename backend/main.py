@@ -3432,6 +3432,7 @@ def merge_people(keep_id: int, drop_id: int):
             """, (keep_id, drop_name, normalize_full_name(drop_name)))
             alias_added = cur.rowcount > 0
 
+        cur.execute("UPDATE tags SET host_id = %s WHERE host_id = %s", (keep_id, drop_id))
         cur.execute("DELETE FROM hosts WHERE host_id = %s", (drop_id,))
 
         # Keep every piece of profile detail across both records: the survivor
@@ -3704,7 +3705,7 @@ def _topic_rows(cur, episode_ids) -> tuple:
         return [], 0
     cur.execute("""
         SELECT et.episode_id, et.tag_id, et.is_primary, t.name, t.category
-        FROM episode_tag et JOIN tags t ON t.tag_id = et.tag_id AND NOT t.not_a_topic AND NOT t.is_company
+        FROM episode_tag et JOIN tags t ON t.tag_id = et.tag_id AND NOT t.not_a_topic AND NOT t.is_company AND NOT t.is_person
         WHERE et.episode_id = ANY(%s)
     """, (episode_ids,))
     rows = cur.fetchall()
@@ -3713,27 +3714,32 @@ def _topic_rows(cur, episode_ids) -> tuple:
     return rows, cur.fetchone()['n']
 
 
-def _company_mentions(cur, episode_ids) -> dict:
-    """{episode_id: [company, ...]}: the companies these episodes discuss.
-    Company tags aren't topics, so they're listed beside them, linking to
-    the organisation's page where there is one."""
+def _mentions(cur, episode_ids) -> tuple:
+    """({episode_id: [company, ...]}, {episode_id: [person, ...]}): the
+    companies and people these episodes discuss. Those tags aren't topics,
+    so they're listed beside them, linking to the organisation's or
+    person's page where there is one."""
     episode_ids = list(episode_ids)
+    companies, people = {}, {}
     if not episode_ids:
-        return {}
+        return companies, people
     cur.execute("""
-        SELECT et.episode_id, t.tag_id, COALESCE(o.name, t.name) AS name, o.org_id
+        SELECT et.episode_id, t.tag_id, t.is_company,
+               COALESCE(o.name, h.first_name || ' ' || h.last_name, t.name) AS name,
+               o.org_id, h.host_id
         FROM episode_tag et
-        JOIN tags t ON t.tag_id = et.tag_id AND t.is_company AND NOT t.not_a_topic
-        LEFT JOIN organizations o ON o.org_id = t.org_id AND NOT o.not_an_org
+        JOIN tags t ON t.tag_id = et.tag_id AND (t.is_company OR t.is_person) AND NOT t.not_a_topic
+        LEFT JOIN organizations o ON o.org_id = t.org_id AND t.is_company AND NOT o.not_an_org
+        LEFT JOIN hosts h ON h.host_id = t.host_id AND t.is_person
         WHERE et.episode_id = ANY(%s)
         ORDER BY et.is_primary DESC, t.name
     """, (episode_ids,))
-    out = {}
     for r in cur.fetchall():
-        out.setdefault(r['episode_id'], []).append({
-            'tag_id': r['tag_id'], 'name': r['name'], 'org_id': r['org_id'],
-            'slug': profiles.slugify(r['name']) if r['org_id'] else None})
-    return out
+        linked = r['org_id'] if r['is_company'] else r['host_id']
+        (companies if r['is_company'] else people).setdefault(r['episode_id'], []).append({
+            'tag_id': r['tag_id'], 'name': r['name'], 'org_id': r['org_id'], 'host_id': r['host_id'],
+            'slug': profiles.slugify(r['name']) if linked else None})
+    return companies, people
 
 
 @app.get("/api/people/{host_id}/profile")
@@ -3816,10 +3822,27 @@ def get_person_profile(host_id: int):
 
         topic_rows, tagged = _topic_rows(cur, {a['episode_id'] for a in appearances})
         per_episode = topics.episode_topics(topic_rows)
-        companies = _company_mentions(cur, {a['episode_id'] for a in appearances})
+        companies, mentioned = _mentions(cur, {a['episode_id'] for a in appearances})
         for a in appearances:
             a['topics'] = per_episode.get(a['episode_id'], [])
             a['companies'] = companies.get(a['episode_id'], [])
+            a['people_mentioned'] = mentioned.get(a['episode_id'], [])
+
+        # Episodes that discuss this person, whether or not they were on.
+        cur.execute("""
+            SELECT e.episode_id, e.title AS episode_title, e.published_date, e.apple_episode_id,
+                   p.podcast_id, p.title AS podcast_title, p.apple_podcast_id, p.cover_art_url,
+                   COUNT(*) OVER () AS total
+            FROM episodes e
+            JOIN podcasts p ON p.podcast_id = e.podcast_id
+            WHERE e.episode_id IN (
+                SELECT et.episode_id FROM tags t JOIN episode_tag et ON et.tag_id = t.tag_id
+                WHERE t.is_person AND NOT t.not_a_topic AND t.host_id = %s)
+            ORDER BY e.published_date DESC NULLS LAST, e.episode_id DESC
+        """, (host_id,))
+        mention_rows = cur.fetchall()
+        discussed_in = {'episodes': mention_rows[0]['total'] if mention_rows else 0,
+                        'recent': [_episode_link(r) for r in mention_rows[:20]]}
 
         dates = [a['published_date'] for a in appearances if a['published_date']]
         return {
@@ -3841,6 +3864,7 @@ def get_person_profile(host_id: int):
             **together,
             'shows': sorted(shows.values(), key=lambda s: (-s['appearances'], s['title'])),
             'talks_about': topics.summary(topic_rows, tagged),
+            'discussed_in': discussed_in,
         }
     finally:
         cur.close()
@@ -4096,10 +4120,11 @@ def get_show_profile(podcast_id: int):
         cur.execute("SELECT episode_id FROM episodes WHERE podcast_id = %s", (podcast_id,))
         topic_rows, tagged = _topic_rows(cur, [r['episode_id'] for r in cur.fetchall()])
         per_episode = topics.episode_topics(topic_rows)
-        companies = _company_mentions(cur, [ep['episode_id'] for ep in recent])
+        companies, mentioned = _mentions(cur, [ep['episode_id'] for ep in recent])
         for ep in recent:
             ep['topics'] = per_episode.get(ep['episode_id'], [])
             ep['companies'] = companies.get(ep['episode_id'], [])
+            ep['people_mentioned'] = mentioned.get(ep['episode_id'], [])
 
         # Shows sharing the most guests with this one (distinct guest people),
         # with Jaccard overlap so a huge show doesn't top every list.
@@ -4420,7 +4445,7 @@ def _build_topic_directory(cur) -> list:
         FROM tags t
         JOIN episode_tag et ON et.tag_id = t.tag_id
         JOIN episodes e ON e.episode_id = et.episode_id
-        WHERE NOT t.not_a_topic AND NOT t.is_company
+        WHERE NOT t.not_a_topic AND NOT t.is_company AND NOT t.is_person
         GROUP BY t.tag_id, t.name, t.category
     """)
     rows = cur.fetchall()
@@ -4473,9 +4498,10 @@ def get_topic(tag_id: int):
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT tag_id, name, category, not_a_topic, is_company FROM tags WHERE tag_id = %s", (tag_id,))
+        cur.execute("SELECT tag_id, name, category, not_a_topic, is_company, is_person FROM tags WHERE tag_id = %s",
+                    (tag_id,))
         tag = cur.fetchone()
-        if not tag or tag['not_a_topic'] or tag['is_company']:
+        if not tag or tag['not_a_topic'] or tag['is_company'] or tag['is_person']:
             raise HTTPException(status_code=404, detail="Topic not found")
 
         cur.execute("""
@@ -4552,7 +4578,7 @@ def get_topic(tag_id: int):
             SELECT t.tag_id, t.name, t.category, COUNT(DISTINCT et2.episode_id) AS episodes
             FROM episode_tag et1
             JOIN episode_tag et2 ON et2.episode_id = et1.episode_id AND et2.tag_id <> et1.tag_id
-            JOIN tags t ON t.tag_id = et2.tag_id AND NOT t.not_a_topic AND NOT t.is_company
+            JOIN tags t ON t.tag_id = et2.tag_id AND NOT t.not_a_topic AND NOT t.is_company AND NOT t.is_person
             WHERE et1.tag_id = %s
             GROUP BY t.tag_id, t.name, t.category
             HAVING COUNT(DISTINCT et2.episode_id) >= 2
@@ -4600,6 +4626,8 @@ class TopicUpdateRequest(BaseModel):
     not_a_topic: Optional[bool] = None
     is_company: Optional[bool] = None
     org_id: Optional[int] = None  # 0 unlinks
+    is_person: Optional[bool] = None
+    host_id: Optional[int] = None  # 0 unlinks
 
 
 @app.get("/api/admin/topics", dependencies=[Depends(verify_admin)])
@@ -4614,7 +4642,8 @@ def list_topics_admin(q: str = "", category: str = "", view: str = "active",
         "newest": "t.created_at DESC, t.tag_id DESC",
     }
     where = {"company": ["NOT t.not_a_topic", "t.is_company"],
-             "not_topic": ["t.not_a_topic"]}.get(view, ["NOT t.not_a_topic", "NOT t.is_company"])
+             "person": ["NOT t.not_a_topic", "t.is_person"],
+             "not_topic": ["t.not_a_topic"]}.get(view, ["NOT t.not_a_topic", "NOT t.is_company", "NOT t.is_person"])
     if category in CATEGORIES:
         where.append("t.category = %(category)s")
     if q.strip():
@@ -4625,18 +4654,20 @@ def list_topics_admin(q: str = "", category: str = "", view: str = "active",
     try:
         cur.execute(f"""
             SELECT t.tag_id, t.name, t.category, t.not_a_topic, t.is_company, t.org_id, o.name AS org_name,
-                   t.created_at,
+                   t.is_person, t.host_id, h.first_name || ' ' || h.last_name AS host_name, t.created_at,
                    (SELECT COUNT(*) FROM episode_tag et WHERE et.tag_id = t.tag_id) AS episodes,
                    (SELECT COUNT(*) FROM tag_aliases a WHERE a.tag_id = t.tag_id) AS alias_count,
                    COUNT(*) OVER () AS matching
             FROM tags t LEFT JOIN organizations o ON o.org_id = t.org_id
+            LEFT JOIN hosts h ON h.host_id = t.host_id
             WHERE {' AND '.join(where)}
             ORDER BY {sort_map.get(sort, sort_map['episodes_desc'])}
             LIMIT %(limit)s
         """, {"q": q.strip(), "category": category, "limit": max(1, min(limit, 1000))})
         items = cur.fetchall()
-        cur.execute("SELECT COUNT(*) FILTER (WHERE NOT not_a_topic AND NOT is_company) AS active, "
+        cur.execute("SELECT COUNT(*) FILTER (WHERE NOT not_a_topic AND NOT is_company AND NOT is_person) AS active, "
                     "COUNT(*) FILTER (WHERE NOT not_a_topic AND is_company) AS company, "
+                    "COUNT(*) FILTER (WHERE NOT not_a_topic AND is_person) AS person, "
                     "COUNT(*) FILTER (WHERE not_a_topic) AS not_topic FROM tags")
         return {"items": items, "totals": cur.fetchone(),
                 "total": items[0]['matching'] if items else 0, "categories": list(CATEGORIES)}
@@ -4653,8 +4684,10 @@ def get_topic_admin(tag_id: int):
     cur = conn.cursor()
     try:
         cur.execute("""SELECT t.tag_id, t.name, t.category, t.not_a_topic, t.is_company, t.org_id,
-                              o.name AS org_name, t.created_at
-                       FROM tags t LEFT JOIN organizations o ON o.org_id = t.org_id WHERE t.tag_id = %s""",
+                              o.name AS org_name, t.is_person, t.host_id,
+                              h.first_name || ' ' || h.last_name AS host_name, t.created_at
+                       FROM tags t LEFT JOIN organizations o ON o.org_id = t.org_id
+                       LEFT JOIN hosts h ON h.host_id = t.host_id WHERE t.tag_id = %s""",
                     (tag_id,))
         tag = cur.fetchone()
         if not tag:
@@ -4681,7 +4714,8 @@ def get_topic_admin(tag_id: int):
 @app.put("/api/admin/topics/{tag_id}", dependencies=[Depends(verify_admin)])
 def update_topic(tag_id: int, body: TopicUpdateRequest):
     """Rename a topic, change its category, mark it not a topic, or mark it
-    a company (and link the organisation; org_id 0 unlinks). A new name
+    a company or a person (and link the organisation or the person's
+    profile; org_id/host_id 0 unlinks). A new name
     becomes another spelling of it; a name that is already another topic's
     spelling is refused (merge them instead)."""
     if body.category is not None and body.category not in CATEGORIES:
@@ -4723,10 +4757,20 @@ def update_topic(tag_id: int, body: TopicUpdateRequest):
                 if not cur.fetchone():
                     raise HTTPException(status_code=400, detail=f"No organisation #{body.org_id}")
             cur.execute("UPDATE tags SET org_id = %s WHERE tag_id = %s", (body.org_id or None, tag_id))
+        if body.is_person is not None:
+            cur.execute("UPDATE tags SET is_person = %s WHERE tag_id = %s", (body.is_person, tag_id))
+        if body.host_id is not None:
+            if body.host_id:
+                cur.execute("SELECT 1 FROM hosts WHERE host_id = %s", (body.host_id,))
+                if not cur.fetchone():
+                    raise HTTPException(status_code=400, detail=f"No person #{body.host_id}")
+            cur.execute("UPDATE tags SET host_id = %s WHERE tag_id = %s", (body.host_id or None, tag_id))
         conn.commit()
         cur.execute("""SELECT t.tag_id, t.name, t.category, t.not_a_topic, t.is_company, t.org_id,
-                              o.name AS org_name
-                       FROM tags t LEFT JOIN organizations o ON o.org_id = t.org_id WHERE t.tag_id = %s""",
+                              o.name AS org_name, t.is_person, t.host_id,
+                              h.first_name || ' ' || h.last_name AS host_name
+                       FROM tags t LEFT JOIN organizations o ON o.org_id = t.org_id
+                       LEFT JOIN hosts h ON h.host_id = t.host_id WHERE t.tag_id = %s""",
                     (tag_id,))
         return {"success": True, "topic": cur.fetchone()}
     finally:
@@ -5219,6 +5263,7 @@ def merge_companies(keep_id: int, drop_id: int, body: Optional[MergeCompaniesReq
         cur.execute("""UPDATE podcasts SET org_id = %s,
                            org_is_show = org_is_show AND NOT %s
                        WHERE org_id = %s""", (keep_id, keep_is_show, drop_id))
+        cur.execute("UPDATE tags SET org_id = %s WHERE org_id = %s", (keep_id, drop_id))
         cur.execute("DELETE FROM organizations WHERE org_id = %s", (drop_id,))
         conn.commit()
         return {"success": True, "kept": keep['name'], "merged": drop['name'], "aliases_moved": aliases_moved}

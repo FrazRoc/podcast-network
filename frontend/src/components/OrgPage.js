@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import ProfileLayout, { Section, Stat, MiniBars, ShowMore, ShowThumb } from './ProfileLayout';
 import OrgLogo from './OrgLogo';
 import AdminEditLink from './AdminEditLink';
-import { TalksAbout } from './Topics';
+import { TalksAbout, DiscussedIn } from './Topics';
 import { ORG_TYPE_LABELS, ORG_TYPE_COLORS } from '../chartUtils';
 import { useProfile, personHref, orgHref, showHref, avatarUrl, fmtDate, fmtMonthYear, plural, imageUrl, imageFallback } from '../profileUtils';
 
@@ -147,27 +147,7 @@ export default function OrgPage() {
               </Section>
             )}
 
-            {o.discussed_in?.episodes > 0 && (
-              <Section title={`Episodes that discuss ${o.name}`}
-                aside={o.discussed_in.episodes > o.discussed_in.recent.length
-                  ? `latest ${o.discussed_in.recent.length} of ${o.discussed_in.episodes}` : undefined}>
-                <ul className="divide-y divide-gray-100">
-                  <ShowMore items={o.discussed_in.recent} initial={8} render={e => (
-                    <li key={e.episode_id} className="py-2.5 flex items-start justify-between gap-3">
-                      <ShowThumb show={e.show} />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-gray-900">{e.title}</p>
-                        <p className="text-xs text-gray-500 mt-0.5">
-                          <a href={showHref(e.show.podcast_id, e.show.slug)} className="text-teal-700 hover:underline">{e.show.title}</a>
-                          {' · '}{fmtDate(e.published_date)}
-                        </p>
-                      </div>
-                      {e.listen_url && <a href={e.listen_url} target="_blank" rel="noopener noreferrer" className="flex-shrink-0 text-xs text-teal-700 hover:underline">Listen ↗</a>}
-                    </li>
-                  )} />
-                </ul>
-              </Section>
-            )}
+            <DiscussedIn discussed={o.discussed_in} name={o.name} />
 
             {o.children.length > 0 && (
               <Section title="Includes">

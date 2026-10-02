@@ -1,5 +1,5 @@
-import { Section } from './ProfileLayout';
-import { topicHref, orgHref, plural } from '../profileUtils';
+import { Section, ShowMore, ShowThumb } from './ProfileLayout';
+import { topicHref, orgHref, personHref, showHref, fmtDate, plural } from '../profileUtils';
 
 // Shared topic pieces: the colour for each of the 12 fixed categories
 // (backend/topic_names.py CATEGORIES), a topic chip, the "Talks about" block
@@ -40,18 +40,50 @@ export function TopicChip({ topic, count, size = 'sm' }) {
 }
 
 // The topics under one episode, main topic first.
-// Companies the episode discusses follow, in grey: they aren't topics, and
-// link to the organisation's page where there is one.
-export function EpisodeTopics({ topics, companies }) {
-  if (!topics?.length && !companies?.length) return null;
-  const company = 'inline-flex items-center whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-600';
+// Companies and people the episode discusses follow, in grey: they aren't
+// topics, and link to the organisation's or person's page where there is one.
+const MENTION = 'inline-flex items-center whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-600';
+const Mention = ({ href, label, name }) => (href
+  ? <a href={href} title={label} className={`${MENTION} hover:bg-gray-200 hover:text-gray-900`}>{name}</a>
+  : <span title={label} className={MENTION}>{name}</span>);
+
+export function EpisodeTopics({ topics, companies, people }) {
+  if (!topics?.length && !companies?.length && !people?.length) return null;
   return (
     <div className="mt-1 flex flex-wrap gap-1">
       {(topics || []).map(t => <TopicChip key={t.tag_id} topic={t} size="xs" />)}
-      {(companies || []).map(c => c.org_id
-        ? <a key={c.tag_id} href={orgHref(c.org_id, c.slug)} title="Company" className={`${company} hover:bg-gray-200 hover:text-gray-900`}>{c.name}</a>
-        : <span key={c.tag_id} title="Company" className={company}>{c.name}</span>)}
+      {(people || []).map(m => <Mention key={m.tag_id} label="Person" name={m.name}
+        href={m.host_id ? personHref(m.host_id, m.slug) : null} />)}
+      {(companies || []).map(c => <Mention key={c.tag_id} label="Company" name={c.name}
+        href={c.org_id ? orgHref(c.org_id, c.slug) : null} />)}
     </div>
+  );
+}
+
+// "Episodes that discuss X" on an organisation's or person's page: episodes
+// tagged with them as a subject, whether or not they were on.
+export function DiscussedIn({ discussed, name }) {
+  if (!discussed?.episodes) return null;
+  const { episodes, recent } = discussed;
+  return (
+    <Section title={`Episodes that discuss ${name}`}
+      aside={episodes > recent.length ? `latest ${recent.length} of ${episodes}` : undefined}>
+      <ul className="divide-y divide-gray-100">
+        <ShowMore items={recent} initial={8} render={e => (
+          <li key={e.episode_id} className="py-2.5 flex items-start justify-between gap-3">
+            <ShowThumb show={e.show} />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-gray-900">{e.title}</p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                <a href={showHref(e.show.podcast_id, e.show.slug)} className="text-teal-700 hover:underline">{e.show.title}</a>
+                {' · '}{fmtDate(e.published_date)}
+              </p>
+            </div>
+            {e.listen_url && <a href={e.listen_url} target="_blank" rel="noopener noreferrer" className="flex-shrink-0 text-xs text-teal-700 hover:underline">Listen ↗</a>}
+          </li>
+        )} />
+      </ul>
+    </Section>
   );
 }
 
