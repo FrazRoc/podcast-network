@@ -4337,11 +4337,14 @@ def show_orgs():
 
 @app.get("/api/directory/people")
 def people_directory(q: str = "", kind: str = "", sort: str = "appearances",
-                           offset: int = 0, limit: int = 50, topic: int = 0):
+                           offset: int = 0, limit: int = 50, topic: str = ""):
     """Everyone credited on an episode, for the /people directory: search by
     name or company, filter by the kind of role (or hosts) or by a topic
     they have talked about, sort by appearances, most recent or name."""
     rows = _directory_index('people', _build_people_directory)
+    # The page sends topic= when no topic is chosen; an empty or non-numeric
+    # value means no topic filter rather than a 422.
+    topic = int(topic) if topic.strip().isdigit() else 0
     topic_row = None
     if topic:
         conn = get_db_connection()
