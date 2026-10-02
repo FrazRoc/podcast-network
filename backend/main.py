@@ -133,7 +133,7 @@ def _find_candidate_episodes(cur, name: str, exclude_episode_id: int = None) -> 
     """
     cur.execute("""
         SELECT e.episode_id, e.podcast_id, p.title AS podcast_title,
-               e.title, e.description
+               e.title, e.description, p.scan_descriptions
         FROM episodes e
         JOIN podcasts p ON p.podcast_id = e.podcast_id
         WHERE (%(exclude_id)s IS NULL OR e.episode_id != %(exclude_id)s)
@@ -171,6 +171,11 @@ def _verify_and_source(rows: list, name: str) -> list:
     for row in rows:
         if name_in_text(name, row['title'] or ''):
             verified.append({**row, 'source': 'parsed_title'})
+            continue
+        # News shows (POLITICO Energy) name far more people than appear on
+        # them; the scheduled scanner credits only those its descriptions
+        # introduce as on the episode, so a bare mention here doesn't count.
+        if row.get('scan_descriptions') is False:
             continue
         if name_in_text(name, clean_description(row['description'] or '')):
             verified.append({**row, 'source': 'parsed_desc'})
@@ -1609,6 +1614,9 @@ def approve_suggestion(suggestion_id: int, body: NameOverrideRequest = None):
 
         # 3. Link every OTHER episode whose title/description names this person
         additional_links = link_matching_episodes(cur, name, host_id, episode_id)
+        alias_links, alias_added = _remember_suggested_spelling(
+            cur, host_id, suggestion['candidate_name'], name, episode_id)
+        additional_links += alias_links
 
         # 4. Mark suggestion approved
         cur.execute("""
@@ -1639,11 +1647,12 @@ def approve_suggestion(suggestion_id: int, body: NameOverrideRequest = None):
             "host_id": host_id,
             "name": name,
             "source_episode_linked": True,
+            "alias_added": suggestion['candidate_name'] if alias_added else None,
             "additional_episodes_linked": len(additional_links),
             "by_podcast": dict(by_podcast),
             "message": (
-                f"Created {name}. "
-                f"Found {len(additional_links)} additional episode appearance(s)"
+                (f"Created {name}. " + (f"Saved \"{suggestion['candidate_name']}\" as another spelling. " if alias_added else ""))
+                + f"Found {len(additional_links)} additional episode appearance(s)"
                 + (f" across: {', '.join(f'{p} ({n})' for p, n in by_podcast.items())}" if by_podcast else "")
             )
         }
@@ -1655,6 +1664,32 @@ def approve_suggestion(suggestion_id: int, body: NameOverrideRequest = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
+
+def _remember_suggested_spelling(cur, host_id, suggested, approved, episode_id):
+    """Approving "Cat Morehouse" as the existing Catherine Morehouse: keep
+    the suggested spelling as an alias, so scans credit her under either
+    name, and link episodes that use it. Returns those extra links and
+    whether an alias was added."""
+    if not suggested or normalize_full_name(suggested) == normalize_full_name(approved):
+        return [], False
+    key = normalize_full_name(suggested)
+    # Never alias over a different real person.
+    other = find_host_by_full_name(cur, suggested)
+    if not key or (other is not None and other != host_id):
+        return [], False
+    cur.execute("""
+        INSERT INTO host_aliases (host_id, alias_name, normalized_name, source)
+        VALUES (%s, %s, %s, 'approved_suggestion')
+        ON CONFLICT (normalized_name) DO NOTHING
+    """, (host_id, suggested, key))
+    added = cur.rowcount > 0
+    links = link_matching_episodes(cur, suggested, host_id, episode_id)
+    cur.execute("""
+        UPDATE suggestions SET status = 'approved', reviewed_at = NOW(), host_id = %s
+        WHERE LOWER(candidate_name) = LOWER(%s) AND status = 'pending'
+    """, (host_id, suggested))
+    return links, added
 
 
 @app.post("/api/admin/suggestions/{suggestion_id}/approve_only", dependencies=[Depends(verify_admin)])
@@ -1706,6 +1741,9 @@ def approve_suggestion_only(suggestion_id: int, body: NameOverrideRequest = None
 
         # Link every OTHER episode whose title/description names this person
         additional_links = link_matching_episodes(cur, name, host_id, episode_id)
+        alias_links, alias_added = _remember_suggested_spelling(
+            cur, host_id, suggestion['candidate_name'], name, episode_id)
+        additional_links += alias_links
 
         # Mark suggestion approved
         cur.execute("""
@@ -1733,11 +1771,12 @@ def approve_suggestion_only(suggestion_id: int, body: NameOverrideRequest = None
             "host_id": host_id,
             "name": name,
             "source_episode_linked": False,
+            "alias_added": suggestion['candidate_name'] if alias_added else None,
             "additional_episodes_linked": len(additional_links),
             "by_podcast": dict(by_podcast),
             "message": (
-                f"Created {name} (not linked to this episode). "
-                f"Found {len(additional_links)} appearance(s) in other episodes"
+                (f"Created {name} (not linked to this episode). " + (f"Saved \"{suggestion['candidate_name']}\" as another spelling. " if alias_added else ""))
+                + f"Found {len(additional_links)} appearance(s) in other episodes"
                 + (f": {', '.join(f'{p} ({n})' for p, n in by_podcast.items())}" if by_podcast else "")
             )
         }
