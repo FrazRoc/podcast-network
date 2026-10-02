@@ -517,6 +517,12 @@ const ConnectionDetails = ({ connection, onClose }) => (
   </div>
 );
 
+// The most-connected people run into the hundreds, which squeezed the useful
+// low end of these sliders into a few pixels. The top stop means "this many
+// or more", which is what a minimum is anyway.
+const CONNECTIONS_CAP = 40;
+const PODCASTS_CAP = 10;
+
 const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuery, onSearchChange, loading, isAdmin, viewMode, onViewModeChange, showGraphError }) => (
   <div className="space-y-4">
     <div className="flex rounded-lg bg-gray-100 p-0.5 text-sm">
@@ -625,13 +631,13 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
         Minimum Connections: {currentFilters.minConnections}
       </label>
       <input
-        type="range" min="1" max={Math.max(1, networkStats.maxConnections)}
+        type="range" min="1" max={Math.max(1, Math.min(CONNECTIONS_CAP, networkStats.maxConnections))}
         value={currentFilters.minConnections}
         onChange={e => onFiltersChange({ minConnections: parseInt(e.target.value) })}
         className="w-full"
       />
       <div className="flex justify-between text-xs text-gray-400">
-        <span>1</span><span>{networkStats.maxConnections}</span>
+        <span>1</span><span>{networkStats.maxConnections > CONNECTIONS_CAP ? `${CONNECTIONS_CAP}+` : networkStats.maxConnections}</span>
       </div>
     </div>
 
@@ -641,13 +647,13 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
         Minimum Podcasts: {currentFilters.minPodcasts}
       </label>
       <input
-        type="range" min="1" max={Math.max(1, networkStats.maxPodcasts)}
+        type="range" min="1" max={Math.max(1, Math.min(PODCASTS_CAP, networkStats.maxPodcasts))}
         value={currentFilters.minPodcasts}
         onChange={e => onFiltersChange({ minPodcasts: parseInt(e.target.value) })}
         className="w-full"
       />
       <div className="flex justify-between text-xs text-gray-400">
-        <span>1</span><span>{networkStats.maxPodcasts}</span>
+        <span>1</span><span>{networkStats.maxPodcasts > PODCASTS_CAP ? `${PODCASTS_CAP}+` : networkStats.maxPodcasts}</span>
       </div>
     </div>
 
