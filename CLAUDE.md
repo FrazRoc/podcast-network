@@ -560,9 +560,12 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   pattern), so "SMRs" and "small modular reactors" share a tag. Tagger:
   `scraper/extract_topics.py` (batch API, or `export`/`import` to read by
   hand); migration `migrate_add_topics.sql` (applied to production Oct 2026).
-- **Oct 2026 state**: 4,000 random episodes tagged by hand (Claude Code read
-  them; `topic_extractions.batch_id` `manual-pilot1..5`, `episode_tag.data_source`
-  'manual'): 5,871 tags, 9,903 episode rows. The rest of the ~22k episodes
+- **Oct 2026 state**: 6,000 random episodes tagged by hand (Claude Code read
+  them; `topic_extractions.batch_id` `manual-pilot1..6`, `episode_tag.data_source`
+  'manual'): 16,734 episode rows; 6,726 topic tags plus 1,261 company and
+  1,052 person tags. From batch 6 on, the hand format marks companies `CO` and
+  people `PE` (see `topic-pilots/conv6.py`, `import6.py`) so they import
+  already flagged and linked by name. The rest of the ~22k episodes
   wait on API credit. Pilot files and the importer are in
   `~/Backups/podcast-network/topic-pilots/`. Expect duplicates
   ("geothermal" vs "geothermal energy") until Topic Admin merges them.
@@ -571,7 +574,9 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   `migrate_add_topic_companies.sql`, `migrate_add_topic_people.sql`) keep
   those tags out of every topic list, page, rollup and the tagger's reuse
   list. Episodes show them as grey chips (`companies` / `people_mentioned`),
-  and org and person pages list "Episodes that discuss X" (`discussed_in`).
+  and org and person pages list "Episodes that discuss X" (`discussed_in`) — leaving
+  out episodes the person is credited on, or where a guest from the company
+  is on, since that's them talking rather than being discussed.
   Regulators, grid operators, agencies, public utilities, events, laws,
   places, books and products stay topics. Oct 2026: 638 company tags (512
   linked) and 188 person tags (137 linked); the reviewed lists and undo
