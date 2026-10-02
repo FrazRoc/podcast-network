@@ -5,16 +5,18 @@ import AdminHeader from './AdminHeader';
 import AdminListCount from './AdminListCount';
 import { formatDateOnly } from '../adminUtils';
 import { Swatch, CATEGORIES } from './Topics';
-import { topicHref, slugify } from '../profileUtils';
+import { topicHref, orgHref, slugify } from '../profileUtils';
+import { CompanyPicker } from './AdminCompanies';
 
 // Topic Admin: rename topics, change their category, mark ones that aren't
 // really topics, and merge duplicates ("geothermal" into "geothermal
 // energy"). A merge moves the episodes and every spelling, so the tagger
-// files future mentions under the survivor.
+// files future mentions under the survivor. Company tags ("Tesla") aren't
+// topics either: flag them and link the company, and they move to its page.
 
 const API = `${API_BASE_URL}/api/admin/topics`;
 
-const VIEWS = [{ id: 'active', label: 'Topics' }, { id: 'not_topic', label: 'Not a topic' }];
+const VIEWS = [{ id: 'active', label: 'Topics' }, { id: 'company', label: 'Companies' }, { id: 'not_topic', label: 'Not a topic' }];
 const SORTS = [
   { id: 'episodes_desc', label: 'Most episodes' },
   { id: 'name_asc', label: 'Name A–Z' },
@@ -110,8 +112,10 @@ function TopicPanel({ tagId, onChanged, onClose }) {
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="text-xs text-gray-400">Topic #{t.tag_id} · added {formatDateOnly(String(t.created_at).slice(0, 10))}</p>
-          <a href={topicHref(t.tag_id, slugify(t.name))} target="_blank" rel="noopener noreferrer"
-            className="text-lg font-semibold text-gray-900 hover:underline">{t.name} ↗</a>
+          {t.is_company || t.not_a_topic ? <p className="text-lg font-semibold text-gray-900">{t.name}</p> : (
+            <a href={topicHref(t.tag_id, slugify(t.name))} target="_blank" rel="noopener noreferrer"
+              className="text-lg font-semibold text-gray-900 hover:underline">{t.name} ↗</a>
+          )}
         </div>
         <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-sm">✕</button>
       </div>
@@ -135,6 +139,27 @@ function TopicPanel({ tagId, onChanged, onClose }) {
             onChange={e => save({ not_a_topic: e.target.checked })} />
           Not a topic (hide everywhere)
         </label>
+      </div>
+      {/* Companies aren't topics: a company tag leaves the topic pages and
+          is listed on its organisation's page instead. */}
+      <div className="space-y-2 text-sm">
+        <label className="flex items-center gap-1.5 text-gray-500">
+          <input type="checkbox" checked={t.is_company} disabled={saving}
+            onChange={e => save({ is_company: e.target.checked })} />
+          A company, investor or nonprofit, not a topic
+        </label>
+        {t.is_company && (
+          t.org_id ? (
+            <p className="text-gray-600">
+              Listed on <a href={orgHref(t.org_id, slugify(t.org_name))} target="_blank" rel="noopener noreferrer"
+                className="text-teal-700 hover:underline">{t.org_name} ↗</a>
+              <button onClick={() => save({ org_id: 0 })} disabled={saving}
+                className="ml-2 text-xs text-gray-400 hover:text-red-600">unlink</button>
+            </p>
+          ) : (
+            <CompanyPicker placeholder="Link to a company in the directory…" onPick={o => save({ org_id: o.org_id })} />
+          )
+        )}
       </div>
       {error && <p className="text-sm text-red-600">{error}</p>}
 
@@ -189,7 +214,7 @@ export default function AdminTopics() {
       .then(d => {
         if (id !== req.current) return;
         setItems(d.items); setLoading(false); setError('');
-        setCount({ total: d.total, allTotal: view === 'not_topic' ? d.totals.not_topic : d.totals.active });
+        setCount({ total: d.total, allTotal: d.totals[view] ?? d.totals.active });
       })
       .catch(() => { if (id === req.current) { setLoading(false); setError('Couldn\'t load topics'); } });
   }, [q, view, category, sort]);
@@ -250,6 +275,7 @@ export default function AdminTopics() {
                         </div>
                         <p className="text-xs text-gray-400 pl-4">
                           {t.category || 'No category'}{t.alias_count > 1 && ` · ${t.alias_count} spellings`}
+                          {view === 'company' && (t.org_name ? ` · → ${t.org_name}` : ' · not linked')}
                         </p>
                       </div>
                     ))}

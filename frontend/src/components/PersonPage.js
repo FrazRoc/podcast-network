@@ -151,7 +151,7 @@ function PersonDetails({ p }) {
                       <> · as {[a.as.title, a.as.company].filter(Boolean).join(', ')}</>
                     )}
                   </p>
-                  <EpisodeTopics topics={a.topics} />
+                  <EpisodeTopics topics={a.topics} companies={a.companies} />
                 </div>
                 <AdminEditLink href={`/admin/episodes?episode_id=${a.episode_id}`} className="flex-shrink-0">edit</AdminEditLink>
                 {a.listen_url && (

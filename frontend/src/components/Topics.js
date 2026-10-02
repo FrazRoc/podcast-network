@@ -1,5 +1,5 @@
 import { Section } from './ProfileLayout';
-import { topicHref, plural } from '../profileUtils';
+import { topicHref, orgHref, plural } from '../profileUtils';
 
 // Shared topic pieces: the colour for each of the 12 fixed categories
 // (backend/topic_names.py CATEGORIES), a topic chip, the "Talks about" block
@@ -40,11 +40,17 @@ export function TopicChip({ topic, count, size = 'sm' }) {
 }
 
 // The topics under one episode, main topic first.
-export function EpisodeTopics({ topics }) {
-  if (!topics?.length) return null;
+// Companies the episode discusses follow, in grey: they aren't topics, and
+// link to the organisation's page where there is one.
+export function EpisodeTopics({ topics, companies }) {
+  if (!topics?.length && !companies?.length) return null;
+  const company = 'inline-flex items-center whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-600';
   return (
     <div className="mt-1 flex flex-wrap gap-1">
-      {topics.map(t => <TopicChip key={t.tag_id} topic={t} size="xs" />)}
+      {(topics || []).map(t => <TopicChip key={t.tag_id} topic={t} size="xs" />)}
+      {(companies || []).map(c => c.org_id
+        ? <a key={c.tag_id} href={orgHref(c.org_id, c.slug)} title="Company" className={`${company} hover:bg-gray-200 hover:text-gray-900`}>{c.name}</a>
+        : <span key={c.tag_id} title="Company" className={company}>{c.name}</span>)}
     </div>
   );
 }

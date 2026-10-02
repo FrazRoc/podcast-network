@@ -78,7 +78,7 @@ function TypeBadge({ type, inherited, parentName }) {
 }
 
 // Search-as-you-type picker over companies, for choosing a parent or a merge target.
-function CompanyPicker({ placeholder, excludeId, onPick }) {
+export function CompanyPicker({ placeholder, excludeId, onPick }) {
   const [q, setQ] = useState('');
   const [results, setResults] = useState([]);
 

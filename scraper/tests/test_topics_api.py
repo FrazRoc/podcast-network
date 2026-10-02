@@ -100,6 +100,41 @@ def test_not_a_topic_is_hidden(db_conn, monkeypatch):
     assert [r['name'] for r in _run(db_conn, monkeypatch, 'topic_directory')['rows']] == ['geothermal energy']
 
 
+def test_company_tags_leave_topics_for_the_org_page(db_conn, monkeypatch):
+    """A company tag drops out of the topic lists and page, shows on its
+    episodes as a company, and lists those episodes on the org's page."""
+    from fastapi import HTTPException
+    pid, people, eps, tags = _setup(db_conn)
+    cur = db_conn.cursor()
+    cur.execute("INSERT INTO organizations (name) VALUES ('Fervo Energy') RETURNING org_id")
+    org = cur.fetchone()[0]
+    db_conn.commit()
+    r = _run(db_conn, monkeypatch, 'update_topic', tags['permitting reform'],
+             main_body(is_company=True, org_id=org))
+    assert (r['topic']['is_company'], r['topic']['org_name']) == (True, 'Fervo Energy')
+    with pytest.raises(HTTPException):
+        _run(db_conn, monkeypatch, 'get_topic', tags['permitting reform'])
+    assert [r['name'] for r in _run(db_conn, monkeypatch, 'topic_directory')['rows']] == ['geothermal energy']
+    admin = _run(db_conn, monkeypatch, 'list_topics_admin', view='company')
+    assert [t['name'] for t in admin['items']] == ['permitting reform']
+    assert admin['totals']['company'] == 1
+    assert 'permitting reform' not in [t['name'] for t in
+                                      _run(db_conn, monkeypatch, 'list_topics_admin')['items']]
+
+    p = _run(db_conn, monkeypatch, 'get_person_profile', people['Bo'])
+    ep4 = p['appearances'][0]
+    assert [t['name'] for t in ep4['topics']] == ['oil prices']
+    assert [(c['name'], c['org_id']) for c in ep4['companies']] == [('Fervo Energy', org)]
+    o = _run(db_conn, monkeypatch, 'get_org_profile', org)
+    assert o['discussed_in']['episodes'] == 2
+    assert [e['episode_id'] for e in o['discussed_in']['recent']] == [eps[3], eps[0]]
+
+
+def main_body(**kw):
+    import main
+    return main.TopicUpdateRequest(**kw)
+
+
 def test_person_profile_talks_about(db_conn, monkeypatch):
     pid, people, eps, tags = _setup(db_conn)
     p = _run(db_conn, monkeypatch, 'get_person_profile', people['Ann'])
