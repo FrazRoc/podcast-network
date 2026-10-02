@@ -491,7 +491,11 @@ _LEADING_ROLE_WORD_RE = re.compile(
     # role-led matching fire on credits rather than guests ("Producer X",
     # "Research Associate X"), but still leak in as the tail of a longer
     # title that some other role word started.
-    r'^(?:' + _ROLE_WORDS + r'|associates?|coordinators?|producers?|assistants?|secretar(?:y|ies)|join|follow)\s+',
+    # "Member" for "Council Member Kristen Sneddon" (episode 297621) and job
+    # nouns for "Urban Foresters Scott Altenhoff" / "Creek Ranger Mersie
+    # Watkins" (297624, 297625): the descriptor intro's lazy capture starts
+    # one word too early when the descriptor is Title Case.
+    r'^(?:' + _ROLE_WORDS + r'|associates?|coordinators?|producers?|assistants?|secretar(?:y|ies)|members?|foresters?|rangers?|planners?|commissioners?|council(?:l)?ors?|officials?|students?|teachers?|join|follow)\s+',
     re.IGNORECASE
 )
 
@@ -874,7 +878,9 @@ _DESCRIPTOR_INTRO_TRIGGER = (
     r'|\b(?:I|we)[\x27’]?(?:m| am| was| were|re| are) joined by'
     r'|\b(?:I|we) (?:was|were|am|are) joined by'
     r'|\bjoined by|\bI(?:[\x27’]m| am) (?:talking|chatting|speaking) (?:with|to)'
-    r'|\b(?:I|we) (?:interview|interviewed|welcome|welcomed|contacted))'
+    # "We interview Council Member Kristen Sneddon, ..." (episode 297621) —
+    # a sentence can start with "We".
+    r'|\b(?:I|[Ww]e) (?:interview|interviewed|welcome|welcomed|contacted))'
 )
 _DESCRIPTOR_NAME = r'[A-Z][a-zA-ZÀ-ž\x27’-]+' + _MIDDLE_INITIAL + r'(?:[^\S\n]+[A-Z][a-zA-ZÀ-ž\x27’-]+){1,2}?'
 _DESCRIPTOR_INTRO_RE = re.compile(
@@ -1289,19 +1295,45 @@ def extract_candidate_names_tagged(text: str) -> list[tuple[str, str, str]]:
             context = text[start:end].strip()
             found.append((name, context, tag))
 
+    # Organisation and role words between "and" and a name: "..., and Sierra
+    # Club Santa Barbara Chair Katie Davis and learn how" (episode 297621).
+    # Case-sensitive, and it must end in a role word ("member" too, as in
+    # "Laramie City Council member Brian Harrington").
+    _PLAIN_NAME = r'[A-Z][a-zà-ž\x27’-]+(?:\s+[A-Z][a-zà-ž\x27’-]+){1,2}'
+    _AND_TITLE = (
+        r'(?-i:(?:[A-Z][A-Za-z\u00C0-\u017E.-]*\s+|&\s+){0,5}?)'
+        r'(?:' + _ROLE_WORDS + r'|members?)\s+'
+    )
     _AND_RE = re.compile(
         # "&" as well as "and" \u2014 "...with Fred Iutzi & Tim Crews of The
         # Land Institute" (episode 95744) joins its second name with a bare
         # ampersand, not the word "and".
-        r'\s+(?:and|&)\s+'
+        r'(?:\s+(?:and|&)\s+'
+        # "We interview Monika Leininger of ..., Professor Rachael Budowle of
+        # ..., and ..." (episode 297632): a comma also continues the list,
+        # but only into a role-word title, or every appositive would count.
+        r'|(?P<comma>,)\s+(?:and\s+)?(?=' + _AND_TITLE + r'(?-i:[A-Z]))'
+        # "We interview Ruth Miller of Native Movement, Polly Carr of the
+        # Alaska Center, Kendra Closter of ..." (episode 297646): or into the
+        # same "Name of Org" shape as the item before it.
+        r'|(?P<listed>,)\s+(?:and\s+)?(?=(?-i:' + _PLAIN_NAME + r')\s+(?:of|with|from|at)\s))'
         r'(?:(?:Dr|Prof|Mr|Ms|Mrs|Senator|Sen|Rep|CEO|CTO|CFO|COO|Governor|'
         r'Director|Mayor|President)\.?\s+)*'
+        # "..., and Sierra Club Santa Barbara Chair Katie Davis and learn how"
+        # (episode 297621): an organisation and role word between "and" and
+        # the name. Case-sensitive, and it must end in a role word.
+        r'(?P<title>' + _AND_TITLE + r')?'
+        # After a comma the title is required, not just looked ahead to.
+        r'(?(comma)(?(title)|(?!))|)'
         # Lazy + a stop-word lookahead, same shape as _INTRO_RE/_POSSESSIVE_RE
         # \u2014 without it a fixed 2-word capture truncated "Pasang Yangjee
         # Sherpa" (episode 54945) to "Pasang Yangjee", since a bare lazy
         # quantifier with nothing after it always takes the shortest match.
-        r'([A-Z][A-Za-z\u00C0-\u017E-]+(?:\s+[A-Z][A-Za-z\u00C0-\u017E-]+){1,2}?)'
-        r'(?=\s+(?:of|at|from|about|for|on|to|and)\b|,|\'s|'
+        r'(?P<name>[A-Z][A-Za-z\u00C0-\u017E-]+(?:\s+[A-Z][A-Za-z\u00C0-\u017E-]+){1,2}?)'
+        # A full stop ends the name too, after a role title only: "... and
+        # Laramie City Council member Brian Harrington." (episode 297632).
+        # Without the title it read "and Goldman Sachs." as a person.
+        r'(?=\s+(?:of|at|from|about|for|on|to|and)\b|(?(listed)\s+with\b|(?!))|,|\'s|(?(title)\.(?:\s|$)|(?!))|'
         r'\s+(?:CEO|CTO|CFO|COO|Director|(?:Co[- ]?)?Founder)\b|\s*[-\u2013)|]|$)',
         re.IGNORECASE
     )
@@ -1314,7 +1346,32 @@ def extract_candidate_names_tagged(text: str) -> list[tuple[str, str, str]]:
             # Jason Gates..." — 40 chars cut that case off by one character.
             if and_m.start() > 100:
                 break
-            yield and_m.group(1), after_pos + and_m.start()
+            # ", Executive Director of ..." is an appositive title, not the
+            # next person in the list.
+            # ", and Tim Sahay from ..." was always a list item; the checks
+            # below are for a bare comma (or for "with" after the name, which
+            # only this list shape allows).
+            sep = and_m.group(0)[:and_m.start('name') - and_m.start()]
+            after_name = rest[and_m.end('name'):and_m.end('name') + 6]
+            if (and_m.group('listed') and re.search(r'\band\b', sep)
+                    and not re.match(r'\s+with\b', after_name)):
+                pass
+            elif and_m.group('listed'):
+                if _BIO_ROLE_WORDS_RE.search(and_m.group('name')):
+                    continue
+                # The item before the comma must be "Name of Org" too, or
+                # "Vice President of New Energy Solutions, Western Hemisphere
+                # of TGS" reads as a list.
+                before = rest[:and_m.start()]
+                prev_item = re.split(r',|\band\b', before)[-1]
+                if not re.search(r'^\s*(?:[A-Z][a-zà-ž\x27’-]+\s+){1,2}[A-Z][a-zà-ž\x27’-]+\s+(?:of|with|from|at)\s', prev_item) \
+                        or _BIO_ROLE_WORDS_RE.search(prev_item.split(' of ')[0]):
+                    continue
+            # "Ana Marques, Executive Board Member at EDP" — a title, not a name.
+            # (Only "member": other role words are surnames too — Emma Champion.)
+            if and_m.group('name').split()[-1].lower() in ('member', 'members'):
+                continue
+            yield and_m.group('name'), after_pos + and_m.start()
 
     for m in _INTRO_RE.finditer(text):
         add(m.group(1), m.start(), 'intro')

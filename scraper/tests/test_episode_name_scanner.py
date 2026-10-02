@@ -1577,3 +1577,45 @@ class TestFindIntroducedNames:
         got = dict(self.find(t, 'POLITICO Energy'))
         assert got.get('Josh Siegel') == 'host' and got.get('Nirmal Mulaikal') == 'host' and got.get('Zack Colman') == 'host'
         assert got.get('Catherine Morehouse') is None
+
+
+class TestGuestListContinuation:
+    """City Climate Corner introduces several guests in one sentence; only
+    the first was being suggested (suggestions 39664, 39671, 39677)."""
+
+    def names(self, text):
+        return {n for n, _, _ in extract_candidate_names_tagged(text)}
+
+    def test_titles_before_each_name(self):
+        text = ("We interview Council Member Kristen Sneddon, Acting Sustainability & "
+                "Resilience Director Alelia Parenteau, and Sierra Club Santa Barbara "
+                "Chair Katie Davis and learn how they did it.")
+        assert self.names(text) == {'Kristen Sneddon', 'Alelia Parenteau', 'Katie Davis'}
+
+    def test_comma_into_title_and_full_stop_after_title(self):
+        text = ("We interview Monika Leininger of the Powder River Basin Resource Council, "
+                "Professor Rachael Budowle of the University of Wyoming, and Laramie City "
+                "Council member Brian Harrington.\nResources")
+        assert self.names(text) == {'Monika Leininger', 'Rachael Budowle', 'Brian Harrington'}
+
+    def test_plain_name_of_org_list(self):
+        text = ("We interview Ruth Miller of Native Movement, Polly Carr of the Alaska Center, "
+                "Kendra Closter of Native Peoples Action, and Shaina Kilcoyne with the City "
+                "of Anchorage and learn about the impact")
+        assert self.names(text) == {'Ruth Miller', 'Polly Carr', 'Kendra Closter', 'Shaina Kilcoyne'}
+
+    def test_job_noun_not_part_of_name(self):
+        assert 'Scott Altenhoff' in self.names(
+            "We interview City of Eugene Urban Foresters Scott Altenhoff and Heidi Lakics, and learn")
+
+    def test_appositive_title_is_not_a_list_item(self):
+        names = self.names("In this episode, our host Joe Batir talks with Katja Akentieva, "
+                           "Vice President of New Energy Solutions, Western Hemisphere of TGS. They")
+        assert 'Western Hemisphere' not in names
+
+    def test_and_name_not_glued_link_text(self):
+        names = self.names("Connect with Ryan Panchadsaram and Anjali GroverConnect with Ryan on LinkedIn")
+        assert not any('Connect' in n for n in names)
+
+    def test_full_stop_needs_a_title(self):
+        assert 'Goldman Sachs' not in self.names("We talk with Jane Porter and Goldman Sachs. Then")
