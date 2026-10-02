@@ -526,8 +526,8 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   the X account's display name is the person's; `people-x-wiki` takes
   namesake Wikidata entries' handles only when the X bio names one of the
   person's organisations.
-- **News shows (`podcasts.scan_descriptions = false`, only POLITICO Energy
-  as of Oct 2026)**: the scanner doesn't credit any known name it finds
+- **News shows (`podcasts.scan_descriptions = false`, POLITICO Energy and
+  ev.news as of Oct 2026)**: the scanner doesn't credit any known name it finds
   there (that credited politicians named in the news, and missed the
   reporter guest on nearly every episode). It credits only people the title
   or description *introduces* (`find_introduced_names`): "POLITICO's X breaks

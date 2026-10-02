@@ -1481,6 +1481,8 @@ _GUEST_INTROS = [
     rf"(?:sits?|sat) down (?:for an? (?:\w+ )?interview )?with {_LEADIN}{_TITLED}{_INAME}",
     rf"(?:chats?|chatted|talks?|talked|speaks?|spoke) (?:with|to) {_LEADIN}{_TITLED}{_INAME}",
     rf"(?:interview|conversation) with {_LEADIN}{_TITLED}{_INAME}",
+    # "My guest today, Nathan Gore-Brown, is helping..." (ev.news, episode 93538)
+    rf"\b(?:[Mm]y|[Oo]ur) guests? (?:today|this week|on this episode)?,? (?:is )?{_TITLED}{_INAME}",
     rf"{_INAME},? (?:a reporter )?(?:from|of|with) [{_U}][^,.]{{0,40}}?,? {_INTRO_VERB}\b",
 ]
 _TITLE_WORDS = re.compile(r"^(?:(?:Assistant|Deputy|Energy|Interior|Former|Secretary|Sen|Senator|Rep|Representative|Gov|"

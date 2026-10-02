@@ -1571,6 +1571,11 @@ class TestFindIntroducedNames:
             "John Jovanovic, the chairman of the Export-Import Bank.", 'POLITICO Energy'))
         assert got == {'Hannah Northey': 'interviewer', 'John Jovanovic': 'guest'}
 
+    def test_my_guest_today(self):
+        got = dict(self.find("is this battery any good? My guest today, Nathan Gore-Brown, is helping to "
+                             "establish the standard.", 'ev.news'))
+        assert got == {'Nathan Gore-Brown': 'guest'}
+
     def test_cross_posted_hosts_are_guests(self):
         got = dict(self.find('Hosts Luiza Savage and Ryan Heath talk to the people trying to make industrial '
                              'policy cool again. Luiza Savage is the host of "Global Translations". Ryan Heath is '
