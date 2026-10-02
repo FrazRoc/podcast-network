@@ -4272,6 +4272,7 @@ def people_directory(q: str = "", kind: str = "", sort: str = "appearances",
     name or company, filter by the kind of role (or hosts) or by a topic
     they have talked about, sort by appearances, most recent or name."""
     rows = _directory_index('people', _build_people_directory)
+    topic_row = None
     if topic:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -4279,6 +4280,8 @@ def people_directory(q: str = "", kind: str = "", sort: str = "appearances",
             cur.execute("""SELECT DISTINCT eh.host_id FROM episode_tag et
                            JOIN episode_host eh ON eh.episode_id = et.episode_id WHERE et.tag_id = %s""", (topic,))
             on_topic = {r['host_id'] for r in cur.fetchall()}
+            cur.execute("SELECT tag_id, name FROM tags WHERE tag_id = %s", (topic,))
+            topic_row = cur.fetchone()
         finally:
             cur.close()
             conn.close()
@@ -4287,7 +4290,8 @@ def people_directory(q: str = "", kind: str = "", sort: str = "appearances",
         rows, q=q, fields=('name', 'company'),
         group_field='kind', group=kind, sort=sort, offset=offset, limit=limit)
     return {'total': page['total'], 'rows': page['rows'],
-            'kinds': _chips(page['counts'], {**org_stats.ROLE_LABELS, 'host': 'Host'})}
+            'kinds': _chips(page['counts'], {**org_stats.ROLE_LABELS, 'host': 'Host'}),
+            'topic': ({**topic_row, 'slug': profiles.slugify(topic_row['name'])} if topic and topic_row else None)}
 
 
 @app.get("/api/directory/orgs")

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import ProfileLayout, { Section, Stat, ShowMore, ShowThumb } from './ProfileLayout';
 import OrgLogo from './OrgLogo';
 import AdminEditLink from './AdminEditLink';
+import { TalksAbout, EpisodeTopics } from './Topics';
 import { useProfile, personHref, orgHref, showHref, avatarUrl, fmtDate, fmtMonthYear, plural, imageUrl, imageFallback } from '../profileUtils';
 
 const describe = (p) => {
@@ -111,6 +112,8 @@ function PersonDetails({ p }) {
     <>
       <Career items={p.career_by_org || []} />
 
+      <TalksAbout summary={p.talks_about} />
+
       <Section title="Appearances" aside={plural(listed.length, 'episode')}>
         {(both || tabShows.length > 1) && (
           <div className="flex flex-wrap items-center gap-2 mb-2">
@@ -148,6 +151,7 @@ function PersonDetails({ p }) {
                       <> · as {[a.as.title, a.as.company].filter(Boolean).join(', ')}</>
                     )}
                   </p>
+                  <EpisodeTopics topics={a.topics} />
                 </div>
                 <AdminEditLink href={`/admin/episodes?episode_id=${a.episode_id}`} className="flex-shrink-0">edit</AdminEditLink>
                 {a.listen_url && (

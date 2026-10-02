@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { API_BASE_URL } from '../config';
 import OrgLogo from './OrgLogo';
-import { personHref, orgHref, showHref, avatarUrl, coverUrl, plural, imageUrl, imageFallback, publicFetch } from '../profileUtils';
+import { Swatch } from './Topics';
+import { personHref, orgHref, showHref, topicHref, avatarUrl, coverUrl, plural, imageUrl, imageFallback, publicFetch } from '../profileUtils';
 
 // Name search across people, organisations and shows (/api/search).
 export default function ProfileSearch({ className = '' }) {
@@ -25,14 +26,14 @@ export default function ProfileSearch({ className = '' }) {
     return () => document.removeEventListener('mousedown', close);
   }, []);
 
-  const empty = results && !results.people.length && !results.orgs.length && !results.shows.length;
+  const empty = results && !results.people.length && !results.orgs.length && !results.shows.length && !results.topics?.length;
   const row = 'flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 text-sm text-gray-800';
   const heading = 'px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400';
 
   return (
     <div ref={boxRef} className={`relative ${className}`}>
       <input
-        type="search" value={q} placeholder="Search people, companies, shows…"
+        type="search" value={q} placeholder="Search people, orgs, shows, topics…"
         onChange={e => { setQ(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)}
         className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm focus:border-teal-500 focus:outline-none"
       />
@@ -61,6 +62,14 @@ export default function ProfileSearch({ className = '' }) {
             <a key={`s${s.podcast_id}`} href={showHref(s.podcast_id, s.slug)} className={row}>
               <img src={s.cover_art_url ? coverUrl(s.cover_art_url, 80) : avatarUrl(s.title)} alt="" className="w-6 h-6 rounded object-cover" />
               <span className="flex-1 truncate">{s.title}</span>
+            </a>
+          ))}
+          {results.topics?.length > 0 && <p className={heading}>Topics</p>}
+          {results.topics?.map(t => (
+            <a key={`t${t.tag_id}`} href={topicHref(t.tag_id, t.slug)} className={row}>
+              <span className="w-6 h-6 flex items-center justify-center"><Swatch category={t.category} className="w-2.5 h-2.5" /></span>
+              <span className="flex-1 truncate">{t.name}</span>
+              <span className="text-xs text-gray-400">{plural(t.episodes, 'episode')}</span>
             </a>
           ))}
         </div>

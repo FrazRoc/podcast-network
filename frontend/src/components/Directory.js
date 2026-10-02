@@ -25,14 +25,15 @@ export function useUrlParams(defaults) {
   return [params, (patch) => setParams(p => ({ ...p, ...patch }))];
 }
 
-// A paged /api/directory/<kind> list: reloads from the top when the filters
-// change, appends on loadMore().
+// A paged /api/directory/<kind> list (or any path starting with /api/):
+// reloads from the top when the filters change, appends on loadMore().
 export function useDirectory(kind, params, pageSize = 50) {
   const [state, setState] = useState({ rows: [], total: 0, data: null, loading: true, error: false });
   const request = useRef(0);
   const query = (offset) => {
     const search = new URLSearchParams({ ...params, offset, limit: pageSize });
-    return publicFetch(`${API_BASE_URL}/api/directory/${kind}?${search}`).then(r => (r.ok ? r.json() : Promise.reject(r)));
+    const path = kind.startsWith('/api/') ? kind : `/api/directory/${kind}`;
+    return publicFetch(`${API_BASE_URL}${path}?${search}`).then(r => (r.ok ? r.json() : Promise.reject(r)));
   };
   useEffect(() => {
     const id = ++request.current;

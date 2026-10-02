@@ -5,6 +5,7 @@ const NAV_LINKS = [
   { href: '/admin/episodes', label: 'Episodes' },
   { href: '/admin/people', label: 'People' },
   { href: '/admin/companies', label: 'Companies' },
+  { href: '/admin/topics', label: 'Topics' },
   { href: '/admin/diagnostics', label: 'Diagnostics' },
 ];
 

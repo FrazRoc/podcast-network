@@ -40,6 +40,7 @@ export const orgHref = (id, slug) => {
   return show ? `/shows/${show.podcast_id}-${show.slug}` : `/orgs/${id}${slug ? `-${slug}` : ''}`;
 };
 export const showHref = (id, slug) => `/shows/${id}${slug ? `-${slug}` : ''}`;
+export const topicHref = (id, slug) => `/topics/${id}${slug ? `-${slug}` : ''}`;
 
 // Same client-side slug rule as the backend's profiles.slugify, for links
 // built from data that doesn't carry a slug (the graph, the Stats charts).
@@ -125,15 +126,15 @@ export function setMeta(title, description) {
   tag.setAttribute('content', description || '');
 }
 
-// Loads /api/<kind>/<id>/profile, fixes up the slug in the address bar, and
-// sets the page title and description. Returns { data, error }.
-export function useProfile(kind, prefix, describe) {
+// Loads /api/<kind>/<id>/profile (or `endpoint(id)`), fixes up the slug in
+// the address bar, and sets the page title and description. Returns { data, error }.
+export function useProfile(kind, prefix, describe, endpoint = (id) => `/api/${kind}/${id}/profile`) {
   const [state, setState] = useState({ data: null, error: null });
   useEffect(() => {
     const id = idFromPath(prefix);
     if (!id) { setState({ data: null, error: 'not_found' }); return; }
     let cancelled = false;
-    publicFetch(`${API_BASE_URL}/api/${kind}/${id}/profile`)
+    publicFetch(`${API_BASE_URL}${endpoint(id)}`)
       .then(r => (r.status === 404 ? Promise.reject(new Error('not_found')) : r.ok ? r.json() : Promise.reject(new Error('error'))))
       .then(data => {
         if (cancelled) return;

@@ -4,6 +4,7 @@ import AdminEditLink from './AdminEditLink';
 import { ORG_TYPE_LABELS, ORG_TYPE_COLORS } from '../chartUtils';
 import { stripHtmlForDisplay } from '../adminUtils';
 import { useProfile, personHref, orgHref, showHref, avatarUrl, coverUrl, fmtDate, fmtMonthYear, plural, imageUrl, imageFallback } from '../profileUtils';
+import { TalksAbout, EpisodeTopics } from './Topics';
 
 const describe = (s) => [s.title,
   `${s.title}: ${plural(s.totals.episodes, 'episode')} since ${fmtMonthYear(s.totals.first_date)}, who it books, `
@@ -100,6 +101,8 @@ export default function ShowPage() {
               <GuestMix mix={s.guest_mix} />
             </Section>
 
+            <TalksAbout summary={s.covers} title="What it covers" noun="its" />
+
             <div className="grid sm:grid-cols-2 gap-5">
               {s.top_guests.length > 0 && (
                 <Section title="Most frequent guests">
@@ -144,6 +147,7 @@ export default function ShowPage() {
                           <span key={g.host_id}>{i ? ', ' : ''}<a href={personHref(g.host_id, g.slug)} className="text-teal-700 hover:underline">{g.name}</a></span>
                         ))}
                       </p>
+                      <EpisodeTopics topics={e.topics} />
                     </div>
                     <AdminEditLink href={`/admin/episodes?episode_id=${e.episode_id}`} className="flex-shrink-0">edit</AdminEditLink>
                     {e.listen_url && <a href={e.listen_url} target="_blank" rel="noopener noreferrer" className="flex-shrink-0 text-xs text-teal-700 hover:underline">Listen ↗</a>}

@@ -579,7 +579,8 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   `/api/search` returns `topics`; `/api/directory/people?topic=`. Admin:
   `GET/PUT /api/admin/topics[/{id}]` (rename refuses another topic's
   spelling with 409 — merge instead), `POST /api/admin/topics/{keep}/merge/{drop}`.
-- Not yet: frontend (topic pages, "Talks about" chips, Topic Admin tab),
+- Frontend: `/topics` (TopicDirectory.js), `/topics/<id>-<slug>` (TopicPage.js), shared chips and the "Talks about" block in `Topics.js` (CATEGORY_COLORS), topics under episodes on person and show pages, topics in header search, `/people?topic=`, and `/admin/topics` (AdminTopics.js: rename, category, not-a-topic, merge a duplicate in).
+- Not yet:
   topic merge suggestions, the ~47-topic broad layer (draft in the pilot
   folder's `broad_proposal.csv`).
 

@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import ProfileLayout, { Section, Stat, MiniBars, ShowMore, ShowThumb } from './ProfileLayout';
 import OrgLogo from './OrgLogo';
 import AdminEditLink from './AdminEditLink';
+import { TalksAbout } from './Topics';
 import { ORG_TYPE_LABELS, ORG_TYPE_COLORS } from '../chartUtils';
 import { useProfile, personHref, orgHref, showHref, avatarUrl, fmtDate, fmtMonthYear, plural, imageUrl, imageFallback } from '../profileUtils';
 
@@ -93,6 +94,8 @@ export default function OrgPage() {
                 <ul className="divide-y divide-gray-100"><ShowMore items={current} initial={12} render={person} /></ul>
               </Section>
             )}
+            <TalksAbout summary={o.talks_about} title="What its people talk about" noun="its people's" />
+
             {former.length > 0 && (
               <Section title="Formerly here">
                 <ul className="divide-y divide-gray-100"><ShowMore items={former} initial={8} render={person} /></ul>

@@ -17,6 +17,9 @@ import ShowPage from './components/ShowPage';
 import PeopleDirectory from './components/PeopleDirectory';
 import OrgDirectory from './components/OrgDirectory';
 import ShowDirectory from './components/ShowDirectory';
+import TopicDirectory from './components/TopicDirectory';
+import TopicPage from './components/TopicPage';
+import AdminTopics from './components/AdminTopics';
 
 function App() {
   const path = window.location.pathname;
@@ -31,6 +34,8 @@ function App() {
     return <OrgDirectory />;
   if (dir === '/shows')
     return <ShowDirectory />;
+  if (dir === '/topics')
+    return <TopicDirectory />;
   // Public profile pages: /people/<id>-<slug>, /orgs/<id>-<slug>, /shows/<id>-<slug>.
   if (path.startsWith('/people/'))
     return <PersonPage />;
@@ -38,6 +43,8 @@ function App() {
     return <OrgPage />;
   if (path.startsWith('/shows/'))
     return <ShowPage />;
+  if (path.startsWith('/topics/'))
+    return <TopicPage />;
   if (path === '/admin/suggestions/list')
     return <AdminLoginGate><div className="w-full min-h-screen"><AdminSuggestionsList /></div></AdminLoginGate>;
   if (path === '/admin/images' || path.startsWith('/admin/images/'))
@@ -52,6 +59,8 @@ function App() {
     return <AdminLoginGate><div className="w-full min-h-screen"><AdminDuplicates /></div></AdminLoginGate>;
   if (path === '/admin/shows' || path.startsWith('/admin/shows/'))
     return <AdminLoginGate><div className="w-full min-h-screen"><AdminShows /></div></AdminLoginGate>;
+  if (path === '/admin/topics' || path.startsWith('/admin/topics/'))
+    return <AdminLoginGate><div className="w-full min-h-screen"><AdminTopics /></div></AdminLoginGate>;
   if (path === '/admin/episodes' || path.startsWith('/admin/episodes/'))
     return <AdminLoginGate><div className="w-full min-h-screen"><AdminEpisodes /></div></AdminLoginGate>;
   if (path === '/admin' || path.startsWith('/admin/'))

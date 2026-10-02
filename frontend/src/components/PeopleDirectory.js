@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { SiteShell } from './SiteHeader';
 import { useUrlParams, useDirectory, SearchBox, SortSelect, FilterChips, DirectoryHeading, DirectoryList } from './Directory';
 import { ROLE_COLORS } from '../chartUtils';
-import { personHref, orgHref, avatarUrl, fmtMonthYear, plural, setMeta, imageUrl, imageFallback, useShowOrgs } from '../profileUtils';
+import { personHref, orgHref, topicHref, avatarUrl, fmtMonthYear, plural, setMeta, imageUrl, imageFallback, useShowOrgs } from '../profileUtils';
 
 const SORTS = [['appearances', 'Most episodes'], ['recent', 'Most recent'], ['name', 'A–Z']];
 const COLORS = { ...ROLE_COLORS, host: '#0d9488' };
@@ -11,7 +11,7 @@ export default function PeopleDirectory() {
   useShowOrgs();
   useEffect(() => setMeta('People · Podcast Network',
     'Everyone who has hosted or been a guest on a clean-energy podcast, with their current role and appearances.'), []);
-  const [params, set] = useUrlParams({ q: '', kind: '', sort: 'appearances' });
+  const [params, set] = useUrlParams({ q: '', kind: '', sort: 'appearances', topic: '' });
   const state = useDirectory('people', params);
 
   const person = (p) => {
@@ -48,6 +48,15 @@ export default function PeopleDirectory() {
         <SearchBox value={params.q} onChange={q => set({ q })} placeholder="Filter by name or company…" />
         <SortSelect value={params.sort} options={SORTS} onChange={sort => set({ sort })} />
       </div>
+      {params.topic && (
+        <p className="text-sm text-gray-600 flex flex-wrap items-center gap-2">
+          On episodes about{' '}
+          {state.data?.topic
+            ? <a href={topicHref(state.data.topic.tag_id, state.data.topic.slug)} className="font-medium text-teal-700 hover:underline">{state.data.topic.name}</a>
+            : '…'}
+          <button onClick={() => set({ topic: '' })} className="text-xs text-gray-400 hover:text-gray-600 underline">clear</button>
+        </p>
+      )}
       <FilterChips chips={state.data?.kinds || []} value={params.kind} onChange={kind => set({ kind })} colors={COLORS} />
       <DirectoryList state={state} render={person} noun={state.total === 1 ? 'person' : 'people'} />
     </SiteShell>
