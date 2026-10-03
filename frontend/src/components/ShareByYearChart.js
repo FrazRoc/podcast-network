@@ -5,20 +5,21 @@ const H = 260;
 const PAD = { top: 18, right: 16, bottom: 30, left: 40 };
 const INSET = 18;   // keeps the first and last points clear of the axis
 
-// Shares per year for a set of categories. "All" (the default) draws every
-// line on one shared scale; picking a category draws just that line on its
-// own scale with the values labelled, so a small one like government guests
-// (3–8%) isn't a flat line along the bottom. Hovering a legend entry in
-// "All" picks its line out; hovering a year lists every value in the caption.
+// Shares per year for a set of categories. With nothing picked (the
+// default) every line is drawn on one shared scale; picking a category draws
+// just that line on its own scale with the values labelled, so a small one
+// like government guests (3–8%) isn't a flat line along the bottom. Clicking
+// it again goes back to every line. With nothing picked, hovering a legend
+// entry picks its line out and hovering a year lists every value.
 //   items: [{year, total, counts: {key: n}}]
 //   share(item, key) -> percent
 export default function ShareByYearChart({ items, keys, colors, labels, partialYear, share,
                                            describeYear, footnote }) {
-  const [focus, setFocus] = useState('all');
+  const [focus, setFocus] = useState(null);
   const [hoverYear, setHoverYear] = useState(null);
   const [hoverKey, setHoverKey] = useState(null);
 
-  const all = focus === 'all';
+  const all = focus == null;
   const shown = all ? keys : [focus];
   const series = shown.map(k => ({ key: k, values: items.map(it => share(it, k)) }));
   const top = Math.max(1, ...series.flatMap(s => s.values));
@@ -45,12 +46,9 @@ export default function ShareByYearChart({ items, keys, colors, labels, partialY
   return (
     <div>
       <div className="flex flex-wrap gap-1.5 mb-3" onMouseLeave={() => setHoverKey(null)}>
-        <button onClick={() => setFocus('all')}
-          className={`text-xs rounded px-2 py-0.5 ${all ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
-          All
-        </button>
         {keys.map(k => (
-          <button key={k} onClick={() => setFocus(k)} onMouseEnter={() => setHoverKey(k)}
+          <button key={k} onClick={() => setFocus(f => (f === k ? null : k))} onMouseEnter={() => setHoverKey(k)}
+            title={focus === k ? 'Back to every line' : `Just ${labels[k]}, on its own scale`}
             className={`flex items-center gap-1.5 text-xs rounded px-2 py-0.5 ${focus === k ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
             <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: colors[k] }} />
             {labels[k]}
