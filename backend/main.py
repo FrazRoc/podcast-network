@@ -38,6 +38,7 @@ from org_suggestions import refresh_suggestions
 from similar_people import find_possible_matches, index_people
 import profiles
 import topics
+import topic_stats
 from topic_names import CATEGORIES, normalize_topic, topic_slug
 import x_avatars
 
@@ -376,7 +377,7 @@ extra_origins = [o.strip() for o in os.getenv("ADDITIONAL_ALLOWED_ORIGINS", "").
 # forth between pages is then instant). Admins' pages fetch with no-cache, so
 # an edit shows up on the next load.
 _PUBLIC_CACHEABLE_RE = re.compile(
-    r'^/api/(?:(?:people|orgs|shows)/\d+/profile|directory/[a-z]+|search|show-orgs|topics(?:/\d+)?)$')
+    r'^/api/(?:(?:people|orgs|shows)/\d+/profile|directory/[a-z]+|search|show-orgs|topics(?:/\d+)?|stats/[a-z-]+)$')
 
 
 @app.middleware("http")
@@ -671,6 +672,30 @@ def _org_stat(fn, *args, **kw):
     finally:
         cur.close()
         conn.close()
+
+
+@app.get("/api/stats/topic-categories-by-year")
+def stats_topic_categories_by_year():
+    """Share of tagged episodes touching each topic category, per year."""
+    return _org_stat(topic_stats.category_by_year)
+
+
+@app.get("/api/stats/rising-topics")
+def stats_rising_topics():
+    """Topics whose share of episodes grew or shrank most in the last two years."""
+    return _org_stat(topic_stats.rising_topics)
+
+
+@app.get("/api/stats/show-topic-mix")
+def stats_show_topic_mix():
+    """Each show's tagged episodes by topic category."""
+    return _org_stat(topic_stats.show_category_mix)
+
+
+@app.get("/api/stats/most-discussed")
+def stats_most_discussed(kind: str = "company"):
+    """The companies or people discussed on the most episodes they weren't on."""
+    return _org_stat(topic_stats.most_discussed, kind="person" if kind == "person" else "company")
 
 
 @app.get("/api/stats/show-guest-mix")

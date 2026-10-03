@@ -231,3 +231,24 @@ def test_rename_adds_spelling_and_refuses_another_topics_name(db_conn, monkeypat
     assert e.value.status_code == 409
     with pytest.raises(HTTPException):
         _run(db_conn, monkeypatch, 'update_topic', tags['oil prices'], main.TopicUpdateRequest(category='Nope'))
+
+
+def test_topic_stats_endpoints(db_conn, monkeypatch):
+    """The Stats page's topic charts: categories by year, show mix, and the
+    most-discussed list leaving out the person's own episodes."""
+    pid, people, eps, tags = _setup(db_conn)
+    years = _run(db_conn, monkeypatch, 'stats_topic_categories_by_year')
+    assert years['items'] == []            # four tagged episodes is under the per-year floor
+    import topic_stats
+    cur = db_conn.cursor(cursor_factory=RealDictCursor)
+    y = topic_stats.category_by_year(cur, min_tagged=1)
+    assert [(i['year'], i['total'], i['counts']) for i in y['items']] == [
+        (2025, 4, {'Power generation': 3, 'Policy and politics': 2, 'Fuels': 1})]
+    mix = topic_stats.show_category_mix(cur, min_tagged=1)
+    assert mix['items'][0]['counts'] == {'Power generation': 3, 'Policy and politics': 2, 'Fuels': 1}
+    _run(db_conn, monkeypatch, 'update_topic', tags['oil prices'], main_body(is_person=True, host_id=people['Ann']))
+    d = _run(db_conn, monkeypatch, 'stats_most_discussed', kind='person')
+    assert [(r['name'], r['episodes']) for r in d['items']] == [('Ann Lee', 1)]
+    _run(db_conn, monkeypatch, 'update_topic', tags['oil prices'], main_body(host_id=people['Bo']))
+    assert _run(db_conn, monkeypatch, 'stats_most_discussed', kind='person')['items'] == []
+    assert _run(db_conn, monkeypatch, 'stats_rising_topics')['rising'] == []

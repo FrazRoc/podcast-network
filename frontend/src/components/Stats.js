@@ -12,6 +12,7 @@ import RevolvingDoorChart from './RevolvingDoorChart';
 import TopOrganizationsChart from './TopOrganizationsChart';
 import GuestMixByYearChart from './GuestMixByYearChart';
 import GuestRolesChart from './GuestRolesChart';
+import { TopicCategoriesByYearChart, RisingTopicsChart, ShowTopicMixChart, MostDiscussedChart } from './TopicStatsCharts';
 import { SiteShell } from './SiteHeader';
 
 function Section({ title, children, description }) {
@@ -24,11 +25,14 @@ function Section({ title, children, description }) {
   );
 }
 
-// People and Shows as two tabs, like the Network page (same ?view=shows in
-// the address bar). Only the open tab's charts mount, so only they load.
+// People, Shows and Topics as tabs, like the Network page (?view=shows or
+// ?view=topics in the address bar). Only the open tab's charts mount, so
+// only they load.
+const VIEWS = ['people', 'shows', 'topics'];
 function initialView() {
   try {
-    return new URLSearchParams(window.location.search).get('view') === 'shows' ? 'shows' : 'people';
+    const v = new URLSearchParams(window.location.search).get('view');
+    return VIEWS.includes(v) ? v : 'people';
   } catch {
     return 'people';   // URLSearchParams is absent in some embedded webviews
   }
@@ -42,7 +46,7 @@ export default function Stats() {
   useEffect(() => {
     try {
       const url = new URL(window.location.href);
-      if (view === 'shows') url.searchParams.set('view', 'shows');
+      if (view !== 'people') url.searchParams.set('view', view);
       else url.searchParams.delete('view');
       window.history.replaceState(null, '', url.toString());
     } catch {
@@ -53,8 +57,8 @@ export default function Stats() {
   return (
     <SiteShell width="max-w-5xl">
       <h1 className="text-2xl font-bold text-gray-900">Stats</h1>
-      <div className="flex rounded-lg bg-gray-200/70 p-0.5 text-sm max-w-xs">
-        {[['people', 'People'], ['shows', 'Shows']].map(([mode, label]) => (
+      <div className="flex rounded-lg bg-gray-200/70 p-0.5 text-sm max-w-sm">
+        {[['people', 'People'], ['shows', 'Shows'], ['topics', 'Topics']].map(([mode, label]) => (
           <button key={mode} onClick={() => setView(mode)}
             className={`flex-1 rounded-md py-1.5 font-medium transition-colors ${
               view === mode ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
@@ -109,6 +113,33 @@ export default function Stats() {
             description="How concentrated the network is — most people appear once, a few appear dozens of times.">
             <GuestAppearanceChart />
           </Section>
+        </>
+      ) : view === 'topics' ? (
+        <>
+          <Section title="What the Network Talks About, Year by Year"
+            description="The share of tagged episodes touching each kind of topic, per year. Pick a category to follow it.">
+            <TopicCategoriesByYearChart />
+          </Section>
+
+          <Section title="Rising and Fading Topics"
+            description="The topics whose share of episodes grew or shrank the most over the last two years.">
+            <RisingTopicsChart />
+          </Section>
+
+          <Section title="What Each Show Covers"
+            description="Each show's episodes by kind of topic. Click a category to sort shows by it.">
+            <ShowTopicMixChart />
+          </Section>
+
+          <Section title="Most Discussed"
+            description="The companies and people that come up most on episodes they weren't on themselves.">
+            <MostDiscussedChart />
+          </Section>
+
+          <p className="text-xs text-gray-400">
+            Topics are read from episode descriptions and so far cover a random sample of the archive, so these
+            charts show shares of the tagged episodes. See all topics on the <a href="/topics" className="text-teal-700 hover:underline">Topics</a> page.
+          </p>
         </>
       ) : (
         <>
