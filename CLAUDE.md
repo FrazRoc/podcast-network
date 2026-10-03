@@ -560,13 +560,16 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   pattern), so "SMRs" and "small modular reactors" share a tag. Tagger:
   `scraper/extract_topics.py` (batch API, or `export`/`import` to read by
   hand); migration `migrate_add_topics.sql` (applied to production Oct 2026).
-- **Oct 2026 state**: 6,000 random episodes tagged by hand (Claude Code read
-  them; `topic_extractions.batch_id` `manual-pilot1..6`, `episode_tag.data_source`
-  'manual'): 16,734 episode rows; 6,726 topic tags plus 1,261 company and
-  1,052 person tags. From batch 6 on, the hand format marks companies `CO` and
-  people `PE` (see `topic-pilots/conv6.py`, `import6.py`) so they import
-  already flagged and linked by name. The rest of the ~22k episodes
-  wait on API credit. Pilot files and the importer are in
+- **Oct 2026 state**: 12,000 random episodes tagged by hand (Claude Code read
+  them; `topic_extractions.batch_id` `manual-pilot1..9`, `episode_tag.data_source`
+  'manual'): 38,411 `episode_tag` rows (27,298 topics, the rest companies and
+  people) over 10,355 distinct topic tags. From batch 6 on, the hand format
+  marks companies `CO` and people `PE` (see `topic-pilots/conv6.py`,
+  `import6.py`) so they import already flagged and linked by name. The rest
+  of the ~22k episodes are still to tag (by hand, or by API once there's
+  credit). Each batch import is one transaction, so if the Render
+  connection drops mid-run nothing is written; just rerun it. Pilot files,
+  importers and per-batch undo snapshots are in
   `~/Backups/podcast-network/topic-pilots/`. Expect duplicates
   ("geothermal" vs "geothermal energy") until Topic Admin merges them.
 - **Companies and people aren't topics** (Evan, Oct 2026). `tags.is_company`
@@ -578,8 +581,8 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   out episodes the person is credited on, or where a guest from the company
   is on, since that's them talking rather than being discussed.
   Regulators, grid operators, agencies, public utilities, events, laws,
-  places, books and products stay topics. Oct 2026: 638 company tags (512
-  linked) and 188 person tags (137 linked); the reviewed lists and undo
+  places, books and products stay topics. Oct 2026: 2,821 company tags
+  (2,075 linked) and 3,777 person tags (2,966 linked); the reviewed lists and undo
   snapshots are in `~/Backups/podcast-network/topic-pilots/`. Org and
   person merges carry the tag link to the survivor.
 - **Rollups** (`backend/topics.py`, pure): an episode counts once per topic
