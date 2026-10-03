@@ -85,7 +85,7 @@ export default function Stats() {
           </Section>
 
           <Section title="Guest Mix by Year"
-            description="The share of guest appearances from each kind of organisation, year by year. Most of it barely moves; government guests are the exception.">
+            description="The share of guest appearances from each kind of organisation, year by year. Most of it barely moves; pick government to see the exception.">
             <GuestMixByYearChart />
           </Section>
 
@@ -117,7 +117,7 @@ export default function Stats() {
       ) : view === 'topics' ? (
         <>
           <Section title="What the Network Talks About, Year by Year"
-            description="The share of tagged episodes touching each kind of topic, per year. Pick a category to follow it.">
+            description="The share of tagged episodes touching each kind of topic, per year. Pick a category to see it on its own scale.">
             <TopicCategoriesByYearChart />
           </Section>
 

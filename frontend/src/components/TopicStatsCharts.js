@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { API_BASE_URL } from '../config';
 import { CATEGORY_COLORS, CATEGORIES, Swatch } from './Topics';
 import StackedShareBars from './StackedShareBars';
+import ShareByYearChart from './ShareByYearChart';
 import { showHref, orgHref, personHref, topicHref, slugify } from '../profileUtils';
 
 // The Stats page's Topics tab. Topics cover a random sample of episodes, so
@@ -27,80 +28,17 @@ function Status({ error }) {
 
 const CATEGORY_LABELS = Object.fromEntries(CATEGORIES.map(c => [c, c]));
 
-const W = 640;
-const H = 260;
-const PAD = { top: 18, right: 16, bottom: 30, left: 40 };
-
-// One category's share of tagged episodes, year by year, on its own scale
-// (like Guest Mix by Year). Policy first: it's the one that swings with
-// elections and COPs.
+// Share of tagged episodes touching each topic category, per year. All
+// categories together by default; pick one to see it on its own scale.
 export function TopicCategoriesByYearChart() {
   const { data, error } = useStat('/api/stats/topic-categories-by-year');
-  const [focus, setFocus] = useState('Policy and politics');
-  const [hover, setHover] = useState(null);
   if (!data) return <Status error={error} />;
-
-  const items = data.items;
-  const values = items.map(it => (100 * (it.counts[focus] || 0)) / (it.total || 1));
-  const colour = CATEGORY_COLORS[focus];
-  const top = Math.max(...values, 1);
-  const step = top > 40 ? 10 : top > 16 ? 5 : 2;
-  const peak = Math.ceil((top * 1.15) / step) * step;
-  const plotW = W - PAD.left - PAD.right;
-  const plotH = H - PAD.top - PAD.bottom;
-  const INSET = 18;
-  const xAt = i => PAD.left + INSET + (i / Math.max(1, items.length - 1)) * (plotW - 2 * INSET);
-  const yAt = v => PAD.top + plotH - (v / peak) * plotH;
-  const partialIdx = items.findIndex(it => it.year === data.partial_year);
-  const line = values.map((v, i) => `${i ? 'L' : 'M'}${xAt(i).toFixed(1)} ${yAt(v).toFixed(1)}`).join(' ');
-  const area = `${line} L${xAt(items.length - 1)} ${yAt(0)} L${xAt(0)} ${yAt(0)} Z`;
-  const ticks = Array.from({ length: Math.floor(peak / step) + 1 }, (_, i) => i * step);
-
   return (
-    <div>
-      <div className="flex flex-wrap gap-1.5 mb-3">
-        {data.categories.map(c => (
-          <button key={c} onClick={() => setFocus(c)}
-            className={`flex items-center gap-1.5 text-xs rounded px-2 py-0.5 ${focus === c ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
-            <Swatch category={c} className="w-2.5 h-2.5" />{c}
-          </button>
-        ))}
-      </div>
-      <div className="overflow-x-auto">
-        <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ maxWidth: W }} onMouseLeave={() => setHover(null)}>
-          {ticks.map(v => (
-            <g key={v}>
-              <line x1={PAD.left} x2={PAD.left + plotW} y1={yAt(v)} y2={yAt(v)} stroke="#f3f4f6" />
-              <text x={PAD.left - 6} y={yAt(v) + 3} fontSize={10} fill="#9ca3af" textAnchor="end">{v}%</text>
-            </g>
-          ))}
-          <path d={area} fill={colour} opacity={0.15} />
-          <path d={line} fill="none" stroke={colour} strokeWidth={2.5} />
-          {values.map((v, i) => (
-            <g key={i}>
-              <circle cx={xAt(i)} cy={yAt(v)} r={hover === i ? 5 : 3.5} fill={colour} stroke="white" strokeWidth={1.5} />
-              <text x={xAt(i)} y={yAt(v) - 9} fontSize={10} fill="#374151" textAnchor="middle">{v.toFixed(0)}%</text>
-            </g>
-          ))}
-          {items.map((it, i) => (
-            <g key={it.year}>
-              <text x={xAt(i)} y={H - PAD.bottom + 16} fontSize={10} fill="#9ca3af" textAnchor="middle">
-                {it.year}{i === partialIdx ? '*' : ''}
-              </text>
-              <rect x={xAt(i) - plotW / (items.length * 2)} y={PAD.top} width={plotW / items.length} height={plotH}
-                fill="transparent" onMouseEnter={() => setHover(i)} />
-            </g>
-          ))}
-        </svg>
-      </div>
-      <p className="text-xs text-gray-500 h-4 mt-1">
-        {hover != null && `${items[hover].year}: ${items[hover].counts[focus] || 0} of ${items[hover].total} tagged episodes touched ${focus.toLowerCase()}.`}
-      </p>
-      <p className="text-xs text-gray-400 mt-1">
-        An episode counts once for each category its topics fall in, so the categories add up to more than 100%.
-        Years with fewer than 40 tagged episodes are left out. * part year.
-      </p>
-    </div>
+    <ShareByYearChart items={data.items} keys={data.categories} colors={CATEGORY_COLORS} labels={CATEGORY_LABELS}
+      partialYear={data.partial_year}
+      share={(it, c) => (100 * (it.counts[c] || 0)) / (it.total || 1)}
+      describeYear={(it, c) => `${it.year}: ${it.counts[c] || 0} of ${it.total} tagged episodes touched ${c.toLowerCase()}.`}
+      footnote="An episode counts once for each category its topics fall in, so the categories add up to more than 100%. Years with fewer than 40 tagged episodes are left out. * part year." />
   );
 }
 
