@@ -560,10 +560,10 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   pattern), so "SMRs" and "small modular reactors" share a tag. Tagger:
   `scraper/extract_topics.py` (batch API, or `export`/`import` to read by
   hand); migration `migrate_add_topics.sql` (applied to production Oct 2026).
-- **Oct 2026 state**: 16,000 random episodes tagged by hand (Claude Code read
-  them; `topic_extractions.batch_id` `manual-pilot1..10`, `episode_tag.data_source`
-  'manual'): 52,220 `episode_tag` rows (35,651 topics, the rest companies and
-  people) over 12,380 distinct topic tags. From batch 6 on, the hand format
+- **Oct 2026 state**: 19,000 random episodes tagged by hand (Claude Code read
+  them; `topic_extractions.batch_id` `manual-pilot1..11`, `episode_tag.data_source`
+  'manual'): 62,760 `episode_tag` rows (41,924 topics, the rest companies and
+  people) over 14,101 distinct topic tags. From batch 6 on, the hand format
   marks companies `CO` and people `PE` (see `topic-pilots/conv6.py`,
   `import6.py`) so they import already flagged and linked by name. The rest
   of the ~22k episodes are still to tag (by hand, or by API once there's
@@ -581,8 +581,8 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   out episodes the person is credited on, or where a guest from the company
   is on, since that's them talking rather than being discussed.
   Regulators, grid operators, agencies, public utilities, events, laws,
-  places, books and products stay topics. Oct 2026: 3,755 company tags
-  (2,693 linked) and 5,419 person tags (4,209 linked); the reviewed lists and undo
+  places, books and products stay topics. Oct 2026: 4,388 company tags
+  (3,080 linked) and 6,506 person tags (5,018 linked); the reviewed lists and undo
   snapshots are in `~/Backups/podcast-network/topic-pilots/`. Org and
   person merges carry the tag link to the survivor.
 - **Rollups** (`backend/topics.py`, pure): an episode counts once per topic
