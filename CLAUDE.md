@@ -656,6 +656,16 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   same prompt to `system_prompt.txt` beside the item files for tagging by
   hand. New episodes are **not** tagged on a schedule yet: `scrape.yml` has
   no topics step (234 untagged on Oct 8 2026, ~$0.34 by API).
+- **Broad topics where people look** (Oct 2026): profile "Talks about" /
+  "Covers" show an Areas row first (`topics.broad_areas`: each episode once
+  per broad topic, with its share of tagged episodes), then the topics.
+  Stats' Topics tab has "Areas over time" (one category's broad topics at a
+  time, `/api/stats/topic-areas-by-year`) and Rising/Fading with a Broad
+  topics / Topics switch (`?level=broad`, the default in the UI). Both broad
+  stats are cached through `_directory_index` (3–5 s to build).
+  `topic_stats.broad_of_sql(seed)` maps tags to their nearest broad topic
+  for all of these. Oct 2026 reading: "Electricity demand and data centers"
+  went from 1% of tagged episodes before 2025 to 6% since.
 - Not yet:
   topic merge suggestions; parents for the ~9,000 tail topics with no
   wording match; a scheduled tagging step.
