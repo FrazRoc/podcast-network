@@ -22,6 +22,13 @@ class TestNormalizeTopic:
         ('U.S.-China trade', 'US-China trade'),
         ('batteries', 'battery'),
         ('energy policies', 'energy policy'),
+        ('heatwave', 'heat waves'),
+        ('coal phase-out', 'coal phaseout'),
+        ('eMobility', 'e-mobility'),
+        ('geothermal', 'geothermal energy'),
+        ('nuclear power', 'nuclear energy'),
+        ('renewables', 'renewable energy'),
+        ('democracy and climate', 'climate and democracy'),
     ])
     def test_same_key(self, a, b):
         assert normalize_topic(a) == normalize_topic(b)
@@ -29,17 +36,26 @@ class TestNormalizeTopic:
     @pytest.mark.parametrize('a,b', [
         ('offshore wind', 'onshore wind'),
         ('natural gas', 'natural gas prices'),
+        ('SolarAPP', 'solar apps'),
+        ('CarbonPlan', 'carbon plan'),
+        ('SOLARCYCLE', 'solar cycles'),
+        ('Wave', 'wave energy'),
+        ('energy', 'power'),
+        ('clean energy', 'clean'),
+        ('energy storage', 'storage'),
+        ('wind turbine', 'wind'),
     ])
     def test_different_key(self, a, b):
         assert normalize_topic(a) != normalize_topic(b)
 
     def test_words_ending_in_s_kept(self):
-        assert normalize_topic('natural gas') == 'natural gas'
-        assert normalize_topic('climate politics') == 'climate politics'
+        assert normalize_topic('natural gas') == 'naturalgas'
+        assert normalize_topic('climate politics') == 'climatepolitics'
         assert normalize_topic('biomass') == 'biomass'
 
     def test_slug(self):
         assert topic_slug('Small Modular Reactors') == 'small-modular-reactor'
+        assert topic_slug('Geothermal Energy') == 'geothermal-energy'
 
 
 TEXT = "[Show: Catalyst] Why geothermal is heating up\nShayle talks with Tim Latimer about enhanced geothermal drilling and data center power demand."

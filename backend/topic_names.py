@@ -71,14 +71,25 @@ def _singular(word: str) -> str:
     return word
 
 
-def normalize_topic(name: str) -> str:
-    """The matching key for a topic phrase ('' when nothing is left).
+# Energy sources whose "X energy" / "X power" is the same topic as "X"
+# ("geothermal energy", "geothermal"; "nuclear power", "nuclear").
+_SOURCES = {'solar', 'wind', 'nuclear', 'geothermal', 'hydro', 'tidal', 'wave', 'fusion',
+            'hydrogen', 'bioenergy', 'offshore wind', 'onshore wind', 'hydroelectric',
+            'renewable', 'coal', 'marine'}
 
-    Lowercases, folds accents and typographic quotes, writes '&' as 'and',
-    drops a bracketed acronym after its expansion ("Small Modular Reactor
-    (SMR)"), drops a leading article, spells out known acronyms and makes
-    each word singular.
-    """
+# One-word names that would otherwise collide with an ordinary phrase once
+# spaces are ignored: SolarAPP+, the permitting tool, is not "solar apps",
+# and these companies are not the topics they spell ("carbon plan" is North
+# Carolina's, not CarbonPlan; "solar cycles" are the sun's).
+_KEEP_APART = {'solarapp': 'solarapp plus'}
+_KEEP_APART.update({name: name + ' company' for name in (
+    'carbonplan', 'carboncapture', 'solarcycle', 'solarcity', 'jetstream', 'powerline', 'scope3', 'wave')})
+
+
+def _words(name: str) -> str:
+    """The readable form: lowercase, accents and punctuation folded, a
+    bracketed acronym and a leading article dropped, known acronyms spelled
+    out, each word singular. Slugs are built from this."""
     if not name:
         return ''
     text = unicodedata.normalize('NFKD', name).encode('ascii', 'ignore').decode()
@@ -95,5 +106,24 @@ def normalize_topic(name: str) -> str:
     return ' '.join(_singular(w) for w in words)
 
 
+def normalize_topic(name: str) -> str:
+    """The matching key for a topic phrase ('' when nothing is left).
+
+    The readable form (_words), then: "X energy" / "X power" is "X" for an
+    energy source, the two sides of "A and B" are put in order ("democracy
+    and climate" = "climate and democracy"), and spaces are ignored
+    ("heatwave" = "heat waves", "coal phase-out" = "coal phaseout").
+    """
+    text = _words(name)
+    text = _KEEP_APART.get(text, text)
+    m = re.fullmatch(r'(.+) (?:energy|power)', text)
+    if m and m.group(1) in _SOURCES:
+        text = m.group(1)
+    sides = text.split(' and ')
+    if len(sides) == 2:
+        text = ' and '.join(sorted(sides))
+    return text.replace(' ', '')
+
+
 def topic_slug(name: str) -> str:
-    return normalize_topic(name).replace(' ', '-')
+    return _words(name).replace(' ', '-')
