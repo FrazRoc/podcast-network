@@ -624,10 +624,32 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
     every change and rolls back, so a clash shows before `--apply
     --snapshot`. It shares `backend/topic_merge.py` with Topic Admin.
     Decision CSVs and undo snapshots are in the topic-pilots folder.
-  - Next: map the tail (1,041 topics on 5–9 episodes first), then parents.
+  - The 5–9 tier (1,035 topics) reviewed: 286 merges, 6 more show formats
+    hidden, the Australian/UK/US/Republican energy+climate pairs combined.
+    The 1–4 tail (13,932) had only clean merges done — 334 of them: by
+    wording, ~4,000 tail topics are narrower versions of a canonical topic
+    (parented below, not merged) and ~7,700 share no wording with one.
+- **Hierarchy** (Oct 2026, `migrate_add_topic_parents.sql`):
+  category > broad topic > topic > narrower topic. `tags.parent_tag_id`
+  and `tags.is_broad`. 55 broad topics (41 new tags, 14 reusing the tag with
+  the same key, renamed: "wind energy" → "Wind"); every topic on 5+
+  episodes has a broad parent (drafted by rules in the session, read and
+  corrected by hand); 4,339 tail topics sit under the canonical topic whose
+  words they contain in order ("solar installer bankruptcies" → "solar
+  installers"), except where that would be a generic word ("risk",
+  "community", "clean energy"). A topic keeps its own category for Stats,
+  which can differ from its broad parent's ("solar tariffs": Policy, under
+  Solar). Topic pages and directory counts include everything under the
+  topic, each episode once (`_TOPIC_ANCESTORS_SQL`, `_topic_tree` in
+  main.py); /people?topic= too. People's "Talks about" and Stats stay at
+  topic level. A merge moves the dropped topic's children to the survivor.
+  `topic_cleanup.py` takes `action=broad` (+ `category`; no tag_id creates
+  one) and a `parent` column. Review files and undo snapshots
+  (`tree_draft.csv`, `tree_draft_by_broad.md`, `tree_undo_*.json`) are in
+  the topic-pilots folder.
 - Not yet:
-  topic merge suggestions, the ~47-topic broad layer (draft in the pilot
-  folder's `broad_proposal.csv`).
+  topic merge suggestions; parents for the ~9,000 tail topics with no
+  wording match.
 
 ## Tests
 
