@@ -12,7 +12,7 @@ import RevolvingDoorChart from './RevolvingDoorChart';
 import TopOrganizationsChart from './TopOrganizationsChart';
 import GuestMixByYearChart from './GuestMixByYearChart';
 import GuestRolesChart from './GuestRolesChart';
-import { TopicCategoriesByYearChart, RisingTopicsChart, ShowTopicMixChart, MostDiscussedChart } from './TopicStatsCharts';
+import { TopicCategoriesByYearChart, TopicAreasByYearChart, RisingTopicsChart, ShowTopicMixChart, MostDiscussedChart } from './TopicStatsCharts';
 import { SiteShell } from './SiteHeader';
 
 function Section({ title, children, description }) {
@@ -121,8 +121,13 @@ export default function Stats() {
             <TopicCategoriesByYearChart />
           </Section>
 
+          <Section title="Areas Over Time"
+            description="The broad topics within one category, as a share of tagged episodes per year. Pick a category; pick a line to see it on its own scale.">
+            <TopicAreasByYearChart />
+          </Section>
+
           <Section title="Rising and Fading Topics"
-            description="The topics whose share of episodes grew or shrank the most over the last two years.">
+            description="The broad topics, or individual topics, whose share of episodes grew or shrank the most over the last two years.">
             <RisingTopicsChart />
           </Section>
 
@@ -137,8 +142,8 @@ export default function Stats() {
           </Section>
 
           <p className="text-xs text-gray-400">
-            Topics are read from episode descriptions and so far cover a random sample of the archive, so these
-            charts show shares of the tagged episodes. See all topics on the <a href="/topics" className="text-teal-700 hover:underline">Topics</a> page.
+            Topics are read from episode descriptions, and these charts show shares of the tagged episodes
+            (episodes added since the last tagging pass aren't counted yet). See all topics on the <a href="/topics" className="text-teal-700 hover:underline">Topics</a> page.
           </p>
         </>
       ) : (

@@ -91,12 +91,26 @@ export function DiscussedIn({ discussed, name }) {
 // show: the topics on 2+ of their tagged episodes, and the category mix.
 // Topics cover only part of the archive so far, so it says what the counts
 // are out of; with too little tagged it says so instead of guessing.
+// Broad areas first (each with the share of tagged episodes under it),
+// then the specific topics, then the category mix.
 export function TalksAbout({ summary, title = 'Talks about', noun = 'their' }) {
   if (!summary || !summary.tagged_episodes) return null;
   const { topics, categories, tagged_episodes: tagged } = summary;
+  const areas = summary.areas || [];
   const total = categories.reduce((n, c) => n + c.episodes, 0);
   return (
     <Section title={title} aside={`from ${plural(tagged, 'tagged episode')}`}>
+      {areas.length > 0 && (
+        <div className="mb-3">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400 mb-1.5">Areas</p>
+          <div className="flex flex-wrap gap-1.5">
+            {areas.map(a => <TopicChip key={a.tag_id} topic={a} count={`${a.share}%`} />)}
+          </div>
+        </div>
+      )}
+      {areas.length > 0 && topics.length > 0 && (
+        <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400 mb-1.5">Topics</p>
+      )}
       {topics.length > 0 ? (
         <div className="flex flex-wrap gap-1.5">
           {topics.map(t => <TopicChip key={t.tag_id} topic={t} count={t.episodes} />)}
@@ -124,7 +138,7 @@ export function TalksAbout({ summary, title = 'Talks about', noun = 'their' }) {
         </div>
       )}
       <p className="mt-3 text-[11px] text-gray-400">
-        Topics are read from episode descriptions and are still being added across the archive.
+        Read from episode descriptions. An area's share is the tagged episodes with any topic under it.
       </p>
     </Section>
   );

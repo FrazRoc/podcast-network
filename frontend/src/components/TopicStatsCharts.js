@@ -42,6 +42,43 @@ export function TopicCategoriesByYearChart() {
   );
 }
 
+// Distinct line colours for the few broad topics in one category.
+const AREA_PALETTE = ['#4e79a7', '#f28e2b', '#e15759', '#59a14f', '#b07aa1', '#76b7b2', '#edc948', '#ff9da7', '#9c755f'];
+
+// Share of tagged episodes touching each broad topic, per year — one
+// category's broad topics at a time (55 lines at once would be unreadable).
+export function TopicAreasByYearChart() {
+  const { data, error } = useStat('/api/stats/topic-areas-by-year');
+  const [category, setCategory] = useState('Grid and storage');
+  if (!data) return <Status error={error} />;
+  const inCat = data.broad.filter(b => b.category === category);
+  const keys = inCat.map(b => b.key);
+  const colors = Object.fromEntries(inCat.map((b, i) => [b.key, AREA_PALETTE[i % AREA_PALETTE.length]]));
+  const labels = Object.fromEntries(inCat.map(b => [b.key, b.name]));
+  const cats = CATEGORIES.filter(c => data.broad.some(b => b.category === c));
+  return (
+    <div>
+      <label className="flex items-center gap-2 text-xs text-gray-500 mb-3">
+        <Swatch category={category} className="w-2.5 h-2.5" />
+        <select value={category} onChange={e => setCategory(e.target.value)}
+          className="border border-gray-200 rounded px-2 py-1 text-gray-700 bg-white">
+          {cats.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </label>
+      <ShareByYearChart key={category} items={data.items} keys={keys} colors={colors} labels={labels}
+        partialYear={data.partial_year}
+        share={(it, k) => (100 * (it.counts[k] || 0)) / (it.total || 1)}
+        describeYear={(it, k) => `${it.year}: ${it.counts[k] || 0} of ${it.total} tagged episodes touched ${labels[k]}.`}
+        footnote="An episode counts once for each broad topic any of its topics sit under. Years with fewer than 40 tagged episodes are left out. * part year." />
+      <p className="text-xs text-gray-400 mt-1">
+        {inCat.map((b, i) => (
+          <span key={b.key}>{i ? ' · ' : 'Topic pages: '}<a href={topicHref(b.tag_id, b.slug)} className="hover:underline">{b.name}</a></span>
+        ))}
+      </p>
+    </div>
+  );
+}
+
 function TopicMoves({ rows, cutoff, direction }) {
   const max = Math.max(...rows.map(r => Math.max(r.recent_share, r.earlier_share)), 0.1);
   return (
@@ -67,10 +104,22 @@ function TopicMoves({ rows, cutoff, direction }) {
 // The topics whose share of episodes moved most between the last two years
 // and everything before.
 export function RisingTopicsChart() {
-  const { data, error } = useStat('/api/stats/rising-topics');
-  if (!data) return <Status error={error} />;
+  const [level, setLevel] = useState('broad');
+  const { data, error } = useStat(`/api/stats/rising-topics?level=${level}`);
+  const toggle = (
+    <div className="flex rounded-lg bg-gray-200/70 p-0.5 text-xs max-w-[16rem] mb-3">
+      {[['broad', 'Broad topics'], ['topic', 'Topics']].map(([k, label]) => (
+        <button key={k} onClick={() => setLevel(k)}
+          className={`flex-1 rounded-md py-1 font-medium ${level === k ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+  if (!data || (data.level && data.level !== level)) return <div>{toggle}<Status error={error} /></div>;
   return (
     <div>
+      {toggle}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
         <div>
           <p className="text-xs font-semibold text-teal-700 uppercase tracking-wide mb-2">Rising</p>
@@ -84,7 +133,7 @@ export function RisingTopicsChart() {
       <p className="text-xs text-gray-400 mt-3">
         Share of tagged episodes before {data.cutoff_year} (grey, {data.earlier_episodes} episodes) against
         {' '}{data.cutoff_year} onward (colour, {data.recent_episodes} episodes). Topics on at least 8 episodes
-        and 3 different shows.
+        and 3 different shows{level === 'broad' && '; a broad topic counts every topic under it'}.
       </p>
     </div>
   );
