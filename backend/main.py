@@ -39,7 +39,8 @@ from similar_people import find_possible_matches, index_people
 import profiles
 import topics
 import topic_stats
-from topic_names import CATEGORIES, normalize_topic, topic_slug
+from topic_names import CATEGORIES, normalize_topic
+from topic_merge import merge_tags, rename_conflict, rename_tag
 import x_avatars
 
 load_dotenv()
@@ -4775,22 +4776,13 @@ def update_topic(tag_id: int, body: TopicUpdateRequest):
             raise HTTPException(status_code=404, detail="Topic not found")
         if body.name is not None and body.name.strip() != tag['name']:
             name = re.sub(r'\s+', ' ', body.name).strip()
-            key = normalize_topic(name)
-            if not key:
+            if not normalize_topic(name):
                 raise HTTPException(status_code=400, detail="Name is empty")
-            cur.execute("""SELECT t.tag_id, t.name FROM tag_aliases a JOIN tags t ON t.tag_id = a.tag_id
-                           WHERE a.normalized_name = %s AND a.tag_id <> %s""", (key, tag_id))
-            other = cur.fetchone()
-            if not other:
-                cur.execute("SELECT tag_id, name FROM tags WHERE (slug = %s OR name = %s) AND tag_id <> %s",
-                            (topic_slug(name), name, tag_id))
-                other = cur.fetchone()
+            other = rename_conflict(cur, tag_id, name)
             if other:
                 raise HTTPException(status_code=409, detail=f'"{name}" is already the topic "{other["name"]}" '
                                                             f'(#{other["tag_id"]}); merge them instead')
-            cur.execute("UPDATE tags SET name = %s, slug = %s WHERE tag_id = %s", (name, topic_slug(name), tag_id))
-            cur.execute("""INSERT INTO tag_aliases (tag_id, alias_name, normalized_name) VALUES (%s, %s, %s)
-                           ON CONFLICT (normalized_name) DO NOTHING""", (tag_id, name, key))
+            rename_tag(cur, tag_id, name)
         if body.category is not None:
             cur.execute("UPDATE tags SET category = %s WHERE tag_id = %s", (body.category, tag_id))
         if body.not_a_topic is not None:
@@ -4826,10 +4818,7 @@ def update_topic(tag_id: int, body: TopicUpdateRequest):
 
 @app.post("/api/admin/topics/{keep_id}/merge/{drop_id}", dependencies=[Depends(verify_admin)])
 def merge_topics(keep_id: int, drop_id: int):
-    """Fold one topic into another: its spellings become the survivor's (so
-    the tagger files future mentions under the survivor) and its episodes
-    move across. An episode on both keeps one row, the main topic if either
-    was."""
+    """Fold one topic into another (topic_merge.merge_tags)."""
     if keep_id == drop_id:
         raise HTTPException(status_code=400, detail="Cannot merge a topic into itself")
     conn = get_db_connection()
@@ -4839,19 +4828,9 @@ def merge_topics(keep_id: int, drop_id: int):
         rows = {r['tag_id']: r for r in cur.fetchall()}
         if keep_id not in rows or drop_id not in rows:
             raise HTTPException(status_code=404, detail="One or both topics not found")
-        cur.execute("""
-            INSERT INTO episode_tag (episode_id, tag_id, is_primary, evidence, data_source)
-            SELECT episode_id, %s, is_primary, evidence, data_source FROM episode_tag WHERE tag_id = %s
-            ON CONFLICT (episode_id, tag_id) DO UPDATE
-                SET is_primary = episode_tag.is_primary OR EXCLUDED.is_primary
-        """, (keep_id, drop_id))
-        episodes_moved = cur.rowcount
-        cur.execute("UPDATE tag_aliases SET tag_id = %s WHERE tag_id = %s", (keep_id, drop_id))
-        aliases_moved = cur.rowcount
-        cur.execute("DELETE FROM tags WHERE tag_id = %s", (drop_id,))  # cascades its episode_tag rows
+        moved = merge_tags(cur, keep_id, drop_id)
         conn.commit()
-        return {"success": True, "kept": rows[keep_id]['name'], "merged": rows[drop_id]['name'],
-                "episodes_moved": episodes_moved, "aliases_moved": aliases_moved}
+        return {"success": True, "kept": rows[keep_id]['name'], "merged": rows[drop_id]['name'], **moved}
     finally:
         cur.close()
         conn.close()
