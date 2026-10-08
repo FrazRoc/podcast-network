@@ -600,6 +600,31 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   `GET/PUT /api/admin/topics[/{id}]` (rename refuses another topic's
   spelling with 409 — merge instead), `POST /api/admin/topics/{keep}/merge/{drop}`.
 - Frontend: `/topics` (TopicDirectory.js), `/topics/<id>-<slug>` (TopicPage.js), shared chips and the "Talks about" block in `Topics.js` (CATEGORY_COLORS), topics under episodes on person and show pages, topics in header search, `/people?topic=`, and `/admin/topics` (AdminTopics.js: rename, category, not-a-topic, merge a duplicate in).
+- **Merging down the 15.8k topics** (Oct 2026; 64% were on one episode).
+  Pairwise review doesn't scale, so: a canonical list built from the topics
+  on 10+ episodes, then every smaller topic mapped onto it (merge / keep /
+  not a topic), then the broad layer as *parents*, not merges. Rule: merge
+  only the same subject in other words; narrower-but-real topics ("home
+  batteries" under "energy storage") get a parent. Done so far:
+  - `normalize_topic()` ignores spaces and hyphens ("heatwave" = "heat
+    waves"), treats "X energy/power" as "X" for energy sources, and orders
+    "A and B". `topic_slug()` keeps the readable form, so slugs didn't move.
+    One-word company names that would spell a topic are kept apart
+    (`_KEEP_APART`: CarbonPlan vs North Carolina's "carbon plan"). All
+    stored alias keys were re-keyed and 73 colliding tags merged; a topic
+    and a company/person tag are never merged by key.
+  - The 10+ list reviewed by Evan: 112 merges, 9 renames, 7 show formats
+    marked not a topic (EV news roundup, cleantech news, good news, year in
+    review…, following "EV news"), 2 companies. "X energy policy" and "X
+    climate policy" are one topic ("Trump energy and climate policy").
+    15,807 → 15,640 topics.
+  - Bulk changes go through `scraper/topic_cleanup.py DECISIONS.csv`
+    (columns tag_id, name, action keep|merge|not_a_topic|company, into,
+    rename): checks each row still matches the DB, and the dry run makes
+    every change and rolls back, so a clash shows before `--apply
+    --snapshot`. It shares `backend/topic_merge.py` with Topic Admin.
+    Decision CSVs and undo snapshots are in the topic-pilots folder.
+  - Next: map the tail (1,041 topics on 5–9 episodes first), then parents.
 - Not yet:
   topic merge suggestions, the ~47-topic broad layer (draft in the pilot
   folder's `broad_proposal.csv`).
