@@ -322,3 +322,18 @@ def test_parent_loop_refused_and_merge_keeps_the_tree(db_conn, monkeypatch):
     _run(db_conn, monkeypatch, 'merge_topics', tags['geothermal'], tags['permitting reform'])
     cur.execute("SELECT parent_tag_id FROM tags WHERE tag_id = %s", (tags['geothermal'],))
     assert cur.fetchone()[0] == energy
+
+
+def test_broad_areas_on_profiles_and_stats(db_conn, monkeypatch):
+    import topic_stats
+    _, people, eps, tags = _setup(db_conn)
+    energy = _hierarchy(db_conn, tags)
+    # Ann is on episodes 1-3: geothermal energy and permitting, both under Energy.
+    p = _run(db_conn, monkeypatch, 'get_person_profile', people['Ann'])
+    assert [(a['name'], a['episodes'], a['share']) for a in p['talks_about']['areas']] == [('Energy', 3, 100)]
+    cur = db_conn.cursor(cursor_factory=RealDictCursor)
+    y = topic_stats.broad_by_year(cur, min_tagged=1)
+    assert [b['name'] for b in y['broad']] == ['Energy']
+    assert [(i['year'], i['counts']) for i in y['items']] == [(2025, {str(energy): 4})]
+    r = _run(db_conn, monkeypatch, 'stats_rising_topics', level='broad')
+    assert r['level'] == 'broad' and r['rising'] == []

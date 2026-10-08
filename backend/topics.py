@@ -54,16 +54,28 @@ def category_mix(rows: list) -> list:
             for c, e in sorted(eps.items(), key=lambda kv: (order.get(kv[0], len(order)), kv[0]))]
 
 
+def broad_areas(rows: list, min_episodes: int = MIN_EPISODES, limit: int = 8) -> list:
+    """The broad topics the rows' episodes fall under (a row carries
+    broad_id/broad_name/broad_category, or none), each episode once per
+    broad topic, ranked like rank_topics."""
+    broad_rows = [{'episode_id': r['episode_id'], 'is_primary': r.get('is_primary'), 'tag_id': r['broad_id'],
+                   'name': r['broad_name'], 'category': r['broad_category']}
+                  for r in rows if r.get('broad_id')]
+    return rank_topics(broad_rows, min_episodes, limit)
+
+
 def summary(rows: list, tagged_episodes: int, limit: int = 12, min_episodes: int = MIN_EPISODES) -> dict:
-    """The "Talks about" block for a profile: the top topics with the share
-    of tagged episodes each is on, the category mix, and how many episodes
-    have been tagged at all (topics cover only part of the archive so far,
-    so the page can say what the numbers are out of)."""
-    ranked = rank_topics(rows, min_episodes, limit)
+    """The "Talks about" block for a profile: the broad areas and the top
+    topics, each with the share of tagged episodes it is on, the category
+    mix, and how many episodes have been tagged at all (so the page can say
+    what the numbers are out of)."""
+    def with_share(items):
+        return [{**t, 'share': round(100 * t['episodes'] / tagged_episodes) if tagged_episodes else None}
+                for t in items]
     return {
         'tagged_episodes': tagged_episodes,
-        'topics': [{**t, 'share': round(100 * t['episodes'] / tagged_episodes) if tagged_episodes else None}
-                   for t in ranked],
+        'areas': with_share(broad_areas(rows, min_episodes)),
+        'topics': with_share(rank_topics(rows, min_episodes, limit)),
         'categories': category_mix(rows),
     }
 

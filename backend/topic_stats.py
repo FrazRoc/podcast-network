@@ -17,6 +17,28 @@ from profiles import slugify
 TOPIC = "NOT t.not_a_topic AND NOT t.is_company AND NOT t.is_person"
 
 
+def broad_of_sql(seed: str) -> str:
+    """A WITH clause defining broad_of(tag_id, broad_id, broad_name,
+    broad_category): each tag from `seed` (a query yielding tag_id) mapped to
+    its nearest broad ancestor, itself included. Tags under no broad topic
+    are absent. Depth-capped so a bad parent loop can't run away."""
+    return f"""
+        WITH RECURSIVE anc(tag_id, ancestor_id, depth) AS (
+            SELECT DISTINCT s.tag_id, s.tag_id, 0 FROM ({seed}) s
+            UNION ALL
+            SELECT a.tag_id, t.parent_tag_id, a.depth + 1
+            FROM anc a JOIN tags t ON t.tag_id = a.ancestor_id
+            WHERE t.parent_tag_id IS NOT NULL AND a.depth < 10
+        ),
+        broad_of AS (
+            SELECT DISTINCT ON (a.tag_id) a.tag_id, b.tag_id AS broad_id, b.name AS broad_name,
+                   b.category AS broad_category
+            FROM anc a JOIN tags b ON b.tag_id = a.ancestor_id AND b.is_broad
+            ORDER BY a.tag_id, a.depth
+        )
+    """
+
+
 def category_by_year(cur, min_tagged: int = 40) -> dict:
     """Per year: tagged episodes, and how many of them touch each category
     (an episode counts once per category, however many of its topics fall
@@ -45,14 +67,47 @@ def category_by_year(cur, min_tagged: int = 40) -> dict:
     return {'categories': list(CATEGORIES), 'items': items, 'partial_year': date.today().year}
 
 
+def broad_by_year(cur, min_tagged: int = 40) -> dict:
+    """Per year: tagged episodes, and how many of them touch each broad
+    topic (anything under it counts; an episode once per broad topic).
+    Same shape as category_by_year, keyed by the broad topic's tag_id."""
+    cur.execute("""
+        SELECT EXTRACT(YEAR FROM e.published_date)::int AS year, COUNT(*) AS n
+        FROM topic_extractions tx JOIN episodes e ON e.episode_id = tx.episode_id
+        WHERE tx.status = 'done' AND e.published_date IS NOT NULL
+        GROUP BY 1
+    """)
+    totals = {r['year']: r['n'] for r in cur.fetchall()}
+    cur.execute(broad_of_sql(f"SELECT t.tag_id FROM tags t WHERE {TOPIC}") + """
+        SELECT EXTRACT(YEAR FROM e.published_date)::int AS year, bo.broad_id, COUNT(DISTINCT e.episode_id) AS n
+        FROM episode_tag et
+        JOIN broad_of bo ON bo.tag_id = et.tag_id
+        JOIN episodes e ON e.episode_id = et.episode_id
+        WHERE e.published_date IS NOT NULL
+        GROUP BY 1, 2
+    """)
+    counts = {}
+    for r in cur.fetchall():
+        counts.setdefault(r['year'], {})[str(r['broad_id'])] = r['n']
+    cur.execute("SELECT tag_id, name, category FROM tags WHERE is_broad AND NOT not_a_topic")
+    order = {c: i for i, c in enumerate(CATEGORIES)}
+    broad = sorted(({'key': str(r['tag_id']), 'tag_id': r['tag_id'], 'name': r['name'], 'slug': slugify(r['name']),
+                     'category': r['category']} for r in cur.fetchall()),
+                   key=lambda b: (order.get(b['category'], len(order)), b['name']))
+    items = [{'year': y, 'total': totals[y], 'counts': counts.get(y, {})}
+             for y in sorted(totals) if totals[y] >= min_tagged]
+    return {'broad': broad, 'categories': list(CATEGORIES), 'items': items, 'partial_year': date.today().year}
+
+
 def rising_topics(cur, recent_years: int = 2, min_episodes: int = 8, min_shows: int = 3,
-                  limit: int = 12) -> dict:
+                  limit: int = 12, level: str = 'topic') -> dict:
     """Topics whose share of tagged episodes grew or shrank most between the
     last recent_years years and everything before. Shares are smoothed (one
     pseudo-episode added each side) so a topic going from 0 to 2 doesn't top
     the list; topics need min_episodes episodes overall, on at least
     min_shows shows (so one show's running format, like a daily "EV news"
-    roundup, isn't mistaken for a trend)."""
+    roundup, isn't mistaken for a trend). level='broad' compares broad
+    topics, each counting everything under it."""
     cutoff = date(date.today().year - recent_years + 1, 1, 1)
     cur.execute("""
         SELECT COUNT(*) FILTER (WHERE e.published_date >= %(c)s) AS recent,
@@ -62,18 +117,29 @@ def rising_topics(cur, recent_years: int = 2, min_episodes: int = 8, min_shows: 
     """, {'c': cutoff})
     base = cur.fetchone()
     if not base['recent'] or not base['earlier']:
-        return {'cutoff_year': cutoff.year, 'rising': [], 'falling': [], **base}
-    cur.execute(f"""
-        SELECT t.tag_id, t.name, t.category,
+        return {'cutoff_year': cutoff.year, 'rising': [], 'falling': [], 'level': level, **base}
+    counts = """
                COUNT(DISTINCT e.episode_id) FILTER (WHERE e.published_date >= %(c)s) AS recent,
-               COUNT(DISTINCT e.episode_id) FILTER (WHERE e.published_date < %(c)s) AS earlier
-        FROM episode_tag et
-        JOIN tags t ON t.tag_id = et.tag_id AND {TOPIC}
-        JOIN episodes e ON e.episode_id = et.episode_id
-        WHERE e.published_date IS NOT NULL
-        GROUP BY t.tag_id, t.name, t.category
-        HAVING COUNT(DISTINCT e.episode_id) >= %(m)s AND COUNT(DISTINCT e.podcast_id) >= %(s)s
-    """, {'c': cutoff, 'm': min_episodes, 's': min_shows})
+               COUNT(DISTINCT e.episode_id) FILTER (WHERE e.published_date < %(c)s) AS earlier"""
+    having = "HAVING COUNT(DISTINCT e.episode_id) >= %(m)s AND COUNT(DISTINCT e.podcast_id) >= %(s)s"
+    if level == 'broad':
+        cur.execute(broad_of_sql(f"SELECT t.tag_id FROM tags t WHERE {TOPIC}") + f"""
+            SELECT bo.broad_id AS tag_id, bo.broad_name AS name, bo.broad_category AS category, {counts}
+            FROM episode_tag et
+            JOIN broad_of bo ON bo.tag_id = et.tag_id
+            JOIN episodes e ON e.episode_id = et.episode_id
+            WHERE e.published_date IS NOT NULL
+            GROUP BY 1, 2, 3 {having}
+        """, {'c': cutoff, 'm': min_episodes, 's': min_shows})
+    else:
+        cur.execute(f"""
+            SELECT t.tag_id, t.name, t.category, {counts}
+            FROM episode_tag et
+            JOIN tags t ON t.tag_id = et.tag_id AND {TOPIC}
+            JOIN episodes e ON e.episode_id = et.episode_id
+            WHERE e.published_date IS NOT NULL
+            GROUP BY t.tag_id, t.name, t.category {having}
+        """, {'c': cutoff, 'm': min_episodes, 's': min_shows})
     rows = []
     for r in cur.fetchall():
         recent_share = 100 * r['recent'] / base['recent']
@@ -85,7 +151,7 @@ def rising_topics(cur, recent_years: int = 2, min_episodes: int = 8, min_shows: 
                      'change': change})
     rising = sorted((r for r in rows if r['change'] > 0), key=lambda r: -r['change'])[:limit]
     falling = sorted((r for r in rows if r['change'] < 0), key=lambda r: r['change'])[:limit]
-    return {'cutoff_year': cutoff.year, 'recent_episodes': base['recent'],
+    return {'cutoff_year': cutoff.year, 'recent_episodes': base['recent'], 'level': level,
             'earlier_episodes': base['earlier'], 'rising': rising, 'falling': falling}
 
 

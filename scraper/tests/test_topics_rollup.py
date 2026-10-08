@@ -62,7 +62,19 @@ class TestSummary:
         assert {t['name']: t['share'] for t in s['topics']} == {'permitting reform': 50, 'geothermal energy': 38}
 
     def test_no_tagged_episodes(self):
-        assert summary([], 0) == {'tagged_episodes': 0, 'topics': [], 'categories': []}
+        assert summary([], 0) == {'tagged_episodes': 0, 'areas': [], 'topics': [], 'categories': []}
+
+    def test_broad_areas(self):
+        # Rooftop and community solar on episode 1 count once for Solar;
+        # a topic with no broad topic adds no area.
+        solar = {'broad_id': 9, 'broad_name': 'Solar', 'broad_category': 'Power generation'}
+        rows = [{'episode_id': 1, 'tag_id': 1, 'name': 'rooftop solar', 'category': 'Power generation', **solar},
+                {'episode_id': 1, 'tag_id': 2, 'name': 'community solar', 'category': 'Power generation', **solar},
+                {'episode_id': 2, 'tag_id': 2, 'name': 'community solar', 'category': 'Power generation',
+                 'is_primary': True, **solar},
+                {'episode_id': 2, 'tag_id': 3, 'name': 'podcasting', 'category': 'Society and justice'}]
+        s = summary(rows, 4)
+        assert [(a['name'], a['episodes'], a['as_main_topic'], a['share']) for a in s['areas']] == [('Solar', 2, 1, 50)]
 
 
 class TestEpisodeTopics:

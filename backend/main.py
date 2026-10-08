@@ -681,9 +681,18 @@ def stats_topic_categories_by_year():
     return _org_stat(topic_stats.category_by_year)
 
 
+@app.get("/api/stats/topic-areas-by-year")
+def stats_topic_areas_by_year():
+    """Share of tagged episodes touching each broad topic, per year. Cached
+    like the directories (a few seconds to build; changes only with tagging)."""
+    return _directory_index('stats-topic-areas', topic_stats.broad_by_year)
+
+
 @app.get("/api/stats/rising-topics")
-def stats_rising_topics():
-    """Topics whose share of episodes grew or shrank most in the last two years."""
+def stats_rising_topics(level: str = "topic"):
+    """Topics (or broad topics) whose share of episodes grew or shrank most in the last two years."""
+    if level == "broad":
+        return _directory_index('stats-rising-broad', lambda cur: topic_stats.rising_topics(cur, level='broad'))
     return _org_stat(topic_stats.rising_topics)
 
 
@@ -3723,17 +3732,20 @@ def _episode_link(row) -> dict:
 
 def _topic_rows(cur, episode_ids) -> tuple:
     """(rows, tagged): the topics on these episodes (one row per episode and
-    topic, topics marked "not a topic" left out) and how many of the
+    topic, topics marked "not a topic" left out, each with its broad topic
+    where it has one) and how many of the
     episodes have been through the tagger at all — topics cover only part of
     the archive, so the pages say what their counts are out of."""
     episode_ids = list(episode_ids)
     if not episode_ids:
         return [], 0
-    cur.execute("""
-        SELECT et.episode_id, et.tag_id, et.is_primary, t.name, t.category
+    cur.execute(topic_stats.broad_of_sql("SELECT tag_id FROM episode_tag WHERE episode_id = ANY(%(eps)s)") + """
+        SELECT et.episode_id, et.tag_id, et.is_primary, t.name, t.category,
+               bo.broad_id, bo.broad_name, bo.broad_category
         FROM episode_tag et JOIN tags t ON t.tag_id = et.tag_id AND NOT t.not_a_topic AND NOT t.is_company AND NOT t.is_person
-        WHERE et.episode_id = ANY(%s)
-    """, (episode_ids,))
+        LEFT JOIN broad_of bo ON bo.tag_id = et.tag_id
+        WHERE et.episode_id = ANY(%(eps)s)
+    """, {'eps': episode_ids})
     rows = cur.fetchall()
     cur.execute("SELECT COUNT(*) AS n FROM topic_extractions WHERE status = 'done' AND episode_id = ANY(%s)",
                 (episode_ids,))
