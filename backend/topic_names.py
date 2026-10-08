@@ -127,3 +127,49 @@ def normalize_topic(name: str) -> str:
 
 def topic_slug(name: str) -> str:
     return _words(name).replace(' ', '-')
+
+
+# ------------------------------------------------------------------
+# Where a new topic sits: under the most specific existing topic whose
+# words it contains, in order ("solar installer bankruptcies" under
+# "solar installers"). The rule the Oct 2026 hierarchy was built with, and
+# the one the tagger uses for topics it creates.
+# ------------------------------------------------------------------
+
+_WORD_STOP = {'and', 'of', 'the', 'in', 'for', 'to', 'a', 'on', 'vs', 'with'}
+
+# Too generic to be a parent: "customer acquisition" is not about
+# acquisitions, "at-risk communities" not about risk.
+WEAK_PARENTS = frozenset("""
+    risk acquisitions community youth progress innovation leadership economics psychology ethics
+    storytelling war capitalism democracy election fundraising networking recruiting patents
+    consumption population poverty inequality faith insurance marketing hiring courts military
+    startups infrastructure water health nature manufacturing mining recycling decarbonization
+    electrification eu europe uk
+""".split()) | {'supply chains', 'clean energy', 'renewable energy'}
+
+
+def topic_words(name: str) -> tuple:
+    """The words that matter, in order, plural 's' dropped."""
+    words = re.sub(r'[^a-z0-9 ]+', ' ', (name or '').lower()).split()
+    return tuple(w[:-1] if len(w) > 3 and w.endswith('s') and not w.endswith('ss') else w
+                 for w in words if w not in _WORD_STOP)
+
+
+def pick_parent(name: str, candidates: list):
+    """The tag_id of the candidate a new topic should sit under, or None.
+    candidates: dicts with tag_id, name, episodes and place (a place name
+    like "Canada", passed over when a subject also fits). The candidate's
+    words must occur together, in order, in the new name, and be fewer."""
+    words = topic_words(name)
+    best = None
+    for c in candidates:
+        cw = topic_words(c['name'])
+        if not cw or len(cw) >= len(words) or c['name'].lower() in WEAK_PARENTS:
+            continue
+        if not any(words[i:i + len(cw)] == cw for i in range(len(words) - len(cw) + 1)):
+            continue
+        rank = (not c.get('place'), len(cw), c.get('episodes', 0))
+        if best is None or rank > best[0]:
+            best = (rank, c['tag_id'])
+    return best[1] if best else None

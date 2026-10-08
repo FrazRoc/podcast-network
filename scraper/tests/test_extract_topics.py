@@ -7,8 +7,9 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '..', 'backend'))
 
-from topic_names import normalize_topic, topic_slug  # noqa: E402
-from extract_topics import build_text, verified_topics, parse_response_text, record_results, item_id  # noqa: E402
+from topic_names import normalize_topic, topic_slug, pick_parent  # noqa: E402
+from extract_topics import (build_text, verified_topics, parse_response_text, record_results, item_id,  # noqa: E402
+                            vocabulary_text, system_prompt)
 
 
 class TestNormalizeTopic:
@@ -139,3 +140,59 @@ def test_record_results(db_conn):
     assert cur.fetchone() == (1, 2)
     cur.execute("SELECT status FROM topic_extractions ORDER BY episode_id")
     assert [r[0] for r in cur.fetchall()] == ['done', 'done']
+
+
+def test_new_topic_goes_under_the_topic_it_names(db_conn):
+    cur = db_conn.cursor()
+    cur.execute("INSERT INTO podcasts (apple_podcast_id, title) VALUES ('1', 'Catalyst') RETURNING podcast_id")
+    cur.execute("INSERT INTO episodes (podcast_id, title) VALUES (%s, 't') RETURNING episode_id", (cur.fetchone()[0],))
+    ep = cur.fetchone()[0]
+    cur.execute("INSERT INTO topic_extractions (episode_id, status, text_sent) VALUES (%s, 'pending', %s)", (ep, TEXT))
+    cur.execute("INSERT INTO tags (name, slug, category, is_broad) VALUES ('Geothermal', 'geothermal', 'Power generation', true)"
+                " RETURNING tag_id")
+    broad = cur.fetchone()[0]
+    cur.execute("INSERT INTO tag_aliases (tag_id, alias_name, normalized_name) VALUES (%s, 'Geothermal', 'geothermal')",
+                (broad,))
+    answers = {item_id(ep): [
+        {'topic': 'geothermal drilling', 'category': 'Power generation', 'primary': True,
+         'evidence': 'enhanced geothermal drilling'},
+        {'topic': 'data center power demand', 'category': 'Grid and storage', 'primary': False,
+         'evidence': 'data center power demand'}]}
+    record_results(cur, [(ep, TEXT)], answers)
+    db_conn.commit()
+    cur.execute("SELECT name, parent_tag_id FROM tags WHERE NOT is_broad ORDER BY name")
+    assert cur.fetchall() == [('data center power demand', None), ('geothermal drilling', broad)]
+
+
+def test_vocabulary_is_grouped_by_broad_topic():
+    vocab = [{'name': 'Solar', 'category': 'Power generation', 'is_broad': True, 'episodes': 38, 'broad': 'Solar'},
+             {'name': 'rooftop solar', 'category': 'Power generation', 'is_broad': False, 'episodes': 120, 'broad': 'Solar'},
+             {'name': 'community solar', 'category': 'Power generation', 'is_broad': False, 'episodes': 140,
+              'broad': 'Solar'},
+             {'name': 'Hydrogen', 'category': 'Fuels', 'is_broad': True, 'episodes': 173, 'broad': 'Hydrogen'},
+             {'name': 'podcast economics', 'category': 'Finance and markets', 'is_broad': False, 'episodes': 6,
+              'broad': None}]
+    assert vocabulary_text(vocab).splitlines() == [
+        'Solar (Power generation): community solar; rooftop solar',
+        'Hydrogen (Fuels)',
+        'Other: podcast economics',
+    ]
+    assert 'community solar; rooftop solar' in system_prompt(vocab)
+
+class TestPickParent:
+    CANDS = [{'tag_id': 1, 'name': 'solar', 'episodes': 38}, {'tag_id': 2, 'name': 'solar installers', 'episodes': 52},
+             {'tag_id': 3, 'name': 'Canada', 'episodes': 30, 'place': True}, {'tag_id': 4, 'name': 'carbon removal', 'episodes': 154},
+             {'tag_id': 5, 'name': 'acquisitions', 'episodes': 5}, {'tag_id': 6, 'name': 'waste-to-energy', 'episodes': 9}]
+
+    @pytest.mark.parametrize('name,parent', [
+        ('solar installer bankruptcies', 2),     # the most specific match
+        ('solar payback', 1),
+        ('Canada carbon removal', 4),            # a subject before a place
+        ('Canada storage', 3),                   # a place when nothing else fits
+        ('customer acquisition', None),          # too generic to be a parent
+        ('building energy waste', None),         # words out of order
+        ('solar', None),                         # a topic isn't its own parent
+        ('wind repowering', None),
+    ])
+    def test_parent(self, name, parent):
+        assert pick_parent(name, self.CANDS) == parent

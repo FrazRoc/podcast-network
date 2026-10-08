@@ -13,6 +13,11 @@ episodes per request, every value checked against the text it came from
 recorded per episode in topic_extractions. Tags are deduplicated through
 topic_names.normalize_topic(): every spelling is an alias of one tag.
 
+The model is shown the cleaned vocabulary — every topic on 5+ episodes,
+grouped under its broad topic — and told to use the most specific one that
+fits. A topic it creates anyway is put under the existing topic whose words
+it contains (topic_names.pick_parent), so new tags join the hierarchy.
+
 Usage:
     python3 extract_topics.py estimate [--limit N]              # no API, no writes
     python3 extract_topics.py pilot --limit 200 [--out f.csv]   # API, CSV only
@@ -37,7 +42,7 @@ from psycopg2.extras import execute_values
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'backend'))
 from description_cleaner import clean_description  # noqa: E402
-from topic_names import CATEGORIES, normalize_topic, topic_slug  # noqa: E402
+from topic_names import CATEGORIES, normalize_topic, topic_slug, topic_words, pick_parent  # noqa: E402
 from extract_affiliations import (  # noqa: E402
     MODELS, BATCH_DISCOUNT, MAX_ATTEMPTS, CHARS_PER_TOKEN,
     _normalise_for_match, message_text, usage_cost,
@@ -55,7 +60,10 @@ ITEMS_PER_REQUEST = 40
 MAX_TOKENS = 16000
 MIN_TOPICS, MAX_TOPICS = 2, 6
 MAX_TOPIC_LEN = 60
-PROMPT_TAG_LIMIT = 200       # existing tags shown to the model to reuse
+VOCAB_MIN_EPISODES = 5      # topics on this many episodes are shown to the model to reuse
+# Broad topics whose short members are places ("Canada", "Texas"): a new
+# topic goes under a subject rather than a place when both fit.
+PLACE_BROADS = {'State and local policy', 'Energy policy outside the US'}
 
 # For `estimate` (no API): ~4 chars/token, ~25 output tokens per topic.
 EST_OUTPUT_TOKENS_PER_ITEM = 120
@@ -73,9 +81,13 @@ and general enough to recur across episodes: "small modular reactors", \
 power demand", "carbon removal markets". Not "energy", "climate", \
 "sustainability" or "the future" on their own, and not a person, company \
 or show name ("Tesla" is not a topic; "electric vehicles" is).
-- Prefer an existing topic name from the list below when it fits; only \
-write a new one when none does. Use the plural/singular and wording of the \
-existing name exactly.
+- Use the existing topics listed below whenever one fits, and the most \
+specific one that does ("home batteries", not "Energy storage and \
+batteries"). They are grouped under broad areas; a broad area's own name \
+is a topic only for an episode about the area in general. Write a new \
+topic only for a subject no listed topic covers; it may be narrower than a \
+listed one ("solar installer bankruptcies"). Use the plural/singular and \
+wording of an existing name exactly.
 - `category` is one of the fixed categories given.
 - Exactly one topic is `primary`: the main subject of the episode.
 - `evidence` is a short phrase copied exactly, word for word, from the \
@@ -87,7 +99,7 @@ return an empty list.
 
 Categories: {categories}
 
-Existing topics (reuse these names when they fit):
+Existing topics, by broad area (reuse these names when they fit):
 {existing}
 
 Return one result for every item id you were given."""
@@ -153,9 +165,31 @@ def render_items(items: list) -> str:
     return '\n'.join(f'<item id="{it["id"]}">{_xml_escape(it["text"])}</item>' for it in items)
 
 
+def vocabulary_text(vocab: list) -> str:
+    """The vocabulary as the model sees it: one line per broad area,
+    "Broad (category): topic; topic; ...", most-used first; topics with no
+    broad area last."""
+    groups = {}
+    for v in vocab:
+        if v['is_broad']:
+            groups.setdefault(v['name'], {'category': v['category'], 'topics': []})
+    for v in vocab:
+        if not v['is_broad']:
+            groups.setdefault(v['broad'] or '', {'category': '', 'topics': []})['topics'].append(v)
+    order = {c: i for i, c in enumerate(CATEGORIES)}
+    lines = []
+    for broad, g in sorted(groups.items(), key=lambda kv: (kv[0] == '', order.get(kv[1]['category'], 99), kv[0])):
+        names = '; '.join(t['name'] for t in sorted(g['topics'], key=lambda t: (-t['episodes'], t['name'])))
+        if broad:
+            lines.append(f"{broad} ({g['category']}): {names}" if names else f"{broad} ({g['category']})")
+        elif names:
+            lines.append(f"Other: {names}")
+    return '\n'.join(lines)
+
+
 def system_prompt(existing: list) -> str:
     return SYSTEM_PROMPT.format(categories='; '.join(CATEGORIES),
-                                existing=', '.join(existing) if existing else '(none yet)')
+                                existing=vocabulary_text(existing) if existing else '(none yet)')
 
 
 def chunk(items: list, size: int = ITEMS_PER_REQUEST) -> list:
@@ -237,20 +271,41 @@ def parse_response_text(text: str, expected_ids: set) -> dict:
 # DATABASE
 # ------------------------------------------------------------------
 
-def existing_topic_names(conn, limit: int = PROMPT_TAG_LIMIT) -> list:
-    """The most-used canonical tag names, for the model to reuse."""
+def topic_vocabulary(conn, min_episodes: int = VOCAB_MIN_EPISODES) -> list:
+    """The cleaned vocabulary: broad topics, and every topic on at least
+    min_episodes episodes, each with its broad topic (the nearest broad
+    ancestor) and whether it is a place. Dicts: tag_id, name, category,
+    is_broad, episodes, broad, place."""
     cur = conn.cursor()
     cur.execute("SELECT to_regclass('topic_extractions') IS NOT NULL")
     if not cur.fetchone()[0]:
         return []
     cur.execute("""
-        SELECT t.name FROM tags t JOIN episode_tag et ON et.tag_id = t.tag_id
-        WHERE NOT t.not_a_topic AND NOT t.is_company AND NOT t.is_person GROUP BY t.tag_id, t.name
-        ORDER BY COUNT(*) DESC, t.name LIMIT %s
-    """, (limit,))
-    names = [r[0] for r in cur.fetchall()]
+        SELECT t.tag_id, t.name, t.category, t.parent_tag_id, t.is_broad,
+               (SELECT COUNT(*) FROM episode_tag et WHERE et.tag_id = t.tag_id) AS episodes
+        FROM tags t WHERE NOT t.not_a_topic AND NOT t.is_company AND NOT t.is_person
+    """)
+    tags = {r[0]: {'tag_id': r[0], 'name': r[1], 'category': r[2], 'parent': r[3], 'is_broad': r[4],
+                   'episodes': r[5]} for r in cur.fetchall()}
     cur.close()
-    return names
+
+    def broad_of(t):
+        seen = set()
+        while t and t['tag_id'] not in seen:
+            seen.add(t['tag_id'])
+            if t['is_broad']:
+                return t['name']
+            t = tags.get(t['parent'])
+        return None
+
+    out = []
+    for t in tags.values():
+        if t['is_broad'] or t['episodes'] >= min_episodes:
+            broad = broad_of(t)
+            out.append({**{k: t[k] for k in ('tag_id', 'name', 'category', 'is_broad', 'episodes')},
+                        'broad': broad, 'place': broad in PLACE_BROADS and len(topic_words(t['name'])) <= 2})
+    out.sort(key=lambda v: (-v['episodes'], v['name']))
+    return out
 
 
 def get_episodes_to_process(conn, limit: int = None, random_sample: bool = False,
@@ -291,9 +346,10 @@ def build_items(episodes: list) -> tuple:
     return empty, items
 
 
-def _tag_ids(cur, kept: list) -> dict:
+def _tag_ids(cur, kept: list, vocab: list = ()) -> dict:
     """{normalized key: tag_id}, creating tags (and their first alias) for
-    keys not seen before."""
+    keys not seen before; a created tag is put under the vocabulary topic
+    whose words it contains (topic_names.pick_parent), if any."""
     keys = list({k['key'] for k in kept})
     if not keys:
         return {}
@@ -303,10 +359,10 @@ def _tag_ids(cur, kept: list) -> dict:
         if k['key'] in found:
             continue
         cur.execute("""
-            INSERT INTO tags (name, slug, category) VALUES (%s, %s, %s)
+            INSERT INTO tags (name, slug, category, parent_tag_id) VALUES (%s, %s, %s, %s)
             ON CONFLICT (slug) DO UPDATE SET slug = EXCLUDED.slug
             RETURNING tag_id
-        """, (k['topic'], topic_slug(k['topic']), k['category']))
+        """, (k['topic'], topic_slug(k['topic']), k['category'], pick_parent(k['topic'], vocab)))
         tag_id = cur.fetchone()[0]
         cur.execute("""
             INSERT INTO tag_aliases (tag_id, alias_name, normalized_name) VALUES (%s, %s, %s)
@@ -321,6 +377,7 @@ def record_results(cur, pending: list, answers: dict) -> tuple:
     Episodes with no answer go to 'retry'. Manual tags are never touched.
     Returns (done, tags added, retried, dropped)."""
     done, retry, rows, dropped_total = [], [], [], 0
+    vocab = topic_vocabulary(cur.connection) if pending else []
     for episode_id, text in pending:
         key = item_id(episode_id)
         if key not in answers:
@@ -328,7 +385,7 @@ def record_results(cur, pending: list, answers: dict) -> tuple:
             continue
         kept, dropped = verified_topics(answers[key], text)
         dropped_total += len(dropped)
-        ids = _tag_ids(cur, kept)
+        ids = _tag_ids(cur, kept, vocab)
         done.append((episode_id,))
         rows.extend((episode_id, ids[k['key']], k['primary'], k['evidence'], DATA_SOURCE) for k in kept)
     if done:
@@ -383,7 +440,7 @@ def cmd_estimate(limit=None, model=MODEL):
     try:
         episodes = get_episodes_to_process(conn, limit)
         empty, items = build_items(episodes)
-        _report(episodes, empty, items, estimate_cost(items, existing_topic_names(conn), model=model))
+        _report(episodes, empty, items, estimate_cost(items, topic_vocabulary(conn), model=model))
     finally:
         conn.close()
 
@@ -395,7 +452,7 @@ def cmd_pilot(limit: int, out_path: str, model: str = MODEL):
 
     conn = psycopg2.connect(DB)
     episodes = get_episodes_to_process(conn, limit, random_sample=True, guests_only=True)
-    existing = existing_topic_names(conn)
+    existing = topic_vocabulary(conn)
     conn.close()
     empty, items = build_items(episodes)
     _report(episodes, empty, items, estimate_cost(items, existing, batch=False, model=model))
@@ -445,7 +502,7 @@ def _send(conn, model, max_cost, dry_run, over_cap_is_error, limit=None):
     from anthropic.types.messages.batch_create_params import Request
 
     episodes = get_episodes_to_process(conn, limit)
-    existing = existing_topic_names(conn)
+    existing = topic_vocabulary(conn)
     empty, items = build_items(episodes)
     est = estimate_cost(items, existing, model=model)
     _report(episodes, empty, items, est)
@@ -539,6 +596,10 @@ def cmd_export(out_dir: str, limit=None, batch_id=None):
                                   for it in items])
         conn.commit()
         os.makedirs(out_dir, exist_ok=True)
+        # The instructions and vocabulary the API run would send, so a
+        # reading by hand works from the same list.
+        with open(os.path.join(out_dir, 'system_prompt.txt'), 'w') as f:
+            f.write(system_prompt(topic_vocabulary(conn)) + '\n')
         for i, group in enumerate(chunk(items)):
             with open(os.path.join(out_dir, f'items_{i:03d}.xml'), 'w') as f:
                 f.write(render_items(group) + '\n')
