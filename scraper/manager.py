@@ -21,8 +21,15 @@ RECENT_REFRESH_LIMIT = 50
 def refresh_limit(itunes_count, db_count, itunes_latest, db_latest,
                   min_gap: int = 10, limit: int = 200):
     """How many episodes to fetch for a show, or None to leave it.
-    itunes_latest / db_latest: ISO dates (YYYY-MM-DD) or None."""
-    if itunes_count is not None and itunes_count - db_count >= min_gap:
+    itunes_latest / db_latest: ISO dates (YYYY-MM-DD) or None.
+
+    The gap is measured against what the lookup can return — Apple's newest
+    `limit` episodes — not its whole trackCount. A show with 1,331 episodes
+    and 200 of ours has nothing more to give this way (older ones come from
+    backfill-rss), yet comparing to trackCount re-fetched 200 episodes from
+    ~25 such shows every run, ~60 s each, and pushed scrape.yml past its
+    45-minute limit (Oct 2026)."""
+    if itunes_count is not None and min(itunes_count, limit) - db_count >= min_gap:
         return limit
     if itunes_latest and (not db_latest or itunes_latest > db_latest):
         return RECENT_REFRESH_LIMIT

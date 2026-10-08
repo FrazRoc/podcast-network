@@ -24,3 +24,17 @@ def test_up_to_date_or_paused_show_is_left_alone():
 
 def test_show_with_no_episodes_yet():
     assert refresh_limit(None, 0, '2026-09-01', None) == RECENT_REFRESH_LIMIT
+
+
+def test_gap_beyond_the_lookup_window_is_not_refetched():
+    # Oct 2026: these re-fetched 200 episodes every run for nothing — Apple's
+    # lookup only returns the newest 200, and we already have them.
+    assert refresh_limit(1331, 199, '2026-10-02', '2026-10-02') is None   # Living on Earth
+    assert refresh_limit(485, 201, '2026-10-05', '2026-10-05') is None    # The Most Important Question
+    assert refresh_limit(983, 855, '2026-10-08', '2026-10-08') is None    # SunCast, RSS-backfilled
+    # ...but a show first scraped with 50 still gets its 200.
+    assert refresh_limit(485, 50, '2026-10-05', '2026-10-05') == 200
+    # A real gap inside the window is still fetched.
+    assert refresh_limit(114, 101, '2026-10-01', '2026-10-01') == 200
+    # A new episode on a show with a big trackCount gap gets the short fetch.
+    assert refresh_limit(1331, 199, '2026-10-08', '2026-10-02') == RECENT_REFRESH_LIMIT
