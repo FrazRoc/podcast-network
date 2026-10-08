@@ -647,9 +647,18 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   one) and a `parent` column. Review files and undo snapshots
   (`tree_draft.csv`, `tree_draft_by_broad.md`, `tree_undo_*.json`) are in
   the topic-pilots folder.
+- **The tagger uses the cleaned vocabulary** (Oct 2026): `extract_topics.py`
+  shows the model every topic on 5+ episodes plus the broad topics (~1,460,
+  ~7k prompt tokens per 40-episode request), one line per broad topic, and
+  asks for the most specific existing topic. A topic it creates anyway gets
+  a parent by `topic_names.pick_parent()` (the hierarchy's in-order wording
+  rule, `WEAK_PARENTS` skipped, subject before place). `export` writes the
+  same prompt to `system_prompt.txt` beside the item files for tagging by
+  hand. New episodes are **not** tagged on a schedule yet: `scrape.yml` has
+  no topics step (234 untagged on Oct 8 2026, ~$0.34 by API).
 - Not yet:
   topic merge suggestions; parents for the ~9,000 tail topics with no
-  wording match.
+  wording match; a scheduled tagging step.
 
 ## Tests
 
