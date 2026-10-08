@@ -666,9 +666,16 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   `topic_stats.broad_of_sql(seed)` maps tags to their nearest broad topic
   for all of these. Oct 2026 reading: "Electricity demand and data centers"
   went from 1% of tagged episodes before 2025 to 6% since.
+- **Orphan tail placed** (Oct 2026): the 9,257 visible topics with no
+  parent were read by hand in 16 chunks, each with a hint from its
+  episode's other topics' broad topic (right ~40% of the time; places,
+  sales/self-help on solar shows, health/AI/finance/trade were the usual
+  misses). 8,281 went under a broad topic, 93 under a specific one, 23
+  merged, 55 not a topic; 805 one-offs with no sensible home (jiu jitsu,
+  "bureaucracy") stay orphaned. 14,117 of 14,936 visible topics now have a
+  parent. Files and undo: `orphans_draft*.{csv,md}`, `orphans_undo_*.json`.
 - Not yet:
-  topic merge suggestions; parents for the ~9,000 tail topics with no
-  wording match; a scheduled tagging step.
+  topic merge suggestions; a scheduled tagging step.
 
 ## Tests
 
