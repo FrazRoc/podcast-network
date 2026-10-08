@@ -2,7 +2,7 @@ import ProfileLayout, { Section, Stat, MiniBars, ShowMore, ShowThumb } from './P
 import OrgLogo from './OrgLogo';
 import AdminEditLink from './AdminEditLink';
 import { TopicChip, Swatch, categoryColor } from './Topics';
-import { useProfile, personHref, orgHref, showHref, avatarUrl, fmtDate, fmtMonthYear, plural, imageUrl, imageFallback } from '../profileUtils';
+import { useProfile, personHref, orgHref, showHref, topicHref, slugify, avatarUrl, fmtDate, fmtMonthYear, plural, imageUrl, imageFallback } from '../profileUtils';
 
 const describe = (t) => [t.name,
   `Who talks about ${t.name} on clean-energy podcasts: ${plural(t.totals.guests, 'guest')} across `
@@ -42,9 +42,15 @@ export default function TopicPage() {
       {(t) => (
         <>
           <section className="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6">
-            <p className="text-xs font-medium uppercase tracking-wide flex items-center gap-1.5" style={{ color: categoryColor(t.category) }}>
+            <p className="text-xs font-medium uppercase tracking-wide flex flex-wrap items-center gap-1.5" style={{ color: categoryColor(t.category) }}>
               <Swatch category={t.category} className="w-2.5 h-2.5" />
               <a href={`/topics?category=${encodeURIComponent(t.category)}`} className="hover:underline">{t.category}</a>
+              {(t.ancestors || []).map(a => (
+                <span key={a.tag_id} className="flex items-center gap-1.5">
+                  <span className="text-gray-300">›</span>
+                  <a href={topicHref(a.tag_id, a.slug || slugify(a.name))} className="hover:underline">{a.name}</a>
+                </span>
+              ))}
             </p>
             <h1 className="mt-1 text-2xl font-bold text-gray-900">{t.name}</h1>
             <AdminEditLink href={`/admin/topics?tag_id=${t.tag_id}`} />
@@ -52,7 +58,7 @@ export default function TopicPage() {
               <p className="mt-1 text-sm text-gray-500">Also written as {t.aliases.join(', ')}</p>
             )}
             <p className="mt-3 text-[11px] text-gray-400">
-              Read from episode descriptions; topics are still being added across the archive, so these counts will grow.
+              Read from episode descriptions{t.children_total > 0 && `; counts include the ${plural(t.children_total, 'topic')} under it`}.
             </p>
           </section>
 
@@ -62,6 +68,15 @@ export default function TopicPage() {
             <Stat label="Shows" value={t.totals.shows} />
             <Stat label="Latest" value={fmtMonthYear(t.totals.last_date) || '—'} />
           </div>
+
+          {t.children?.length > 0 && (
+            <Section title={t.is_broad ? 'Topics in this area' : 'Narrower topics'}
+              aside={t.children_total > t.children.length ? `top ${t.children.length} of ${t.children_total}` : 'episodes'}>
+              <div className="flex flex-wrap gap-1.5">
+                {t.children.map(c => <TopicChip key={c.tag_id} topic={c} count={c.episodes} />)}
+              </div>
+            </Section>
+          )}
 
           <People title="Who talks about it" people={t.guests} aside="guests" />
 

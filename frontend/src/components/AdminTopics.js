@@ -11,14 +11,17 @@ import { CompanyPicker } from './AdminCompanies';
 // Topic Admin: rename topics, change their category, mark ones that aren't
 // really topics, and merge duplicates ("geothermal" into "geothermal
 // energy"). A merge moves the episodes and every spelling, so the tagger
-// files future mentions under the survivor. Company and person tags ("Tesla",
+// files future mentions under the survivor. A narrower subject isn't a
+// duplicate: set the topic it sits under instead ("home batteries" under
+// "Energy storage and batteries"); broad topics are the level under the
+// twelve categories. Company and person tags ("Tesla",
 // "Joe Manchin") aren't topics either: flag them and link the company or
 // person, and they move to that page.
 
 const API = `${API_BASE_URL}/api/admin/topics`;
 
-const VIEWS = [{ id: 'active', label: 'Topics' }, { id: 'company', label: 'Companies' }, { id: 'person', label: 'People' },
-  { id: 'not_topic', label: 'Not a topic' }];
+const VIEWS = [{ id: 'active', label: 'Topics' }, { id: 'broad', label: 'Broad topics' }, { id: 'company', label: 'Companies' },
+  { id: 'person', label: 'People' }, { id: 'not_topic', label: 'Not a topic' }];
 
 // Search-as-you-type over people, for linking a person tag to a profile.
 function PersonPicker({ onPick }) {
@@ -113,6 +116,48 @@ function MergeBox({ topic, onMerged }) {
   );
 }
 
+// Where a topic sits: its parent (a broad topic, or a broader topic), set by
+// searching. The backend refuses a parent that would loop.
+function ParentBox({ topic, saving, onSave }) {
+  const [q, setQ] = useState('');
+  const [hits, setHits] = useState([]);
+  useEffect(() => {
+    if (q.trim().length < 2) { setHits([]); return undefined; }
+    const t = setTimeout(() => {
+      adminFetch(`${API}?q=${encodeURIComponent(q.trim())}&limit=12`).then(r => r.json())
+        .then(d => setHits((d.items || []).filter(i => i.tag_id !== topic.tag_id))).catch(() => setHits([]));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [q, topic.tag_id]);
+  return (
+    <div>
+      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Sits under</p>
+      {topic.parent_tag_id ? (
+        <p className="text-sm text-gray-700 mb-1">
+          <a href={`/admin/topics?tag_id=${topic.parent_tag_id}`} className="text-blue-700 hover:underline">{topic.parent_name}</a>
+          <button onClick={() => onSave({ parent_tag_id: 0 })} disabled={saving}
+            className="ml-2 text-xs text-gray-400 hover:text-red-600">remove</button>
+        </p>
+      ) : <p className="text-sm text-gray-400 mb-1">Nothing — a top-level topic</p>}
+      <input value={q} onChange={e => setQ(e.target.value)} placeholder="Move it under another topic…"
+        className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none" />
+      {hits.length > 0 && (
+        <ul className="mt-1 border border-gray-200 rounded-lg divide-y divide-gray-100 max-h-56 overflow-y-auto">
+          {hits.map(h => (
+            <li key={h.tag_id} className="px-3 py-1.5 flex items-center gap-2 text-sm">
+              <Swatch category={h.category} />
+              <span className="flex-1 truncate">{h.name}{h.is_broad && <span className="text-gray-400"> (broad)</span>}</span>
+              <span className="text-xs text-gray-400">{h.episodes}</span>
+              <button disabled={saving} onClick={() => { onSave({ parent_tag_id: h.tag_id }); setQ(''); setHits([]); }}
+                className="text-xs px-2 py-0.5 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">Put under</button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function TopicPanel({ tagId, onChanged, onClose }) {
   const [t, setT] = useState(null);
   const [name, setName] = useState('');
@@ -174,7 +219,28 @@ function TopicPanel({ tagId, onChanged, onClose }) {
             onChange={e => save({ not_a_topic: e.target.checked })} />
           Not a topic (hide everywhere)
         </label>
+        <label className="flex items-center gap-1.5 text-gray-500">
+          <input type="checkbox" checked={t.is_broad} disabled={saving}
+            onChange={e => save({ is_broad: e.target.checked })} />
+          Broad topic
+        </label>
       </div>
+      {!t.is_company && !t.is_person && !t.not_a_topic && (
+        <ParentBox topic={t} saving={saving} onSave={save} />
+      )}
+      {t.children?.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+            Under it ({t.children.length}{t.children.length === 200 ? '+' : ''})
+          </p>
+          <div className="flex flex-wrap gap-1 max-h-32 overflow-y-auto">
+            {t.children.map(c => (
+              <a key={c.tag_id} href={`/admin/topics?tag_id=${c.tag_id}`}
+                className="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-700 hover:bg-gray-200">{c.name} {c.episodes}</a>
+            ))}
+          </div>
+        </div>
+      )}
       {/* Companies aren't topics: a company tag leaves the topic pages and
           is listed on its organisation's page instead. */}
       <div className="space-y-2 text-sm">
@@ -327,6 +393,7 @@ export default function AdminTopics() {
                         </div>
                         <p className="text-xs text-gray-400 pl-4">
                           {t.category || 'No category'}{t.alias_count > 1 && ` · ${t.alias_count} spellings`}
+                          {t.is_broad && ' · broad'}{t.parent_name && ` · under ${t.parent_name}`}
                           {view === 'company' && (t.org_name ? ` · → ${t.org_name}` : ' · not linked')}
                           {view === 'person' && (t.host_name ? ` · → ${t.host_name}` : ' · not linked')}
                         </p>
@@ -342,7 +409,7 @@ export default function AdminTopics() {
               <TopicPanel key={selected} tagId={selected} onChanged={load} onClose={() => setSelected(null)} />
             ) : (
               <div className="bg-white rounded-2xl border border-gray-200 p-6 text-sm text-gray-400">
-                Pick a topic to rename it, change its category, mark it not a topic, or merge a duplicate into it.
+                Pick a topic to rename it, change its category, mark it not a topic, set the topic it sits under, or merge a duplicate into it.
               </div>
             )}
           </div>
