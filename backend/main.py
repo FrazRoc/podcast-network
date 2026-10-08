@@ -40,7 +40,7 @@ import profiles
 import topics
 import topic_stats
 from topic_names import CATEGORIES, normalize_topic
-from topic_merge import merge_tags, rename_conflict, rename_tag
+from topic_merge import merge_tags, rename_conflict, rename_tag, would_cycle
 import x_avatars
 
 load_dotenv()
@@ -4384,7 +4384,8 @@ def people_directory(q: str = "", kind: str = "", sort: str = "appearances",
                            offset: int = 0, limit: int = 50, topic: str = ""):
     """Everyone credited on an episode, for the /people directory: search by
     name or company, filter by the kind of role (or hosts) or by a topic
-    they have talked about, sort by appearances, most recent or name."""
+    they have talked about (or any topic under it), sort by appearances,
+    most recent or name."""
     rows = _directory_index('people', _build_people_directory)
     # The page sends topic= when no topic is chosen; an empty or non-numeric
     # value means no topic filter rather than a 422.
@@ -4394,8 +4395,9 @@ def people_directory(q: str = "", kind: str = "", sort: str = "appearances",
         conn = get_db_connection()
         cur = conn.cursor()
         try:
+            ids, _ = _topic_tree(cur, topic)  # the topic and everything under it
             cur.execute("""SELECT DISTINCT eh.host_id FROM episode_tag et
-                           JOIN episode_host eh ON eh.episode_id = et.episode_id WHERE et.tag_id = %s""", (topic,))
+                           JOIN episode_host eh ON eh.episode_id = et.episode_id WHERE et.tag_id = ANY(%s)""", (ids,))
             on_topic = {r['host_id'] for r in cur.fetchall()}
             cur.execute("SELECT tag_id, name FROM tags WHERE tag_id = %s", (topic,))
             topic_row = cur.fetchone()
@@ -4481,46 +4483,79 @@ def search_profiles(q: str = "", limit: int = 8):
 # in topics.py; spellings and categories in topic_names.py.
 # ==================================================================
 
+# Every (topic, ancestor) pair, the topic itself included: a topic's counts
+# are the episodes of everything under it, each episode once. Depth-capped
+# so a bad parent loop can't run away.
+_TOPIC_ANCESTORS_SQL = """
+    WITH RECURSIVE anc(tag_id, ancestor_id, depth) AS (
+        SELECT tag_id, tag_id, 0 FROM tags
+        UNION ALL
+        SELECT a.tag_id, t.parent_tag_id, a.depth + 1
+        FROM anc a JOIN tags t ON t.tag_id = a.ancestor_id
+        WHERE t.parent_tag_id IS NOT NULL AND a.depth < 10
+    )
+"""
+
+
 def _build_topic_directory(cur) -> list:
-    """Every topic (not those marked "not a topic") with its counts. Hosts
-    and guests both count as people talking about it."""
-    cur.execute("""
-        SELECT t.tag_id, t.name, t.category,
+    """Every topic (not those marked "not a topic") with its counts,
+    including the episodes of the narrower topics under it. Hosts and
+    guests both count as people talking about it."""
+    cur.execute(_TOPIC_ANCESTORS_SQL + """
+        SELECT t.tag_id, t.name, t.category, t.parent_tag_id, t.is_broad,
                COUNT(DISTINCT et.episode_id) AS episodes,
                COUNT(DISTINCT et.episode_id) FILTER (WHERE et.is_primary) AS as_main_topic,
+               COUNT(DISTINCT et.episode_id) FILTER (WHERE a.depth = 0) AS own_episodes,
                COUNT(DISTINCT e.podcast_id) AS shows, MAX(e.published_date) AS last_date
         FROM tags t
-        JOIN episode_tag et ON et.tag_id = t.tag_id
+        JOIN anc a ON a.ancestor_id = t.tag_id
+        JOIN episode_tag et ON et.tag_id = a.tag_id
         JOIN episodes e ON e.episode_id = et.episode_id
         WHERE NOT t.not_a_topic AND NOT t.is_company AND NOT t.is_person
-        GROUP BY t.tag_id, t.name, t.category
+        GROUP BY t.tag_id, t.name, t.category, t.parent_tag_id, t.is_broad
     """)
     rows = cur.fetchall()
-    cur.execute("""
-        SELECT et.tag_id, COUNT(DISTINCT eh.host_id) AS people,
+    cur.execute(_TOPIC_ANCESTORS_SQL + """
+        SELECT a.ancestor_id AS tag_id, COUNT(DISTINCT eh.host_id) AS people,
                COUNT(DISTINCT eh.host_id) FILTER (WHERE eh.is_guest) AS guests
-        FROM episode_tag et JOIN episode_host eh ON eh.episode_id = et.episode_id
-        GROUP BY et.tag_id
+        FROM anc a
+        JOIN episode_tag et ON et.tag_id = a.tag_id
+        JOIN episode_host eh ON eh.episode_id = et.episode_id
+        GROUP BY a.ancestor_id
     """)
     people = {r['tag_id']: r for r in cur.fetchall()}
     cur.execute("SELECT tag_id, array_agg(alias_name ORDER BY alias_name) AS aliases FROM tag_aliases GROUP BY tag_id")
     aliases = {r['tag_id']: r['aliases'] for r in cur.fetchall()}
+    children = {}
+    for r in rows:
+        if r['parent_tag_id']:
+            children[r['parent_tag_id']] = children.get(r['parent_tag_id'], 0) + 1
     out = []
     for r in rows:
         p = people.get(r['tag_id'], {})
         out.append({**r, 'slug': profiles.slugify(r['name']),
                     'people': p.get('people', 0), 'guests': p.get('guests', 0),
+                    'children': children.get(r['tag_id'], 0),
                     'aliases': [a for a in aliases.get(r['tag_id'], []) if a != r['name']]})
     return out
 
 
 @app.get("/api/topics")
 def topic_directory(q: str = "", category: str = "", sort: str = "episodes",
-                    offset: int = 0, limit: int = 100, all: bool = False):
+                    offset: int = 0, limit: int = 100, all: bool = False, parent: int = 0):
     """Topics for the /topics directory: search by name or other spelling,
-    filter by category, sort by episodes, people, most recent or name. A
-    topic on a single episode is left out unless all=true (Topic Admin)."""
-    rows = _directory_index('topics', _build_topic_directory)
+    filter by category, sort by episodes, people, most recent or name;
+    parent= lists the topics directly under one topic. Counts include the
+    topics under each one. A topic on a single episode is left out unless
+    all=true (Topic Admin). `broad` is every broad topic, for browsing."""
+    all_rows = _directory_index('topics', _build_topic_directory)
+    order = {c: i for i, c in enumerate(CATEGORIES)}
+    broad = sorted(({k: r[k] for k in ('tag_id', 'name', 'slug', 'category', 'episodes', 'children')}
+                    for r in all_rows if r['is_broad']),
+                   key=lambda r: (order.get(r['category'], len(order)), -r['episodes'], r['name']))
+    rows = all_rows
+    if parent:
+        rows = [r for r in rows if r['parent_tag_id'] == parent]
     if not all:
         rows = [r for r in rows if r['episodes'] >= topics.MIN_PUBLIC_EPISODES]
     # Other spellings are a list; search them as one string.
@@ -4528,50 +4563,83 @@ def topic_directory(q: str = "", category: str = "", sort: str = "episodes",
     page = profiles.directory_page(
         rows, q=q, fields=('name', 'aliases_text'), group_field='category', group=category,
         sort=sort, default_sort='episodes', offset=offset, limit=limit)
-    order = {c: i for i, c in enumerate(CATEGORIES)}
     return {
         'total': page['total'],
         'rows': [{k: v for k, v in r.items() if k != 'aliases_text'} for r in page['rows']],
         'categories': sorted(({'category': c, 'count': n} for c, n in page['counts'].items() if c),
                              key=lambda c: order.get(c['category'], len(order))),
+        'broad': broad,
     }
+
+
+# A topic's episodes, everything under it included, each episode once
+# (main topic if it was for any of them). Takes one parameter: the tag ids.
+_TOPIC_EPISODES_SQL = """(SELECT episode_id, bool_or(is_primary) AS is_primary
+                         FROM episode_tag WHERE tag_id = ANY(%s) GROUP BY episode_id)"""
+
+
+def _topic_tree(cur, tag_id: int) -> tuple:
+    """(the tag and every tag under it, the tags above it from the top
+    down as {tag_id, name, is_broad})."""
+    cur.execute("""
+        WITH RECURSIVE down(id, depth) AS (
+            SELECT %s::int, 0
+            UNION ALL
+            SELECT t.tag_id, down.depth + 1 FROM tags t JOIN down ON t.parent_tag_id = down.id
+            WHERE down.depth < 10
+        )
+        SELECT DISTINCT id FROM down
+    """, (tag_id,))
+    ids = [r['id'] for r in cur.fetchall()]
+    cur.execute("""
+        WITH RECURSIVE up(id, depth) AS (
+            SELECT parent_tag_id, 1 FROM tags WHERE tag_id = %s AND parent_tag_id IS NOT NULL
+            UNION ALL
+            SELECT t.parent_tag_id, up.depth + 1 FROM tags t JOIN up ON t.tag_id = up.id
+            WHERE t.parent_tag_id IS NOT NULL AND up.depth < 10
+        )
+        SELECT t.tag_id, t.name, t.is_broad FROM up JOIN tags t ON t.tag_id = up.id
+        WHERE t.tag_id <> %s ORDER BY up.depth DESC
+    """, (tag_id, tag_id))
+    return ids, cur.fetchall()
 
 
 @app.get("/api/topics/{tag_id}")
 def get_topic(tag_id: int):
     """A topic's public page: the people who talk about it (guests and hosts
     apart), the shows that cover it, the organisations its guests come from,
-    episodes per year, related topics and recent episodes."""
+    episodes per year, related topics and recent episodes — counting the
+    episodes of every topic under it, each once. Also the topics above it
+    (breadcrumb) and directly under it."""
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT tag_id, name, category, not_a_topic, is_company, is_person FROM tags WHERE tag_id = %s",
-                    (tag_id,))
+        cur.execute("""SELECT tag_id, name, category, not_a_topic, is_company, is_person, is_broad
+                       FROM tags WHERE tag_id = %s""", (tag_id,))
         tag = cur.fetchone()
         if not tag or tag['not_a_topic'] or tag['is_company'] or tag['is_person']:
             raise HTTPException(status_code=404, detail="Topic not found")
+        ids, ancestors = _topic_tree(cur, tag_id)
 
         cur.execute("""
             SELECT e.episode_id, e.title AS episode_title, e.published_date, e.apple_episode_id,
                    p.podcast_id, p.title AS podcast_title, p.apple_podcast_id, p.cover_art_url,
                    et.is_primary
-            FROM episode_tag et
+            FROM """ + _TOPIC_EPISODES_SQL + """ et
             JOIN episodes e ON e.episode_id = et.episode_id
             JOIN podcasts p ON p.podcast_id = e.podcast_id
-            WHERE et.tag_id = %s
             ORDER BY e.published_date DESC NULLS LAST, e.episode_id DESC
-        """, (tag_id,))
+        """, (ids,))
         eps = cur.fetchall()
         primary = {r['episode_id'] for r in eps if r['is_primary']}
 
         cur.execute("""
             SELECT eh.host_id, h.first_name || ' ' || h.last_name AS name, h.profile_image_url,
                    eh.is_guest, et.episode_id, et.is_primary
-            FROM episode_tag et
+            FROM """ + _TOPIC_EPISODES_SQL + """ et
             JOIN episode_host eh ON eh.episode_id = et.episode_id
             JOIN hosts h ON h.host_id = eh.host_id
-            WHERE et.tag_id = %s
-        """, (tag_id,))
+        """, (ids,))
         credits = cur.fetchall()
         roles = _all_current_roles(cur)
 
@@ -4589,18 +4657,17 @@ def get_topic(tag_id: int):
         cur.execute("""
             SELECT o.org_id, o.name, COUNT(DISTINCT ha.host_id) AS people,
                    COUNT(DISTINCT ha.episode_id) AS episodes
-            FROM episode_tag et
+            FROM """ + _TOPIC_EPISODES_SQL + """ et
             JOIN episode_host eh ON eh.episode_id = et.episode_id AND eh.is_guest
             JOIN host_affiliations ha ON ha.episode_id = et.episode_id AND ha.host_id = eh.host_id
                                      AND NOT ha.is_former
             JOIN organization_aliases a ON a.normalized_name = ha.company_key
             JOIN organizations o ON o.org_id = a.org_id AND NOT o.not_an_org
-            WHERE et.tag_id = %s
-              AND NOT EXISTS (SELECT 1 FROM podcasts sp WHERE sp.org_id = o.org_id AND sp.org_is_show)
+            WHERE NOT EXISTS (SELECT 1 FROM podcasts sp WHERE sp.org_id = o.org_id AND sp.org_is_show)
             GROUP BY o.org_id, o.name
             ORDER BY people DESC, episodes DESC, o.name
             LIMIT 15
-        """, (tag_id,))
+        """, (ids,))
         orgs = [{**r, 'slug': profiles.slugify(r['name'])} for r in cur.fetchall()]
 
         shows, by_year = {}, {}
@@ -4623,15 +4690,15 @@ def get_topic(tag_id: int):
 
         cur.execute("""
             SELECT t.tag_id, t.name, t.category, COUNT(DISTINCT et2.episode_id) AS episodes
-            FROM episode_tag et1
-            JOIN episode_tag et2 ON et2.episode_id = et1.episode_id AND et2.tag_id <> et1.tag_id
+            FROM """ + _TOPIC_EPISODES_SQL + """ et1
+            JOIN episode_tag et2 ON et2.episode_id = et1.episode_id AND NOT et2.tag_id = ANY(%s)
             JOIN tags t ON t.tag_id = et2.tag_id AND NOT t.not_a_topic AND NOT t.is_company AND NOT t.is_person
-            WHERE et1.tag_id = %s
+            WHERE NOT t.tag_id = ANY(%s)
             GROUP BY t.tag_id, t.name, t.category
             HAVING COUNT(DISTINCT et2.episode_id) >= 2
             ORDER BY episodes DESC, t.name
             LIMIT 12
-        """, (tag_id,))
+        """, (ids, ids, [a['tag_id'] for a in ancestors]))
         related = [{**r, 'slug': profiles.slugify(r['name'])} for r in cur.fetchall()]
 
         cur.execute("SELECT alias_name FROM tag_aliases WHERE tag_id = %s ORDER BY alias_name", (tag_id,))
@@ -4646,9 +4713,16 @@ def get_topic(tag_id: int):
                    'guests': names.get(r['episode_id'], [])} for r in eps[:20]]
 
         dates = [r['published_date'] for r in eps if r['published_date']]
+        under = sorted((r for r in _directory_index('topics', _build_topic_directory)
+                        if r['parent_tag_id'] == tag_id and r['episodes'] >= topics.MIN_PUBLIC_EPISODES),
+                       key=lambda r: (-r['episodes'], r['name']))
         return {
             'tag_id': tag['tag_id'], 'name': tag['name'], 'slug': profiles.slugify(tag['name']),
-            'category': tag['category'], 'aliases': aliases,
+            'category': tag['category'], 'aliases': aliases, 'is_broad': tag['is_broad'],
+            'ancestors': [{**a, 'slug': profiles.slugify(a['name'])} for a in ancestors],
+            'children': [{k: r[k] for k in ('tag_id', 'name', 'slug', 'category', 'episodes', 'children')}
+                         for r in under[:40]],
+            'children_total': len(under),
             'totals': {'episodes': len(eps), 'as_main_topic': len(primary),
                        'guests': len({c['host_id'] for c in credits if c['is_guest']}),
                        'shows': len(shows),
@@ -4675,6 +4749,8 @@ class TopicUpdateRequest(BaseModel):
     org_id: Optional[int] = None  # 0 unlinks
     is_person: Optional[bool] = None
     host_id: Optional[int] = None  # 0 unlinks
+    parent_tag_id: Optional[int] = None  # 0 clears
+    is_broad: Optional[bool] = None
 
 
 @app.get("/api/admin/topics", dependencies=[Depends(verify_admin)])
@@ -4690,7 +4766,8 @@ def list_topics_admin(q: str = "", category: str = "", view: str = "active",
     }
     where = {"company": ["NOT t.not_a_topic", "t.is_company"],
              "person": ["NOT t.not_a_topic", "t.is_person"],
-             "not_topic": ["t.not_a_topic"]}.get(view, ["NOT t.not_a_topic", "NOT t.is_company", "NOT t.is_person"])
+             "not_topic": ["t.not_a_topic"],
+             "broad": ["NOT t.not_a_topic", "t.is_broad"]}.get(view, ["NOT t.not_a_topic", "NOT t.is_company", "NOT t.is_person"])
     if category in CATEGORIES:
         where.append("t.category = %(category)s")
     if q.strip():
@@ -4702,11 +4779,13 @@ def list_topics_admin(q: str = "", category: str = "", view: str = "active",
         cur.execute(f"""
             SELECT t.tag_id, t.name, t.category, t.not_a_topic, t.is_company, t.org_id, o.name AS org_name,
                    t.is_person, t.host_id, h.first_name || ' ' || h.last_name AS host_name, t.created_at,
+                   t.is_broad, t.parent_tag_id, pt.name AS parent_name,
                    (SELECT COUNT(*) FROM episode_tag et WHERE et.tag_id = t.tag_id) AS episodes,
                    (SELECT COUNT(*) FROM tag_aliases a WHERE a.tag_id = t.tag_id) AS alias_count,
                    COUNT(*) OVER () AS matching
             FROM tags t LEFT JOIN organizations o ON o.org_id = t.org_id
             LEFT JOIN hosts h ON h.host_id = t.host_id
+            LEFT JOIN tags pt ON pt.tag_id = t.parent_tag_id
             WHERE {' AND '.join(where)}
             ORDER BY {sort_map.get(sort, sort_map['episodes_desc'])}
             LIMIT %(limit)s
@@ -4715,12 +4794,24 @@ def list_topics_admin(q: str = "", category: str = "", view: str = "active",
         cur.execute("SELECT COUNT(*) FILTER (WHERE NOT not_a_topic AND NOT is_company AND NOT is_person) AS active, "
                     "COUNT(*) FILTER (WHERE NOT not_a_topic AND is_company) AS company, "
                     "COUNT(*) FILTER (WHERE NOT not_a_topic AND is_person) AS person, "
-                    "COUNT(*) FILTER (WHERE not_a_topic) AS not_topic FROM tags")
+                    "COUNT(*) FILTER (WHERE not_a_topic) AS not_topic, "
+                    "COUNT(*) FILTER (WHERE NOT not_a_topic AND is_broad) AS broad FROM tags")
         return {"items": items, "totals": cur.fetchone(),
                 "total": items[0]['matching'] if items else 0, "categories": list(CATEGORIES)}
     finally:
         cur.close()
         conn.close()
+
+
+_ADMIN_TOPIC_SQL = """
+    SELECT t.tag_id, t.name, t.category, t.not_a_topic, t.is_company, t.org_id,
+           o.name AS org_name, t.is_person, t.host_id,
+           h.first_name || ' ' || h.last_name AS host_name, t.created_at,
+           t.is_broad, t.parent_tag_id, pt.name AS parent_name
+    FROM tags t LEFT JOIN organizations o ON o.org_id = t.org_id
+    LEFT JOIN hosts h ON h.host_id = t.host_id
+    LEFT JOIN tags pt ON pt.tag_id = t.parent_tag_id
+    WHERE t.tag_id = %s"""
 
 
 @app.get("/api/admin/topics/{tag_id}", dependencies=[Depends(verify_admin)])
@@ -4730,12 +4821,7 @@ def get_topic_admin(tag_id: int):
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("""SELECT t.tag_id, t.name, t.category, t.not_a_topic, t.is_company, t.org_id,
-                              o.name AS org_name, t.is_person, t.host_id,
-                              h.first_name || ' ' || h.last_name AS host_name, t.created_at
-                       FROM tags t LEFT JOIN organizations o ON o.org_id = t.org_id
-                       LEFT JOIN hosts h ON h.host_id = t.host_id WHERE t.tag_id = %s""",
-                    (tag_id,))
+        cur.execute(_ADMIN_TOPIC_SQL, (tag_id,))
         tag = cur.fetchone()
         if not tag:
             raise HTTPException(status_code=404, detail="Topic not found")
@@ -4752,7 +4838,11 @@ def get_topic_admin(tag_id: int):
             ORDER BY e.published_date DESC NULLS LAST
             LIMIT 500
         """, (tag_id,))
-        return {**tag, 'aliases': aliases, 'episodes': cur.fetchall(), 'categories': list(CATEGORIES)}
+        episodes = cur.fetchall()
+        cur.execute("""SELECT tag_id, name, (SELECT COUNT(*) FROM episode_tag et WHERE et.tag_id = t.tag_id) AS episodes
+                       FROM tags t WHERE parent_tag_id = %s ORDER BY episodes DESC, name LIMIT 200""", (tag_id,))
+        return {**tag, 'aliases': aliases, 'episodes': episodes, 'children': cur.fetchall(),
+                'categories': list(CATEGORIES)}
     finally:
         cur.close()
         conn.close()
@@ -4762,7 +4852,8 @@ def get_topic_admin(tag_id: int):
 def update_topic(tag_id: int, body: TopicUpdateRequest):
     """Rename a topic, change its category, mark it not a topic, or mark it
     a company or a person (and link the organisation or the person's
-    profile; org_id/host_id 0 unlinks). A new name
+    profile; org_id/host_id 0 unlinks); set the topic it sits under
+    (parent_tag_id, 0 clears; a loop is refused) or mark it a broad topic. A new name
     becomes another spelling of it; a name that is already another topic's
     spelling is refused (merge them instead)."""
     if body.category is not None and body.category not in CATEGORIES:
@@ -4803,13 +4894,18 @@ def update_topic(tag_id: int, body: TopicUpdateRequest):
                 if not cur.fetchone():
                     raise HTTPException(status_code=400, detail=f"No person #{body.host_id}")
             cur.execute("UPDATE tags SET host_id = %s WHERE tag_id = %s", (body.host_id or None, tag_id))
+        if body.parent_tag_id is not None:
+            if body.parent_tag_id:
+                cur.execute("SELECT 1 FROM tags WHERE tag_id = %s", (body.parent_tag_id,))
+                if not cur.fetchone():
+                    raise HTTPException(status_code=400, detail=f"No topic #{body.parent_tag_id}")
+                if would_cycle(cur, tag_id, body.parent_tag_id):
+                    raise HTTPException(status_code=400, detail="That topic is this one or sits under it")
+            cur.execute("UPDATE tags SET parent_tag_id = %s WHERE tag_id = %s", (body.parent_tag_id or None, tag_id))
+        if body.is_broad is not None:
+            cur.execute("UPDATE tags SET is_broad = %s WHERE tag_id = %s", (body.is_broad, tag_id))
         conn.commit()
-        cur.execute("""SELECT t.tag_id, t.name, t.category, t.not_a_topic, t.is_company, t.org_id,
-                              o.name AS org_name, t.is_person, t.host_id,
-                              h.first_name || ' ' || h.last_name AS host_name
-                       FROM tags t LEFT JOIN organizations o ON o.org_id = t.org_id
-                       LEFT JOIN hosts h ON h.host_id = t.host_id WHERE t.tag_id = %s""",
-                    (tag_id,))
+        cur.execute(_ADMIN_TOPIC_SQL, (tag_id,))
         return {"success": True, "topic": cur.fetchone()}
     finally:
         cur.close()

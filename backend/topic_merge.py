@@ -18,13 +18,35 @@ def merge_tags(cur, keep_id: int, drop_id: int) -> dict:
     """, (keep_id, drop_id))
     episodes_moved = cur.rowcount
     cur.execute("""
-        UPDATE tags k SET org_id = COALESCE(k.org_id, d.org_id), host_id = COALESCE(k.host_id, d.host_id)
+        UPDATE tags k SET org_id = COALESCE(k.org_id, d.org_id), host_id = COALESCE(k.host_id, d.host_id),
+                          is_broad = k.is_broad OR d.is_broad,
+                          parent_tag_id = NULLIF(COALESCE(NULLIF(k.parent_tag_id, d.tag_id), d.parent_tag_id),
+                                                 k.tag_id)
         FROM tags d WHERE k.tag_id = %s AND d.tag_id = %s
     """, (keep_id, drop_id))
+    # The dropped tag's narrower topics now sit under the survivor (a
+    # survivor that was itself under the dropped tag took its parent above).
+    cur.execute("UPDATE tags SET parent_tag_id = %s WHERE parent_tag_id = %s AND tag_id <> %s",
+                (keep_id, drop_id, keep_id))
     cur.execute("UPDATE tag_aliases SET tag_id = %s WHERE tag_id = %s", (keep_id, drop_id))
     aliases_moved = cur.rowcount
     cur.execute("DELETE FROM tags WHERE tag_id = %s", (drop_id,))  # cascades its episode_tag rows
     return {"episodes_moved": episodes_moved, "aliases_moved": aliases_moved}
+
+
+def would_cycle(cur, tag_id: int, parent_id: int) -> bool:
+    """True when parent_id is the tag itself or anything under it, so
+    making it the parent would loop."""
+    cur.execute("""
+        WITH RECURSIVE up(id, depth) AS (
+            SELECT %s::int, 0
+            UNION ALL
+            SELECT t.parent_tag_id, up.depth + 1 FROM tags t JOIN up ON t.tag_id = up.id
+            WHERE t.parent_tag_id IS NOT NULL AND up.depth < 20
+        )
+        SELECT 1 FROM up WHERE id = %s LIMIT 1
+    """, (parent_id, tag_id))
+    return cur.fetchone() is not None
 
 
 def rename_conflict(cur, tag_id: int, name: str):

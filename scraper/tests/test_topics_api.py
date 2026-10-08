@@ -252,3 +252,73 @@ def test_topic_stats_endpoints(db_conn, monkeypatch):
     _run(db_conn, monkeypatch, 'update_topic', tags['oil prices'], main_body(host_id=people['Bo']))
     assert _run(db_conn, monkeypatch, 'stats_most_discussed', kind='person')['items'] == []
     assert _run(db_conn, monkeypatch, 'stats_rising_topics')['rising'] == []
+
+
+def _hierarchy(db_conn, tags):
+    """A broad topic 'Energy' (no episodes of its own) over geothermal
+    energy and permitting reform; 'geothermal' under geothermal energy."""
+    cur = db_conn.cursor()
+    cur.execute("INSERT INTO tags (name, slug, category, is_broad) VALUES ('Energy', 'energy', 'Power generation', true) "
+                "RETURNING tag_id")
+    energy = cur.fetchone()[0]
+    cur.execute("INSERT INTO tag_aliases (tag_id, alias_name, normalized_name) VALUES (%s, 'Energy', 'energy')", (energy,))
+    cur.execute("UPDATE tags SET parent_tag_id = %s WHERE tag_id = ANY(%s)",
+                (energy, [tags['geothermal energy'], tags['permitting reform']]))
+    cur.execute("UPDATE tags SET parent_tag_id = %s WHERE tag_id = %s", (tags['geothermal energy'], tags['geothermal']))
+    db_conn.commit()
+    return energy
+
+
+def test_broad_topic_counts_everything_under_it(db_conn, monkeypatch):
+    _, people, eps, tags = _setup(db_conn)
+    energy = _hierarchy(db_conn, tags)
+    d = _run(db_conn, monkeypatch, 'topic_directory')
+    rows = {r['name']: r for r in d['rows']}
+    # Every episode is under Energy once, though it has none of its own.
+    assert (rows['Energy']['episodes'], rows['Energy']['own_episodes'], rows['Energy']['children']) == (4, 0, 2)
+    assert rows['Energy']['people'] == 3
+    # 'geothermal' (episode 3) is already on geothermal energy's episodes.
+    assert (rows['geothermal energy']['episodes'], rows['geothermal energy']['children']) == (3, 1)
+    assert [b['name'] for b in d['broad']] == ['Energy']
+    under = _run(db_conn, monkeypatch, 'topic_directory', parent=energy)
+    assert sorted(r['name'] for r in under['rows']) == ['geothermal energy', 'permitting reform']
+
+    t = _run(db_conn, monkeypatch, 'get_topic', energy)
+    assert t['is_broad'] and t['ancestors'] == []
+    assert (t['totals']['episodes'], t['totals']['guests']) == (4, 2)
+    assert [c['name'] for c in t['children']] == ['geothermal energy', 'permitting reform']
+    assert [e['episode_id'] for e in t['recent_episodes']] == list(reversed(eps))
+
+    g = _run(db_conn, monkeypatch, 'get_topic', tags['geothermal'])
+    assert [a['name'] for a in g['ancestors']] == ['Energy', 'geothermal energy']
+    ge = _run(db_conn, monkeypatch, 'get_topic', tags['geothermal energy'])
+    # Topics above or below it are not "discussed with" it.
+    assert 'geothermal' not in [r['name'] for r in ge['related']]
+    assert 'Energy' not in [r['name'] for r in ge['related']]
+
+    p = _run(db_conn, monkeypatch, 'people_directory', topic=str(energy))
+    assert p['total'] == 3
+
+
+def test_parent_loop_refused_and_merge_keeps_the_tree(db_conn, monkeypatch):
+    import main
+    _, _, _, tags = _setup(db_conn)
+    energy = _hierarchy(db_conn, tags)
+    with pytest.raises(main.HTTPException) as e:
+        _run(db_conn, monkeypatch, 'update_topic', energy, main.TopicUpdateRequest(parent_tag_id=tags['geothermal']))
+    assert e.value.status_code == 400
+    r = _run(db_conn, monkeypatch, 'update_topic', tags['oil prices'], main.TopicUpdateRequest(parent_tag_id=energy))
+    assert r['topic']['parent_name'] == 'Energy'
+
+    # Merging geothermal energy away: its child moves to the survivor.
+    _run(db_conn, monkeypatch, 'merge_topics', tags['permitting reform'], tags['geothermal energy'])
+    cur = db_conn.cursor()
+    cur.execute("SELECT parent_tag_id FROM tags WHERE tag_id = %s", (tags['geothermal'],))
+    assert cur.fetchone()[0] == tags['permitting reform']
+    cur.execute("SELECT parent_tag_id FROM tags WHERE tag_id = %s", (tags['permitting reform'],))
+    assert cur.fetchone()[0] == energy
+
+    # A survivor that sat under the dropped topic takes the dropped one's parent.
+    _run(db_conn, monkeypatch, 'merge_topics', tags['geothermal'], tags['permitting reform'])
+    cur.execute("SELECT parent_tag_id FROM tags WHERE tag_id = %s", (tags['geothermal'],))
+    assert cur.fetchone()[0] == energy
