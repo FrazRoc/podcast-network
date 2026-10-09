@@ -586,6 +586,23 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   (3,412 linked) and 7,494 person tags (5,708 linked); the reviewed lists and undo
   snapshots are in `~/Backups/podcast-network/topic-pilots/`. Org and
   person merges carry the tag link to the survivor.
+  Oct 9 2026 linking pass: 147 person and 149 company tags linked to
+  existing records by spelling (each checked against the episode text —
+  same-name strangers like Speaker Mike Johnson left out), then 206
+  organisations created for unlinked company tags on 2+ episodes (BYD,
+  Volkswagen, Electrek…, with types, car brands under their groups) and 24
+  existing sub-units given those parents. Ambiguous one-word brands got a
+  distinct name ("Slate Auto", "Bentley Motors") so a future guest's
+  "Slate" or "Bentley" isn't pulled in by alias. Person tags with no record
+  (mostly public figures) are deliberately left unlinked: a `hosts` row
+  would make the scanner credit them on every episode naming them. Undo:
+  `undo_link_tags_2026-10-09.json`, `undo_new_orgs_2026-10-09.json` in the
+  topic-pilots folder. Left: ~1,640 person and 1,138 company tags, nearly
+  all on one episode.
+- **Topic categories vs broad parents** are allowed to differ (26% do):
+  the category says what kind of topic it is ("solar tariffs": Policy),
+  the broad parent what it's about (Solar). Checked Oct 2026; aligning them
+  would make the Stats category charts less accurate.
 - **Rollups** (`backend/topics.py`, pure): an episode counts once per topic
   and its main topic counts twice; a person/show/org "talks about" a topic
   only at 2+ of their episodes (`MIN_EPISODES`); the public directory lists
