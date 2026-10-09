@@ -38,7 +38,7 @@ export function TopicCategoriesByYearChart() {
       partialYear={data.partial_year}
       share={(it, c) => (100 * (it.counts[c] || 0)) / (it.total || 1)}
       describeYear={(it, c) => `${it.year}: ${it.counts[c] || 0} of ${it.total} tagged episodes touched ${c.toLowerCase()}.`}
-      footnote="An episode counts once for each category its topics fall in, so the categories add up to more than 100%. Years with fewer than 40 tagged episodes are left out. * part year." />
+      footnote="An episode counts once for each category its topics fall in, so the categories add up to more than 100%. From 2019; years with fewer than 40 tagged episodes are left out. * part year." />
   );
 }
 
@@ -69,7 +69,7 @@ export function TopicAreasByYearChart() {
         partialYear={data.partial_year}
         share={(it, k) => (100 * (it.counts[k] || 0)) / (it.total || 1)}
         describeYear={(it, k) => `${it.year}: ${it.counts[k] || 0} of ${it.total} tagged episodes touched ${labels[k]}.`}
-        footnote="An episode counts once for each broad topic any of its topics sit under. Years with fewer than 40 tagged episodes are left out. * part year." />
+        footnote="An episode counts once for each broad topic any of its topics sit under. From 2019; years with fewer than 40 tagged episodes are left out. * part year." />
       <p className="text-xs text-gray-400 mt-1">
         {inCat.map((b, i) => (
           <span key={b.key}>{i ? ' · ' : 'Topic pages: '}<a href={topicHref(b.tag_id, b.slug)} className="hover:underline">{b.name}</a></span>

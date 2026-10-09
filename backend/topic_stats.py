@@ -39,10 +39,11 @@ def broad_of_sql(seed: str) -> str:
     """
 
 
-def category_by_year(cur, min_tagged: int = 40) -> dict:
+def category_by_year(cur, min_tagged: int = 40, first_year: int = 2019) -> dict:
     """Per year: tagged episodes, and how many of them touch each category
     (an episode counts once per category, however many of its topics fall
-    in it). Years with fewer than min_tagged tagged episodes are left out."""
+    in it). Years before first_year (2019, like the other by-year charts) or
+    with fewer than min_tagged tagged episodes are left out."""
     cur.execute("""
         SELECT EXTRACT(YEAR FROM e.published_date)::int AS year, COUNT(*) AS n
         FROM topic_extractions tx JOIN episodes e ON e.episode_id = tx.episode_id
@@ -63,11 +64,11 @@ def category_by_year(cur, min_tagged: int = 40) -> dict:
     for r in cur.fetchall():
         counts.setdefault(r['year'], {})[r['category']] = r['n']
     items = [{'year': y, 'total': totals[y], 'counts': counts.get(y, {})}
-             for y in sorted(totals) if totals[y] >= min_tagged]
+             for y in sorted(totals) if y >= first_year and totals[y] >= min_tagged]
     return {'categories': list(CATEGORIES), 'items': items, 'partial_year': date.today().year}
 
 
-def broad_by_year(cur, min_tagged: int = 40) -> dict:
+def broad_by_year(cur, min_tagged: int = 40, first_year: int = 2019) -> dict:
     """Per year: tagged episodes, and how many of them touch each broad
     topic (anything under it counts; an episode once per broad topic).
     Same shape as category_by_year, keyed by the broad topic's tag_id."""
@@ -95,7 +96,7 @@ def broad_by_year(cur, min_tagged: int = 40) -> dict:
                      'category': r['category']} for r in cur.fetchall()),
                    key=lambda b: (order.get(b['category'], len(order)), b['name']))
     items = [{'year': y, 'total': totals[y], 'counts': counts.get(y, {})}
-             for y in sorted(totals) if totals[y] >= min_tagged]
+             for y in sorted(totals) if y >= first_year and totals[y] >= min_tagged]
     return {'broad': broad, 'categories': list(CATEGORIES), 'items': items, 'partial_year': date.today().year}
 
 
