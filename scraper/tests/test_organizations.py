@@ -628,7 +628,18 @@ class TestCompanyLogo:
         monkeypatch.setattr(main, '_fetch_logo', fake_fetch)
         r = _run(org_db, monkeypatch, 'company_logo', acme)
         assert r.status_code == 200 and r.body == b'PNG'
-        assert _run(org_db, monkeypatch, 'company_logo', blank).status_code == 404
+        miss = _run(org_db, monkeypatch, 'company_logo', blank)
+        # No logo: a 1x1 transparent PNG (OrgLogo shows the initial), not a
+        # 404 that logs a console error per organisation.
+        assert miss.status_code == 200 and miss.media_type == 'image/png' and miss.headers['x-no-logo'] == '1'
+        import struct, zlib
+        b = miss.body
+        assert b[:8] == b'\x89PNG\r\n\x1a\n' and struct.unpack('>II', b[16:24]) == (1, 1)
+        i = 8
+        while i < len(b):      # every chunk's checksum is valid
+            n = struct.unpack('>I', b[i:i + 4])[0]
+            assert zlib.crc32(b[i + 4:i + 8 + n]) == struct.unpack('>I', b[i + 8 + n:i + 12 + n])[0]
+            i += 12 + n
 
 
 def test_wikimedia_photos_are_allowed_through_the_proxy():

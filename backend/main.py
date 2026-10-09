@@ -2225,6 +2225,15 @@ def skip_image(host_id: int):
 # the page shows the organisation's initial instead.
 
 LOGO_DEV_TOKEN = os.getenv("LOGO_DEV_TOKEN")
+def _png_1x1() -> bytes:
+    import struct, zlib
+    def chunk(kind, data):
+        return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data))
+    return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 1, 1, 8, 6, 0, 0, 0))
+            + chunk(b'IDAT', zlib.compress(b'\x00\x00\x00\x00\x00')) + chunk(b'IEND', b''))
+
+
+_NO_LOGO_PNG = _png_1x1()   # transparent, for an organisation with no logo
 _LOGO_CACHE: "OrderedDict[tuple, tuple | None]" = OrderedDict()
 _LOGO_CACHE_MAX = 3000
 _LOGO_UA = 'PodcastNetwork/1.0 (https://github.com/FrazRoc/podcast-network) logo fetcher'
@@ -2283,8 +2292,12 @@ async def company_logo(org_id: int):
         if len(_LOGO_CACHE) > _LOGO_CACHE_MAX:
             _LOGO_CACHE.popitem(last=False)
     if not hit:
-        # Cached briefly by browsers too, so a page of initials doesn't re-ask.
-        return Response(status_code=404, headers={'Cache-Control': 'public, max-age=86400'})
+        # A 1x1 transparent PNG, not a 404: a 404 logs a console error for every
+        # organisation without a logo, and OrgLogo shows the initial for an
+        # image this small. Cached by browsers for a day, so a page of initials
+        # doesn't re-ask.
+        return Response(content=_NO_LOGO_PNG, media_type='image/png',
+                        headers={'Cache-Control': 'public, max-age=86400', 'X-No-Logo': '1'})
     content, ctype = hit
     return Response(content=content, media_type=ctype,
                     headers={'Cache-Control': 'public, max-age=604800', 'Access-Control-Allow-Origin': '*'})
