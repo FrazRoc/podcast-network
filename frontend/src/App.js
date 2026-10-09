@@ -1,15 +1,4 @@
-import PodcastHostNetwork from './components/PodcastHostNetwork';
-import AdminSuggestions from './components/AdminSuggestions';
-import AdminSuggestionsList from './components/AdminSuggestionsList';
-import AdminImages from './components/AdminImages';
-import AdminPeople from './components/AdminPeople';
-import AdminCompanies from './components/AdminCompanies';
-import AdminShows from './components/AdminShows';
-import AdminEpisodes from './components/AdminEpisodes';
-import AdminDuplicates from './components/AdminDuplicates';
-import AdminDiagnostics from './components/AdminDiagnostics';
-import AdminLoginGate from './components/AdminLoginGate';
-import Stats from './components/Stats';
+import { lazy, Suspense } from 'react';
 import SiteHeader from './components/SiteHeader';
 import PersonPage from './components/PersonPage';
 import OrgPage from './components/OrgPage';
@@ -19,14 +8,33 @@ import OrgDirectory from './components/OrgDirectory';
 import ShowDirectory from './components/ShowDirectory';
 import TopicDirectory from './components/TopicDirectory';
 import TopicPage from './components/TopicPage';
-import AdminTopics from './components/AdminTopics';
 import NotFound from './components/NotFound';
+
+// The admin pages load only on /admin: they were most of the bundle every
+// visitor downloaded (site review, Oct 2026).
+const AdminSuggestions = lazy(() => import('./components/AdminSuggestions'));
+const AdminSuggestionsList = lazy(() => import('./components/AdminSuggestionsList'));
+const AdminImages = lazy(() => import('./components/AdminImages'));
+const AdminPeople = lazy(() => import('./components/AdminPeople'));
+const AdminCompanies = lazy(() => import('./components/AdminCompanies'));
+const AdminShows = lazy(() => import('./components/AdminShows'));
+const AdminEpisodes = lazy(() => import('./components/AdminEpisodes'));
+const AdminDuplicates = lazy(() => import('./components/AdminDuplicates'));
+const AdminDiagnostics = lazy(() => import('./components/AdminDiagnostics'));
+const AdminTopics = lazy(() => import('./components/AdminTopics'));
+const AdminLoginGate = lazy(() => import('./components/AdminLoginGate'));
+const Stats = lazy(() => import('./components/Stats'));
+// The graph library is only needed on the home page.
+const PodcastHostNetwork = lazy(() => import('./components/PodcastHostNetwork'));
+
+const Loading = () => <div className="p-6 text-sm text-gray-400">Loading…</div>;
+const later = (el) => <Suspense fallback={<Loading />}>{el}</Suspense>;
 
 function App() {
   const path = window.location.pathname;
 
   if (path === '/stats' || path.startsWith('/stats/'))
-    return <Stats />;
+    return later(<Stats />);
   // Public directories: /people, /orgs, /shows (a trailing slash too).
   const dir = path.replace(/\/+$/, '');
   if (dir === '/people')
@@ -47,32 +55,32 @@ function App() {
   if (path.startsWith('/topics/'))
     return <TopicPage />;
   if (path === '/admin/suggestions/list')
-    return <AdminLoginGate><div className="w-full min-h-screen"><AdminSuggestionsList /></div></AdminLoginGate>;
+    return later(<AdminLoginGate><div className="w-full min-h-screen"><AdminSuggestionsList /></div></AdminLoginGate>);
   if (path === '/admin/images' || path.startsWith('/admin/images/'))
-    return <AdminLoginGate><div className="w-full min-h-screen"><AdminImages /></div></AdminLoginGate>;
+    return later(<AdminLoginGate><div className="w-full min-h-screen"><AdminImages /></div></AdminLoginGate>);
   if (path === '/admin/people' || path.startsWith('/admin/people/'))
-    return <AdminLoginGate><div className="w-full min-h-screen"><AdminPeople /></div></AdminLoginGate>;
+    return later(<AdminLoginGate><div className="w-full min-h-screen"><AdminPeople /></div></AdminLoginGate>);
   if (path === '/admin/companies' || path.startsWith('/admin/companies/'))
-    return <AdminLoginGate><div className="w-full min-h-screen"><AdminCompanies /></div></AdminLoginGate>;
+    return later(<AdminLoginGate><div className="w-full min-h-screen"><AdminCompanies /></div></AdminLoginGate>);
   if (path === '/admin/diagnostics' || path.startsWith('/admin/diagnostics/'))
-    return <AdminLoginGate><div className="w-full min-h-screen"><AdminDiagnostics /></div></AdminLoginGate>;
+    return later(<AdminLoginGate><div className="w-full min-h-screen"><AdminDiagnostics /></div></AdminLoginGate>);
   if (path === '/admin/duplicates' || path.startsWith('/admin/duplicates/'))
-    return <AdminLoginGate><div className="w-full min-h-screen"><AdminDuplicates /></div></AdminLoginGate>;
+    return later(<AdminLoginGate><div className="w-full min-h-screen"><AdminDuplicates /></div></AdminLoginGate>);
   if (path === '/admin/shows' || path.startsWith('/admin/shows/'))
-    return <AdminLoginGate><div className="w-full min-h-screen"><AdminShows /></div></AdminLoginGate>;
+    return later(<AdminLoginGate><div className="w-full min-h-screen"><AdminShows /></div></AdminLoginGate>);
   if (path === '/admin/topics' || path.startsWith('/admin/topics/'))
-    return <AdminLoginGate><div className="w-full min-h-screen"><AdminTopics /></div></AdminLoginGate>;
+    return later(<AdminLoginGate><div className="w-full min-h-screen"><AdminTopics /></div></AdminLoginGate>);
   if (path === '/admin/episodes' || path.startsWith('/admin/episodes/'))
-    return <AdminLoginGate><div className="w-full min-h-screen"><AdminEpisodes /></div></AdminLoginGate>;
+    return later(<AdminLoginGate><div className="w-full min-h-screen"><AdminEpisodes /></div></AdminLoginGate>);
   if (path === '/admin' || path.startsWith('/admin/'))
-    return <AdminLoginGate><div className="w-full min-h-screen"><AdminSuggestions /></div></AdminLoginGate>;
+    return later(<AdminLoginGate><div className="w-full min-h-screen"><AdminSuggestions /></div></AdminLoginGate>);
   if (dir !== '' && dir !== '/index.html')
     return <NotFound />;
   return (
     <div className="w-full h-screen overflow-hidden flex flex-col">
       <SiteHeader />
       <div className="flex-1 min-h-0">
-        <PodcastHostNetwork />
+        {later(<PodcastHostNetwork />)}
       </div>
     </div>
   );
