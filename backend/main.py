@@ -380,7 +380,7 @@ extra_origins = [o.strip() for o in os.getenv("ADDITIONAL_ALLOWED_ORIGINS", "").
 # forth between pages is then instant). Admins' pages fetch with no-cache, so
 # an edit shows up on the next load.
 _PUBLIC_CACHEABLE_RE = re.compile(
-    r'^/api/(?:(?:people|orgs|shows)/\d+/profile|(?:people|shows)/\d+/similar|directory/[a-z]+|search|show-orgs|topics(?:/\d+(?:/members)?)?|stats/[a-z-]+)$')
+    r'^/api/(?:(?:people|orgs|shows)/\d+/profile|(?:people|shows)/\d+/similar|host-connections|show-connections|directory/[a-z]+|search|show-orgs|topics(?:/\d+(?:/members)?)?|stats/[a-z-]+)$')
 
 
 @app.middleware("http")
@@ -395,7 +395,38 @@ async def _cache_headers_and_freshness(request, call_next):
     if request.method != 'GET' and request.url.path.startswith('/api/admin/') and response.status_code < 400:
         _ROLES_CACHE.clear()
         _expire_directories()
+        _STATS_CACHE.clear()
     return response
+
+
+# Stats responses, by full URL (query included), for _STATS_TTL seconds.
+# Each chart is a whole-database aggregate (1-5 s apiece, ~16 s for the
+# page), and the data only moves with a scrape, so an hour is fine; an admin
+# edit clears it. Admins' no-cache fetches still read the cache — the
+# browser header is what they bypass.
+_STATS_TTL = 3600
+_STATS_CACHE: dict = {}
+
+
+@app.middleware("http")
+async def _stats_cache(request, call_next):
+    from fastapi.responses import Response
+    if request.method != 'GET' or not request.url.path.startswith('/api/stats/'):
+        return await call_next(request)
+    key = str(request.url.path) + '?' + str(request.url.query)
+    hit = _STATS_CACHE.get(key)
+    if hit and time.monotonic() - hit[0] < _STATS_TTL:
+        return Response(content=hit[1], media_type=hit[2], headers={'Cache-Control': 'public, max-age=300'})
+    response = await call_next(request)
+    if response.status_code != 200:
+        return response
+    body = b''.join([chunk async for chunk in response.body_iterator])
+    media = response.headers.get('content-type', 'application/json')
+    if len(_STATS_CACHE) > 500:      # arbitrary query strings can't grow it without bound
+        _STATS_CACHE.clear()
+    _STATS_CACHE[key] = (time.monotonic(), body, media)
+    return Response(content=body, media_type=media, headers={k: v for k, v in response.headers.items()
+                                                             if k.lower() not in ('content-length', 'content-type')})
 
 
 app.add_middleware(
@@ -469,6 +500,43 @@ def get_db_connection():
 
 @app.get("/api/host-connections")
 def get_host_connections():
+    """The graph's people and links. Built once and kept with the directory
+    lists (~10 s to build, 3.3 MB of JSON), so the home page doesn't wait on
+    the query every visit; an admin edit expires it like the directories."""
+    return _cached_json('host-connections', _host_connections_payload)
+
+
+@app.get("/api/show-connections")
+def get_show_connections():
+    """See _show_connections_payload."""
+    return _cached_json('show-connections', _show_connections_payload)
+
+
+@app.on_event("startup")
+def _warm_graph_cache():
+    """Build the graph payloads in the background at startup, so the first
+    visitor after a deploy doesn't wait ~10 s for them. Not under tests
+    (the TestClient would start it against whatever database is set)."""
+    if os.getenv('PYTEST_CURRENT_TEST'):
+        return
+
+    def warm():
+        for kind, payload in (('host-connections', _host_connections_payload),
+                              ('show-connections', _show_connections_payload)):
+            try:
+                _cached_json(kind, payload)
+            except Exception as e:
+                print(f'warming {kind} failed: {e}')
+    threading.Thread(target=warm, daemon=True).start()
+
+
+def _cached_json(kind: str, payload):
+    from fastapi.responses import Response
+    body = _directory_index(kind, lambda cur: json.dumps(payload(), default=str).encode())
+    return Response(content=body, media_type='application/json')
+
+
+def _host_connections_payload():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -832,8 +900,7 @@ def get_guest_reach():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/show-connections")
-def get_show_connections():
+def _show_connections_payload():
     """The network one level up: shows as nodes, shared people as edges.
 
     The person graph buries the communities it contains — at 1,952 nodes you
