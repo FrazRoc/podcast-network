@@ -22,7 +22,8 @@ for f in migrate_add_data_source.sql migrate_add_host_aliases.sql \
          migrate_add_host_affiliations.sql migrate_add_host_role_pins.sql \
          migrate_add_organizations.sql migrate_add_company_merge_suggestions.sql \
          migrate_add_topics.sql migrate_add_topic_companies.sql migrate_add_topic_people.sql \
-         migrate_add_topic_parents.sql migrate_add_topic_merge_suggestions.sql; do
+         migrate_add_topic_parents.sql migrate_add_topic_merge_suggestions.sql \
+         migrate_add_topic_descriptions.sql; do
     psql -h "$PSQL_HOST" -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$f" > /dev/null
 done
 

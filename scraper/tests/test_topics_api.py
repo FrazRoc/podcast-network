@@ -408,3 +408,14 @@ def test_topic_members_for_the_graph(db_conn, monkeypatch):
     assert sorted(m['people']) == sorted([people['Ann'], people['Hal']])
     assert m['shows'] == [pid]
     assert _run(db_conn, monkeypatch, 'topic_members', tags['oil prices'], min_episodes=1)['people']
+
+
+def test_topic_description(db_conn, monkeypatch):
+    import main
+    _, _, _, tags = _setup(db_conn)
+    assert _run(db_conn, monkeypatch, 'get_topic', tags['geothermal energy'])['description'] is None
+    _run(db_conn, monkeypatch, 'update_topic', tags['geothermal energy'],
+         main.TopicUpdateRequest(description='  Heat from the ground.  '))
+    assert _run(db_conn, monkeypatch, 'get_topic', tags['geothermal energy'])['description'] == 'Heat from the ground.'
+    _run(db_conn, monkeypatch, 'update_topic', tags['geothermal energy'], main.TopicUpdateRequest(description=''))
+    assert _run(db_conn, monkeypatch, 'get_topic_admin', tags['geothermal energy'])['description'] is None

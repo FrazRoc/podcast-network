@@ -4634,7 +4634,7 @@ def get_topic(tag_id: int):
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("""SELECT tag_id, name, category, not_a_topic, is_company, is_person, is_broad
+        cur.execute("""SELECT tag_id, name, category, not_a_topic, is_company, is_person, is_broad, description
                        FROM tags WHERE tag_id = %s""", (tag_id,))
         tag = cur.fetchone()
         if not tag or tag['not_a_topic'] or tag['is_company'] or tag['is_person']:
@@ -4739,6 +4739,7 @@ def get_topic(tag_id: int):
         return {
             'tag_id': tag['tag_id'], 'name': tag['name'], 'slug': profiles.slugify(tag['name']),
             'category': tag['category'], 'aliases': aliases, 'is_broad': tag['is_broad'],
+            'description': tag['description'],
             'ancestors': [{**a, 'slug': profiles.slugify(a['name'])} for a in ancestors],
             'children': [{k: r[k] for k in ('tag_id', 'name', 'slug', 'category', 'episodes', 'children')}
                          for r in under[:40]],
@@ -4802,6 +4803,7 @@ class TopicUpdateRequest(BaseModel):
     host_id: Optional[int] = None  # 0 unlinks
     parent_tag_id: Optional[int] = None  # 0 clears
     is_broad: Optional[bool] = None
+    description: Optional[str] = None  # '' clears
 
 
 @app.get("/api/admin/topics", dependencies=[Depends(verify_admin)])
@@ -4858,7 +4860,7 @@ _ADMIN_TOPIC_SQL = """
     SELECT t.tag_id, t.name, t.category, t.not_a_topic, t.is_company, t.org_id,
            o.name AS org_name, t.is_person, t.host_id,
            h.first_name || ' ' || h.last_name AS host_name, t.created_at,
-           t.is_broad, t.parent_tag_id, pt.name AS parent_name
+           t.is_broad, t.parent_tag_id, pt.name AS parent_name, t.description
     FROM tags t LEFT JOIN organizations o ON o.org_id = t.org_id
     LEFT JOIN hosts h ON h.host_id = t.host_id
     LEFT JOIN tags pt ON pt.tag_id = t.parent_tag_id
@@ -4961,6 +4963,9 @@ def update_topic(tag_id: int, body: TopicUpdateRequest):
             cur.execute("UPDATE tags SET parent_tag_id = %s WHERE tag_id = %s", (body.parent_tag_id or None, tag_id))
         if body.is_broad is not None:
             cur.execute("UPDATE tags SET is_broad = %s WHERE tag_id = %s", (body.is_broad, tag_id))
+        if body.description is not None:
+            cur.execute("UPDATE tags SET description = %s WHERE tag_id = %s",
+                        (body.description.strip() or None, tag_id))
         conn.commit()
         cur.execute(_ADMIN_TOPIC_SQL, (tag_id,))
         return {"success": True, "topic": cur.fetchone()}
