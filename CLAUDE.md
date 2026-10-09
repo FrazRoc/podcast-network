@@ -599,6 +599,18 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   `undo_link_tags_2026-10-09.json`, `undo_new_orgs_2026-10-09.json` in the
   topic-pilots folder. Left: ~1,640 person and 1,138 company tags, nearly
   all on one episode.
+  **Person tags find missing credits**: a linked person tag on an episode
+  that doesn't credit them is either a mention, a suppressed credit, or a
+  guest the scanner missed because the episode spells them differently
+  ("Timothy Hade", "Arthur Berman"). Oct 9 2026: 558 such pairs, 396
+  suppressed, 63 real guests added as `manual` credits (21 POLITICO
+  reporters the introduced-names rules missed: "Pro's Ben Lefebvre is
+  following…", "X and Y explain…"). Then 43 of those spellings became
+  `host_aliases`; their 29 new matches were read first — 11 real
+  appearances credited, 18 mentions (citations, past-episode links)
+  suppressed — and "Emily Cohen" (a namesake journalist) left out. Duplicate
+  records merged: Manuel Quiñones, Raphaël Haupt, Sandra Safro. Files:
+  `added_guest_credits_2026-10-09.csv`, `aliases_credits_2026-10-09.json`.
 - **Topic categories vs broad parents** are allowed to differ (26% do):
   the category says what kind of topic it is ("solar tariffs": Policy),
   the broad parent what it's about (Solar). Checked Oct 2026; aligning them
