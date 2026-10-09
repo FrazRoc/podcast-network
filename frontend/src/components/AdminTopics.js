@@ -195,6 +195,22 @@ function PossibleDuplicates({ topic, onDone }) {
   );
 }
 
+// The short description shown under the name on the public topic page.
+function DescriptionBox({ topic, saving, onSave }) {
+  const [text, setText] = useState(topic.description || '');
+  const changed = text.trim() !== (topic.description || '');
+  return (
+    <div>
+      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Description</p>
+      <textarea value={text} onChange={e => setText(e.target.value)} rows={3}
+        placeholder="One or two sentences on what this topic covers, shown on its public page."
+        className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none" />
+      <button disabled={saving || !changed} onClick={() => onSave({ description: text })}
+        className="mt-1 px-3 py-1 rounded-lg bg-blue-600 text-white text-xs hover:bg-blue-700 disabled:opacity-40">Save description</button>
+    </div>
+  );
+}
+
 function TopicPanel({ tagId, onChanged, onClose }) {
   const [t, setT] = useState(null);
   const [name, setName] = useState('');
@@ -264,6 +280,9 @@ function TopicPanel({ tagId, onChanged, onClose }) {
       </div>
       {!t.is_company && !t.is_person && !t.not_a_topic && (
         <ParentBox topic={t} saving={saving} onSave={save} />
+      )}
+      {!t.is_company && !t.is_person && !t.not_a_topic && (
+        <DescriptionBox key={t.tag_id} topic={t} saving={saving} onSave={save} />
       )}
       {t.suggestions?.length > 0 && (
         <PossibleDuplicates topic={t} onDone={() => { load(); onChanged(); }} />

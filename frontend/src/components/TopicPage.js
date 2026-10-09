@@ -53,6 +53,7 @@ export default function TopicPage() {
               ))}
             </p>
             <h1 className="mt-1 text-2xl font-bold text-gray-900">{t.name}</h1>
+            {t.description && <p className="mt-2 text-sm text-gray-700 max-w-2xl">{t.description}</p>}
             <AdminEditLink href={`/admin/topics?tag_id=${t.tag_id}`} />
             {t.aliases.length > 0 && (
               <p className="mt-1 text-sm text-gray-500">Also written as {t.aliases.join(', ')}</p>
