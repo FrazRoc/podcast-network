@@ -29,6 +29,9 @@ export default function OrgLogo({ orgId, name, size = 20, className = '' }) {
   return (
     <img src={`${API_BASE_URL}/api/logo/${orgId}`} alt="" loading="lazy" style={box}
       onError={() => setFailed(true)}
+      // No logo comes back as a 1x1 transparent image (a 404 put an error in
+      // the console for every organisation without one): show the initial.
+      onLoad={e => { if (e.currentTarget.naturalWidth <= 1) setFailed(true); }}
       className={`flex-shrink-0 rounded bg-white object-contain ${className}`} />
   );
 }
