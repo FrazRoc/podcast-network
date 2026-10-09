@@ -4,9 +4,10 @@ import { CATEGORY_COLORS, CATEGORIES, Swatch } from './Topics';
 import StackedShareBars from './StackedShareBars';
 import ShareByYearChart from './ShareByYearChart';
 import { showHref, orgHref, personHref, topicHref, slugify } from '../profileUtils';
+import { ORG_TYPE_COLORS, ORG_TYPE_LABELS } from '../chartUtils';
 
-// The Stats page's Topics tab. Topics cover a random sample of episodes, so
-// every chart here is a share of tagged episodes rather than a raw count.
+// The Stats page's Topics tab. New episodes wait for the next tagging pass,
+// so every chart here is a share of tagged episodes rather than a raw count.
 
 function useStat(path) {
   const [data, setData] = useState(null);
@@ -38,7 +39,7 @@ export function TopicCategoriesByYearChart() {
       partialYear={data.partial_year}
       share={(it, c) => (100 * (it.counts[c] || 0)) / (it.total || 1)}
       describeYear={(it, c) => `${it.year}: ${it.counts[c] || 0} of ${it.total} tagged episodes touched ${c.toLowerCase()}.`}
-      footnote="An episode counts once for each category its topics fall in, so the categories add up to more than 100%. From 2019; years with fewer than 40 tagged episodes are left out. * part year." />
+      footnote="An episode counts once for each category its topics fall in, so the categories add up to more than 100%. From 2019. * part year." />
   );
 }
 
@@ -69,7 +70,7 @@ export function TopicAreasByYearChart() {
         partialYear={data.partial_year}
         share={(it, k) => (100 * (it.counts[k] || 0)) / (it.total || 1)}
         describeYear={(it, k) => `${it.year}: ${it.counts[k] || 0} of ${it.total} tagged episodes touched ${labels[k]}.`}
-        footnote="An episode counts once for each broad topic any of its topics sit under. From 2019; years with fewer than 40 tagged episodes are left out. * part year." />
+        footnote="An episode counts once for each broad topic any of its topics sit under. From 2019. * part year." />
       <p className="text-xs text-gray-400 mt-1">
         {inCat.map((b, i) => (
           <span key={b.key}>{i ? ' · ' : 'Topic pages: '}<a href={topicHref(b.tag_id, b.slug)} className="hover:underline">{b.name}</a></span>
@@ -79,7 +80,7 @@ export function TopicAreasByYearChart() {
   );
 }
 
-function TopicMoves({ rows, cutoff, direction }) {
+function TopicMoves({ rows, from, cutoff, direction }) {
   const max = Math.max(...rows.map(r => Math.max(r.recent_share, r.earlier_share)), 0.1);
   return (
     <ul className="space-y-2">
@@ -90,7 +91,7 @@ function TopicMoves({ rows, cutoff, direction }) {
             <a href={topicHref(r.tag_id, r.slug)} className="flex-1 truncate text-gray-800 hover:text-teal-700 hover:underline">{r.name}</a>
             <span className="tabular-nums text-gray-400">{r.earlier_share.toFixed(1)}% → {r.recent_share.toFixed(1)}%</span>
           </div>
-          <div className="mt-0.5 ml-3.5 space-y-px" title={`Before ${cutoff}: ${r.earlier} episodes · since: ${r.recent}`}>
+          <div className="mt-0.5 ml-3.5 space-y-px" title={`${from}–${cutoff - 1}: ${r.earlier} episodes · since: ${r.recent}`}>
             <div className="h-1.5 rounded-sm bg-gray-300" style={{ width: `${(100 * r.earlier_share) / max}%` }} />
             <div className="h-1.5 rounded-sm" style={{ width: `${(100 * r.recent_share) / max}%`,
               background: direction === 'up' ? '#0d9488' : '#e15759' }} />
@@ -123,15 +124,15 @@ export function RisingTopicsChart() {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
         <div>
           <p className="text-xs font-semibold text-teal-700 uppercase tracking-wide mb-2">Rising</p>
-          <TopicMoves rows={data.rising} cutoff={data.cutoff_year} direction="up" />
+          <TopicMoves rows={data.rising} from={data.first_year || 2019} cutoff={data.cutoff_year} direction="up" />
         </div>
         <div>
           <p className="text-xs font-semibold text-red-600 uppercase tracking-wide mb-2">Fading</p>
-          <TopicMoves rows={data.falling} cutoff={data.cutoff_year} direction="down" />
+          <TopicMoves rows={data.falling} from={data.first_year || 2019} cutoff={data.cutoff_year} direction="down" />
         </div>
       </div>
       <p className="text-xs text-gray-400 mt-3">
-        Share of tagged episodes before {data.cutoff_year} (grey, {data.earlier_episodes} episodes) against
+        Share of tagged episodes from {data.first_year || 2019} to {data.cutoff_year - 1} (grey, {data.earlier_episodes} episodes) against
         {' '}{data.cutoff_year} onward (colour, {data.recent_episodes} episodes). Topics on at least 8 episodes
         and 3 different shows{level === 'broad' && '; a broad topic counts every topic under it'}.
       </p>
@@ -154,6 +155,40 @@ export function ShowTopicMixChart() {
         topics fall in; the number is those pairs.
       </p>
     </>
+  );
+}
+
+// Who's on the episodes about each broad topic: its guests by the kind of
+// organisation they work for, with every guest appearance as the first row
+// to compare against.
+export function TopicGuestMixChart() {
+  const { data, error } = useStat('/api/stats/topic-guest-mix');
+  const [category, setCategory] = useState('');
+  if (!data) return <Status error={error} />;
+  const cats = CATEGORIES.filter(c => data.items.some(t => t.category === c));
+  const rows = [
+    { id: 'all', label: 'All guest appearances', counts: data.all.counts, total: data.all.total },
+    ...data.items.filter(t => !category || t.category === category)
+      .map(t => ({ id: t.tag_id, label: t.name, counts: t.counts, total: t.total, href: topicHref(t.tag_id, t.slug) })),
+  ];
+  return (
+    <div>
+      <label className="flex items-center gap-2 text-xs text-gray-500 mb-3">
+        {category && <Swatch category={category} className="w-2.5 h-2.5" />}
+        <select value={category} onChange={e => setCategory(e.target.value)}
+          className="border border-gray-200 rounded px-2 py-1 text-gray-700 bg-white">
+          <option value="">All categories</option>
+          {cats.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </label>
+      <StackedShareBars key={category} rows={rows} keys={data.types} colors={ORG_TYPE_COLORS} labels={ORG_TYPE_LABELS}
+        noun="guest appearances" />
+      <p className="text-xs text-gray-400 mt-3">
+        Broad topics with at least 30 counted appearances, most first. Each guest counts once per episode, under
+        the role they had then; guests at small, unclassified organisations aren't counted. An episode counts
+        under every broad topic it touches.
+      </p>
+    </div>
   );
 }
 
@@ -192,7 +227,7 @@ export function MostDiscussedChart() {
             })}
           </ul>
           <p className="text-xs text-gray-400 mt-3">
-            Tagged episodes that discuss them, out of {data.tagged_episodes.toLocaleString()} tagged so far.
+            Tagged episodes that discuss them, out of {data.tagged_episodes.toLocaleString()} tagged.
             Episodes they're on themselves don't count: the person credited, or a guest who works at the company.
           </p>
         </>

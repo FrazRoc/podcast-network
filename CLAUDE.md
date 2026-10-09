@@ -666,6 +666,14 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   `topic_stats.broad_of_sql(seed)` maps tags to their nearest broad topic
   for all of these. Oct 2026 reading: "Electricity demand and data centers"
   went from 1% of tagged episodes before 2025 to 6% since.
+- **Stats' topic charts start at 2019** (Oct 2026), like the People charts:
+  the by-year charts and Rising/Fading's baseline (156 episodes predate it).
+  **"Who's Talking About It"** (`topic_stats.broad_guest_mix`,
+  `/api/stats/topic-guest-mix`, cached, ~5 s to build): each broad topic's
+  guest appearances by organisation type, one per (episode, guest) at their
+  current role then, with all appearances as the baseline row. First read:
+  US federal climate policy guests are 40% media (reporters), climate tech
+  startups 53% investors, storage 78% companies.
 - **Orphan tail placed** (Oct 2026): the 9,257 visible topics with no
   parent were read by hand in 16 chunks, each with a hint from its
   episode's other topics' broad topic (right ~40% of the time; places,

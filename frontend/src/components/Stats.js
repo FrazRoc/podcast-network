@@ -12,7 +12,7 @@ import RevolvingDoorChart from './RevolvingDoorChart';
 import TopOrganizationsChart from './TopOrganizationsChart';
 import GuestMixByYearChart from './GuestMixByYearChart';
 import GuestRolesChart from './GuestRolesChart';
-import { TopicCategoriesByYearChart, TopicAreasByYearChart, RisingTopicsChart, ShowTopicMixChart, MostDiscussedChart } from './TopicStatsCharts';
+import { TopicCategoriesByYearChart, TopicAreasByYearChart, TopicGuestMixChart, RisingTopicsChart, ShowTopicMixChart, MostDiscussedChart } from './TopicStatsCharts';
 import { SiteShell } from './SiteHeader';
 
 function Section({ title, children, description }) {
@@ -129,6 +129,11 @@ export default function Stats() {
           <Section title="Rising and Fading Topics"
             description="The broad topics, or individual topics, whose share of episodes grew or shrank the most over the last two years.">
             <RisingTopicsChart />
+          </Section>
+
+          <Section title="Who's Talking About It"
+            description="The guests on each broad topic's episodes, by the kind of organisation they work for. Click a kind to sort topics by it.">
+            <TopicGuestMixChart />
           </Section>
 
           <Section title="What Each Show Covers"
