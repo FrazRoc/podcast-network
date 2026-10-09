@@ -4,7 +4,7 @@ import AdminEditLink from './AdminEditLink';
 import { ORG_TYPE_LABELS, ORG_TYPE_COLORS } from '../chartUtils';
 import { stripHtmlForDisplay } from '../adminUtils';
 import { useProfile, personHref, orgHref, showHref, avatarUrl, coverUrl, fmtDate, fmtMonthYear, plural, imageUrl, imageFallback } from '../profileUtils';
-import { TalksAbout, EpisodeTopics } from './Topics';
+import { TalksAbout, EpisodeTopics, SimilarByTopic } from './Topics';
 
 const describe = (s) => [s.title,
   `${s.title}: ${plural(s.totals.episodes, 'episode')} since ${fmtMonthYear(s.totals.first_date)}, who it books, `
@@ -102,6 +102,7 @@ export default function ShowPage() {
             </Section>
 
             <TalksAbout summary={s.covers} title="What it covers" noun="its" />
+            <SimilarByTopic kind="shows" id={s.podcast_id} title="Shows that cover similar things" />
 
             <div className="grid sm:grid-cols-2 gap-5">
               {s.top_guests.length > 0 && (

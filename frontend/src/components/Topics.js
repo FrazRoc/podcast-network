@@ -1,5 +1,8 @@
+import { useEffect, useState } from 'react';
 import { Section, ShowMore, ShowThumb } from './ProfileLayout';
-import { topicHref, orgHref, personHref, showHref, fmtDate, plural } from '../profileUtils';
+import { API_BASE_URL } from '../config';
+import { topicHref, orgHref, personHref, showHref, fmtDate, plural, publicFetch,
+         avatarUrl, imageUrl, imageFallback } from '../profileUtils';
 
 // Shared topic pieces: the colour for each of the 12 fixed categories
 // (backend/topic_names.py CATEGORIES), a topic chip, the "Talks about" block
@@ -140,6 +143,56 @@ export function TalksAbout({ summary, title = 'Talks about', noun = 'their' }) {
       <p className="mt-3 text-[11px] text-gray-400">
         Read from episode descriptions. An area's share is the tagged episodes with any topic under it.
       </p>
+    </Section>
+  );
+}
+
+
+// "Talks about similar things": people (kind 'people') or shows ('shows')
+// whose episodes cover the same topics, each with the topics they share.
+// Fetched on its own (backend/topic_similarity.py), so the profile doesn't
+// wait for it; nothing shows until it arrives, or if there's nobody.
+export function SimilarByTopic({ kind, id, title = 'Talks about similar things' }) {
+  const [items, setItems] = useState([]);
+  useEffect(() => {
+    let live = true;
+    setItems([]);
+    publicFetch(`${API_BASE_URL}/api/${kind}/${id}/similar`)
+      .then(r => (r.ok ? r.json() : { similar: [] }))
+      .then(d => { if (live) setItems(d.similar || []); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [kind, id]);
+  if (!items.length) return null;
+  const people = kind === 'people';
+  return (
+    <Section title={title} aside="by the topics of their episodes">
+      <ul className="grid sm:grid-cols-2 gap-x-6 gap-y-3">
+        {items.map(x => {
+          const key = people ? x.host_id : x.podcast_id;
+          const name = people ? x.name : x.title;
+          const href = people ? personHref(x.host_id, x.slug) : showHref(x.podcast_id, x.slug);
+          const role = people ? [x.title, x.company].filter(Boolean).join(' · ') : '';
+          return (
+            <li key={key} className="flex items-start gap-2.5 min-w-0">
+              {people ? (
+                <img src={x.profile_image_url ? imageUrl(x.profile_image_url, 64) : avatarUrl(x.name)} alt=""
+                  onError={imageFallback(x.profile_image_url, x.name)}
+                  className="w-8 h-8 rounded-full object-cover bg-gray-100 flex-shrink-0" />
+              ) : <ShowThumb show={x} size="w-8 h-8" />}
+              <div className="min-w-0">
+                <a href={href} className="block truncate text-sm text-gray-900 hover:text-teal-700 hover:underline">{name}</a>
+                {role && <p className="truncate text-xs text-gray-500">{role}</p>}
+                {x.shared.length > 0 && (
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {x.shared.map(t => <TopicChip key={t.tag_id} topic={t} size="xs" />)}
+                  </div>
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
     </Section>
   );
 }

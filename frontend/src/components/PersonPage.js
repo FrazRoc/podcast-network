@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import ProfileLayout, { Section, Stat, ShowMore, ShowThumb } from './ProfileLayout';
 import OrgLogo from './OrgLogo';
 import AdminEditLink from './AdminEditLink';
-import { TalksAbout, EpisodeTopics, DiscussedIn } from './Topics';
+import { TalksAbout, EpisodeTopics, DiscussedIn, SimilarByTopic } from './Topics';
 import { useProfile, personHref, orgHref, showHref, avatarUrl, fmtDate, fmtMonthYear, plural, imageUrl, imageFallback } from '../profileUtils';
 
 const describe = (p) => {
@@ -113,6 +113,7 @@ function PersonDetails({ p }) {
       <Career items={p.career_by_org || []} />
 
       <TalksAbout summary={p.talks_about} />
+      <SimilarByTopic kind="people" id={p.host_id} />
       <DiscussedIn discussed={p.discussed_in} name={p.name} />
 
       <Section title="Appearances" aside={plural(listed.length, 'episode')}>
