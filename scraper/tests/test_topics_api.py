@@ -269,6 +269,32 @@ def _hierarchy(db_conn, tags):
     return energy
 
 
+def test_broad_guest_mix(db_conn):
+    """Who's talking about it: each broad topic's guest appearances by the
+    type of organisation, one per (episode, guest), current roles only."""
+    _, people, eps, tags = _setup(db_conn)
+    energy = _hierarchy(db_conn, tags)
+    cur = db_conn.cursor()
+    for name, key, org_type in [('Fervo', 'fervo', 'company'), ('DOE', 'doe', 'government')]:
+        cur.execute("INSERT INTO organizations (name, org_type) VALUES (%s, %s) RETURNING org_id", (name, org_type))
+        cur.execute("INSERT INTO organization_aliases (org_id, alias_name, normalized_name) VALUES (%s, %s, %s)",
+                    (cur.fetchone()[0], name, key))
+    rows = [(eps[i], people['Ann'], 'CEO', 'Fervo', 'fervo', False) for i in range(3)]
+    rows += [(eps[0], people['Ann'], 'Advisor', 'DOE', 'doe', True),      # former: not counted
+             (eps[3], people['Bo'], 'Secretary', 'DOE', 'doe', False),
+             (eps[0], people['Hal'], 'Host', 'Fervo', 'fervo', False)]    # not a guest
+    for r in rows:
+        cur.execute("INSERT INTO host_affiliations (episode_id, host_id, title, company, company_key, is_former, "
+                    "title_kind) VALUES (%s, %s, %s, %s, %s, %s, 'position')", r)
+    db_conn.commit()
+    import topic_stats
+    d = topic_stats.broad_guest_mix(db_conn.cursor(cursor_factory=RealDictCursor), min_typed=1)
+    assert d['all'] == {'counts': {'company': 3, 'government': 1}, 'total': 4}
+    assert [(t['tag_id'], t['counts'], t['total']) for t in d['items']] == [
+        (energy, {'company': 3, 'government': 1}, 4)]
+    assert topic_stats.broad_guest_mix(db_conn.cursor(cursor_factory=RealDictCursor))['items'] == []   # under 30
+
+
 def test_broad_topic_counts_everything_under_it(db_conn, monkeypatch):
     _, people, eps, tags = _setup(db_conn)
     energy = _hierarchy(db_conn, tags)

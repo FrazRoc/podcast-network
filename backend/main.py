@@ -697,6 +697,13 @@ def stats_rising_topics(level: str = "topic"):
     return _org_stat(topic_stats.rising_topics)
 
 
+@app.get("/api/stats/topic-guest-mix")
+def stats_topic_guest_mix():
+    """Per broad topic, its episodes' guests by the type of organisation they
+    work for. Cached like the directories (~5 s to build)."""
+    return _directory_index('stats-topic-guest-mix', topic_stats.broad_guest_mix)
+
+
 @app.get("/api/stats/show-topic-mix")
 def stats_show_topic_mix():
     """Each show's tagged episodes by topic category."""

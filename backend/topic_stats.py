@@ -2,9 +2,9 @@
 Topic charts for the Stats page: what the network's episodes talk about,
 over time and by show, and which companies and people get discussed.
 
-Topics cover a random sample of the archive (topic_extractions status
-'done'), so everything here is a share of tagged episodes, never a raw count
-of all episodes. Company and person tags (tags.is_company / is_person) are
+Every episode was tagged by Oct 2026, but new ones wait for the next
+tagging pass (topic_extractions status 'done'), so everything here is a
+share of tagged episodes, never a raw count of all episodes. Company and person tags (tags.is_company / is_person) are
 not topics and are left out of the topic charts; they have their own chart.
 """
 import math
@@ -101,9 +101,10 @@ def broad_by_year(cur, min_tagged: int = 40, first_year: int = 2019) -> dict:
 
 
 def rising_topics(cur, recent_years: int = 2, min_episodes: int = 8, min_shows: int = 3,
-                  limit: int = 12, level: str = 'topic') -> dict:
+                  limit: int = 12, level: str = 'topic', first_year: int = 2019) -> dict:
     """Topics whose share of tagged episodes grew or shrank most between the
-    last recent_years years and everything before. Shares are smoothed (one
+    last recent_years years and the years before, back to first_year (2019,
+    like the other charts; the earlier episodes are a few shows' first years). Shares are smoothed (one
     pseudo-episode added each side) so a topic going from 0 to 2 doesn't top
     the list; topics need min_episodes episodes overall, on at least
     min_shows shows (so one show's running format, like a daily "EV news"
@@ -114,8 +115,8 @@ def rising_topics(cur, recent_years: int = 2, min_episodes: int = 8, min_shows: 
         SELECT COUNT(*) FILTER (WHERE e.published_date >= %(c)s) AS recent,
                COUNT(*) FILTER (WHERE e.published_date < %(c)s) AS earlier
         FROM topic_extractions tx JOIN episodes e ON e.episode_id = tx.episode_id
-        WHERE tx.status = 'done' AND e.published_date IS NOT NULL
-    """, {'c': cutoff})
+        WHERE tx.status = 'done' AND e.published_date >= %(f)s
+    """, {'c': cutoff, 'f': date(first_year, 1, 1)})
     base = cur.fetchone()
     if not base['recent'] or not base['earlier']:
         return {'cutoff_year': cutoff.year, 'rising': [], 'falling': [], 'level': level, **base}
@@ -129,18 +130,18 @@ def rising_topics(cur, recent_years: int = 2, min_episodes: int = 8, min_shows: 
             FROM episode_tag et
             JOIN broad_of bo ON bo.tag_id = et.tag_id
             JOIN episodes e ON e.episode_id = et.episode_id
-            WHERE e.published_date IS NOT NULL
+            WHERE e.published_date >= %(f)s
             GROUP BY 1, 2, 3 {having}
-        """, {'c': cutoff, 'm': min_episodes, 's': min_shows})
+        """, {'c': cutoff, 'f': date(first_year, 1, 1), 'm': min_episodes, 's': min_shows})
     else:
         cur.execute(f"""
             SELECT t.tag_id, t.name, t.category, {counts}
             FROM episode_tag et
             JOIN tags t ON t.tag_id = et.tag_id AND {TOPIC}
             JOIN episodes e ON e.episode_id = et.episode_id
-            WHERE e.published_date IS NOT NULL
+            WHERE e.published_date >= %(f)s
             GROUP BY t.tag_id, t.name, t.category {having}
-        """, {'c': cutoff, 'm': min_episodes, 's': min_shows})
+        """, {'c': cutoff, 'f': date(first_year, 1, 1), 'm': min_episodes, 's': min_shows})
     rows = []
     for r in cur.fetchall():
         recent_share = 100 * r['recent'] / base['recent']
@@ -152,7 +153,7 @@ def rising_topics(cur, recent_years: int = 2, min_episodes: int = 8, min_shows: 
                      'change': change})
     rising = sorted((r for r in rows if r['change'] > 0), key=lambda r: -r['change'])[:limit]
     falling = sorted((r for r in rows if r['change'] < 0), key=lambda r: r['change'])[:limit]
-    return {'cutoff_year': cutoff.year, 'recent_episodes': base['recent'], 'level': level,
+    return {'cutoff_year': cutoff.year, 'first_year': first_year, 'recent_episodes': base['recent'], 'level': level,
             'earlier_episodes': base['earlier'], 'rising': rising, 'falling': falling}
 
 
@@ -186,6 +187,51 @@ def show_category_mix(cur, min_tagged: int = 25) -> dict:
             items.append({**s, 'tagged_episodes': tagged[pid]})
     items.sort(key=lambda s: -s['tagged_episodes'])
     return {'categories': list(CATEGORIES), 'items': items}
+
+
+def broad_guest_mix(cur, min_typed: int = 30) -> dict:
+    """Per broad topic, the guests on its episodes split by the type of
+    organisation they work for, with every guest appearance as the
+    baseline ("all"). Each (episode, guest) counts once per broad topic,
+    under their first typed current role on that episode; guests at
+    untyped organisations aren't counted. Broad topics with fewer than
+    min_typed counted appearances are left out."""
+    from org_stats import _GUEST_ROLES, ORG_TYPES
+    cur.execute(_GUEST_ROLES + """
+        , one AS (
+            SELECT DISTINCT ON (episode_id, host_id) episode_id, org_type
+            FROM guest_roles WHERE NOT is_former AND org_type IS NOT NULL
+            ORDER BY episode_id, host_id, affiliation_id
+        )
+        SELECT org_type, COUNT(*) AS n FROM one GROUP BY 1
+    """)
+    baseline = {r['org_type']: r['n'] for r in cur.fetchall()}
+    # broad_of_sql opens its own WITH, so _GUEST_ROLES's CTEs follow it.
+    cur.execute(broad_of_sql(f"SELECT t.tag_id FROM tags t WHERE {TOPIC}")
+                + ", " + _GUEST_ROLES.strip()[len("WITH"):] + """
+        , one AS (
+            SELECT DISTINCT ON (episode_id, host_id) episode_id, org_type
+            FROM guest_roles WHERE NOT is_former AND org_type IS NOT NULL
+            ORDER BY episode_id, host_id, affiliation_id
+        ),
+        ep_broad AS (
+            SELECT DISTINCT et.episode_id, bo.broad_id, bo.broad_name, bo.broad_category
+            FROM episode_tag et JOIN broad_of bo ON bo.tag_id = et.tag_id
+        )
+        SELECT eb.broad_id, eb.broad_name, eb.broad_category, one.org_type, COUNT(*) AS n
+        FROM one JOIN ep_broad eb ON eb.episode_id = one.episode_id
+        GROUP BY 1, 2, 3, 4
+    """)
+    topics = {}
+    for r in cur.fetchall():
+        t = topics.setdefault(r['broad_id'], {'tag_id': r['broad_id'], 'name': r['broad_name'],
+                                              'slug': slugify(r['broad_name']), 'category': r['broad_category'],
+                                              'counts': {}, 'total': 0})
+        t['counts'][r['org_type']] = r['n']
+        t['total'] += r['n']
+    items = sorted((t for t in topics.values() if t['total'] >= min_typed), key=lambda t: -t['total'])
+    return {'types': list(ORG_TYPES), 'all': {'counts': baseline, 'total': sum(baseline.values())},
+            'items': items}
 
 
 def most_discussed(cur, kind: str = 'company', limit: int = 20) -> dict:
