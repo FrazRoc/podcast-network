@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { personHref, showHref, slugify } from '../profileUtils';
+import { personHref, showHref, slugify, setMeta } from '../profileUtils';
 // The 2D entry point, not the 'react-force-graph' barrel: that one imports all
 // four renderers at module scope, so three.js, A-Frame and AR.js were bundled
 // and shipped on every load despite nothing here being able to reach them.
@@ -973,8 +973,13 @@ const PodcastHostNetwork = () => {
   const [selectedNodeConnections, setSelectedNodeConnections] = useState([]);
   const [selectedLinks, setSelectedLinks] = useState(new Set());
   const [selectedPodcast, setSelectedPodcast] = useState(null);
-  const [legendOpen, setLegendOpen] = useState(true);
+  // On a phone the open legend covers half the graph: start it collapsed there.
+  const [legendOpen, setLegendOpen] = useState(() => {
+    try { return !window.matchMedia('(max-width: 639px)').matches; } catch { return true; }
+  });
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  useEffect(() => setMeta('Podcast Network · who appears on clean-energy podcasts',
+    'An interactive map of the hosts and guests of clean-energy and climate podcasts, and the shows that connect them.'), []);
   const [searchQuery, setSearchQuery] = useState('');
   const [lastUpdated, setLastUpdated] = useState(null);
   const [dimensions, setDimensions] = useState({

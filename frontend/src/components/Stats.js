@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { setMeta } from '../profileUtils';
 import ShowOverlapMatrix from './ShowOverlapMatrix';
 import GuestAppearanceChart from './GuestAppearanceChart';
 import GuestReachChart from './GuestReachChart';
@@ -40,6 +41,8 @@ function initialView() {
 
 export default function Stats() {
   const [view, setView] = useState(initialView);
+  useEffect(() => setMeta('Stats · Podcast Network',
+    'Who gets booked on clean-energy podcasts: the organisations, guests, shows and topics, in charts.'), []);
 
   // replaceState, as on the Network page: switching tabs shouldn't stack up
   // back-button presses.

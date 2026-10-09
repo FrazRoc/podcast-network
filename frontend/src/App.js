@@ -20,6 +20,7 @@ import ShowDirectory from './components/ShowDirectory';
 import TopicDirectory from './components/TopicDirectory';
 import TopicPage from './components/TopicPage';
 import AdminTopics from './components/AdminTopics';
+import NotFound from './components/NotFound';
 
 function App() {
   const path = window.location.pathname;
@@ -65,6 +66,8 @@ function App() {
     return <AdminLoginGate><div className="w-full min-h-screen"><AdminEpisodes /></div></AdminLoginGate>;
   if (path === '/admin' || path.startsWith('/admin/'))
     return <AdminLoginGate><div className="w-full min-h-screen"><AdminSuggestions /></div></AdminLoginGate>;
+  if (dir !== '' && dir !== '/index.html')
+    return <NotFound />;
   return (
     <div className="w-full h-screen overflow-hidden flex flex-col">
       <SiteHeader />
