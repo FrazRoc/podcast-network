@@ -379,7 +379,7 @@ extra_origins = [o.strip() for o in os.getenv("ADDITIONAL_ALLOWED_ORIGINS", "").
 # forth between pages is then instant). Admins' pages fetch with no-cache, so
 # an edit shows up on the next load.
 _PUBLIC_CACHEABLE_RE = re.compile(
-    r'^/api/(?:(?:people|orgs|shows)/\d+/profile|directory/[a-z]+|search|show-orgs|topics(?:/\d+)?|stats/[a-z-]+)$')
+    r'^/api/(?:(?:people|orgs|shows)/\d+/profile|directory/[a-z]+|search|show-orgs|topics(?:/\d+(?:/members)?)?|stats/[a-z-]+)$')
 
 
 @app.middleware("http")
@@ -4756,6 +4756,37 @@ def get_topic(tag_id: int):
             'related': related,
             'recent_episodes': recent,
         }
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.get("/api/topics/{tag_id}/members")
+def topic_members(tag_id: int, min_episodes: int = topics.MIN_EPISODES):
+    """Who and which shows talk about a topic (anything under it counts):
+    people credited on, and shows with, at least min_episodes of its
+    episodes. For the network graph's Topic filter, so only ids."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT 1 FROM tags WHERE tag_id = %s AND NOT not_a_topic AND NOT is_company AND NOT is_person",
+                    (tag_id,))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Topic not found")
+        ids, _ = _topic_tree(cur, tag_id)
+        n = max(1, min_episodes)
+        cur.execute("""
+            SELECT eh.host_id FROM (SELECT DISTINCT episode_id FROM episode_tag WHERE tag_id = ANY(%s)) et
+            JOIN episode_host eh ON eh.episode_id = et.episode_id
+            GROUP BY eh.host_id HAVING COUNT(DISTINCT et.episode_id) >= %s
+        """, (ids, n))
+        people = [r['host_id'] for r in cur.fetchall()]
+        cur.execute("""
+            SELECT e.podcast_id FROM (SELECT DISTINCT episode_id FROM episode_tag WHERE tag_id = ANY(%s)) et
+            JOIN episodes e ON e.episode_id = et.episode_id
+            GROUP BY e.podcast_id HAVING COUNT(*) >= %s
+        """, (ids, n))
+        return {'tag_id': tag_id, 'people': people, 'shows': [r['podcast_id'] for r in cur.fetchall()]}
     finally:
         cur.close()
         conn.close()

@@ -398,3 +398,13 @@ def test_topic_merge_suggestions_queue(db_conn, monkeypatch):
     conn.close()
     q = _run(db_conn, monkeypatch, 'topic_merge_suggestions')
     assert 'oil pricing' not in {i['a']['name'] for i in q['items']} | {i['b']['name'] for i in q['items']}
+
+
+def test_topic_members_for_the_graph(db_conn, monkeypatch):
+    pid, people, eps, tags = _setup(db_conn)
+    energy = _hierarchy(db_conn, tags)
+    m = _run(db_conn, monkeypatch, 'topic_members', energy)
+    # Ann (episodes 1-3) and Hal (all four) are on 2+ Energy episodes; Bo on one.
+    assert sorted(m['people']) == sorted([people['Ann'], people['Hal']])
+    assert m['shows'] == [pid]
+    assert _run(db_conn, monkeypatch, 'topic_members', tags['oil prices'], min_episodes=1)['people']
