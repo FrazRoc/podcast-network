@@ -446,3 +446,21 @@ def test_similar_people_and_shows(db_conn, monkeypatch):
     shows = _run(db_conn, monkeypatch, 'show_similar', pid)
     assert [x['title'] for x in shows['similar']] == ['Heat Hour']
     assert shows['similar'][0]['shared'][0]['name'] == 'geothermal energy'
+
+
+def test_discussed_only_orgs_are_searchable_and_listed(db_conn, monkeypatch):
+    """Organisations no guest has worked for, but episodes discuss (BYD),
+    are in search and the Organisations directory with their count."""
+    _, _, eps, _ = _setup(db_conn)
+    cur = db_conn.cursor()
+    cur.execute("INSERT INTO organizations (name, org_type) VALUES ('BYD', 'company') RETURNING org_id")
+    org = cur.fetchone()[0]
+    cur.execute("INSERT INTO tags (name, slug, category, is_company, org_id) VALUES ('BYD', 'byd', 'Transport', true, %s) RETURNING tag_id", (org,))
+    tag = cur.fetchone()[0]
+    for ep in eps[:3]:
+        cur.execute("INSERT INTO episode_tag (episode_id, tag_id, is_primary, data_source) VALUES (%s, %s, false, 'manual')", (ep, tag))
+    db_conn.commit()
+    hits = _run(db_conn, monkeypatch, 'search_profiles', q='BYD')['orgs']
+    assert [(o['name'], o['people'], o['discussed']) for o in hits] == [('BYD', 0, 3)]
+    rows = _run(db_conn, monkeypatch, 'org_directory', sort='discussed')['rows']
+    assert (rows[0]['name'], rows[0]['people'], rows[0]['discussed']) == ('BYD', 0, 3)

@@ -152,6 +152,7 @@ DIRECTORY_SORTS = {
     'appearances': lambda r: (-(r.get('appearances') or 0), _name_key(r)),
     'people': lambda r: (-(r.get('people') or 0), -(r.get('appearances') or 0), _name_key(r)),
     'guests': lambda r: (-(r.get('guests') or 0), _name_key(r)),
+    'discussed': lambda r: (-(r.get('discussed') or 0), -(r.get('people') or 0), _name_key(r)),
     'episodes': lambda r: (-(r.get('episodes') or 0), -(r.get('people') or 0), _name_key(r)),
     'recent': lambda r: (_recency(r), _name_key(r)),
     'name': _name_key,

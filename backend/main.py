@@ -4404,7 +4404,32 @@ def _build_org_directory(cur) -> list:
         WHERE NOT EXISTS (SELECT 1 FROM podcasts sp WHERE sp.org_id = o.org_id AND sp.org_is_show)
         GROUP BY o.org_id, o.name, COALESCE(o.org_type, t.org_type), par.name
     """)
-    return [{**r, 'slug': profiles.slugify(r['name'])} for r in cur.fetchall()]
+    rows = {r['org_id']: {**r, 'discussed': 0} for r in cur.fetchall()}
+    # Organisations episodes discuss (topic tags linked to them), whether or
+    # not a guest has worked there: BYD has no guests but 130 episodes.
+    cur.execute(f"""
+        WITH {org_stats._ORG_TOP}
+        SELECT o.org_id, o.name, COALESCE(o.org_type, t.org_type) AS org_type, par.name AS parent_name,
+               COUNT(DISTINCT et.episode_id) AS discussed, MAX(e.published_date) AS last_discussed
+        FROM tags tg
+        JOIN episode_tag et ON et.tag_id = tg.tag_id
+        JOIN episodes e ON e.episode_id = et.episode_id
+        JOIN organizations o ON o.org_id = tg.org_id AND NOT o.not_an_org
+        LEFT JOIN org_top ot ON ot.org_id = o.org_id
+        LEFT JOIN organizations t ON t.org_id = ot.top
+        LEFT JOIN organizations par ON par.org_id = o.parent_org_id AND NOT par.not_an_org
+        WHERE tg.is_company AND NOT tg.not_a_topic
+          AND NOT EXISTS (SELECT 1 FROM podcasts sp WHERE sp.org_id = o.org_id AND sp.org_is_show)
+        GROUP BY o.org_id, o.name, COALESCE(o.org_type, t.org_type), par.name
+    """)
+    for r in cur.fetchall():
+        if r['org_id'] in rows:
+            rows[r['org_id']]['discussed'] = r['discussed']
+        else:
+            rows[r['org_id']] = {'org_id': r['org_id'], 'name': r['name'], 'org_type': r['org_type'],
+                                 'parent_name': r['parent_name'], 'people': 0, 'appearances': 0, 'shows': 0,
+                                 'last_date': r['last_discussed'], 'discussed': r['discussed']}
+    return [{**r, 'slug': profiles.slugify(r['name'])} for r in rows.values()]
 
 
 def _build_show_directory(cur) -> list:
@@ -4504,7 +4529,8 @@ def people_directory(q: str = "", kind: str = "", sort: str = "appearances",
 @app.get("/api/directory/orgs")
 def org_directory(q: str = "", type: str = "", sort: str = "people",
                         offset: int = 0, limit: int = 50):
-    """Every organisation a guest has worked for, for the /orgs directory."""
+    """Every organisation a guest has worked for, or that episodes discuss,
+    for the /orgs directory."""
     page = profiles.directory_page(
         _directory_index('orgs', _build_org_directory), q=q, fields=('name', 'parent_name'),
         group_field='org_type', group=type, sort=sort, default_sort='people', offset=offset, limit=limit)
@@ -4538,13 +4564,19 @@ def search_profiles(q: str = "", limit: int = 8):
         """, (like, limit))
         people = [{**r, 'slug': profiles.slugify(r['name'])} for r in cur.fetchall()]
         cur.execute("""
-            SELECT o.org_id, o.name, o.org_type, COUNT(DISTINCT ha.host_id) AS people
+            SELECT o.org_id, o.name, o.org_type, COUNT(DISTINCT ha.host_id) AS people,
+                   (SELECT COUNT(DISTINCT et.episode_id) FROM tags tg JOIN episode_tag et ON et.tag_id = tg.tag_id
+                    WHERE tg.org_id = o.org_id AND tg.is_company AND NOT tg.not_a_topic) AS discussed
             FROM organizations o
-            JOIN organization_aliases a ON a.org_id = o.org_id
-            JOIN host_affiliations ha ON ha.company_key = a.normalized_name
+            LEFT JOIN organization_aliases a ON a.org_id = o.org_id
+            LEFT JOIN host_affiliations ha ON ha.company_key = a.normalized_name
             WHERE o.name ILIKE %s AND NOT o.not_an_org
               AND NOT EXISTS (SELECT 1 FROM podcasts sp WHERE sp.org_id = o.org_id AND sp.org_is_show)
-            GROUP BY o.org_id ORDER BY people DESC, o.name LIMIT %s
+            GROUP BY o.org_id
+            -- Someone worked there, or episodes discuss it (BYD: no guests).
+            HAVING COUNT(ha.host_id) > 0
+                OR EXISTS (SELECT 1 FROM tags tg WHERE tg.org_id = o.org_id AND tg.is_company AND NOT tg.not_a_topic)
+            ORDER BY people DESC, discussed DESC, o.name LIMIT %s
         """, (like, limit))
         orgs = [{**r, 'slug': profiles.slugify(r['name'])} for r in cur.fetchall()]
         cur.execute("""
