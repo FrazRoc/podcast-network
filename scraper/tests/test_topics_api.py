@@ -464,3 +464,13 @@ def test_discussed_only_orgs_are_searchable_and_listed(db_conn, monkeypatch):
     assert [(o['name'], o['people'], o['discussed']) for o in hits] == [('BYD', 0, 3)]
     rows = _run(db_conn, monkeypatch, 'org_directory', sort='discussed')['rows']
     assert (rows[0]['name'], rows[0]['people'], rows[0]['discussed']) == ('BYD', 0, 3)
+
+
+def test_sitemap_lists_public_pages(db_conn, monkeypatch):
+    pid, people, _, tags = _setup(db_conn)
+    paths = {p['path'] for p in _run(db_conn, monkeypatch, 'sitemap_paths')['pages']}
+    assert {'/', '/people', '/stats'} <= paths
+    assert f"/people/{people['Ann']}-ann-lee" in paths
+    assert f"/shows/{pid}-grid-talk" in paths
+    assert f"/topics/{tags['geothermal energy']}-geothermal-energy" in paths
+    assert not any(p.startswith(f"/topics/{tags['oil prices']}-") for p in paths)   # one episode: not public

@@ -4539,6 +4539,26 @@ def people_directory(q: str = "", kind: str = "", sort: str = "appearances",
             'topic': ({**topic_row, 'slug': profiles.slugify(topic_row['name'])} if topic and topic_row else None)}
 
 
+@app.get("/api/sitemap")
+def sitemap_paths():
+    """Every public page, for the frontend build's sitemap.xml: the
+    directories, each person, organisation and show, and the topics the
+    directory lists (2+ episodes). lastmod is the newest episode, where known."""
+    def date_of(v):
+        return v.isoformat()[:10] if v else None
+    pages = [{'path': p, 'lastmod': None} for p in ('/', '/people', '/orgs', '/shows', '/topics', '/stats')]
+    for r in _directory_index('people', _build_people_directory):
+        pages.append({'path': f"/people/{r['host_id']}-{r['slug']}", 'lastmod': date_of(r.get('last_date'))})
+    for r in _directory_index('orgs', _build_org_directory):
+        pages.append({'path': f"/orgs/{r['org_id']}-{r['slug']}", 'lastmod': date_of(r.get('last_date'))})
+    for r in _directory_index('shows', _build_show_directory):
+        pages.append({'path': f"/shows/{r['podcast_id']}-{r['slug']}", 'lastmod': date_of(r.get('last_date'))})
+    for r in _directory_index('topics', _build_topic_directory):
+        if r['episodes'] >= topics.MIN_PUBLIC_EPISODES:
+            pages.append({'path': f"/topics/{r['tag_id']}-{r['slug']}", 'lastmod': date_of(r.get('last_date'))})
+    return {'pages': pages}
+
+
 @app.get("/api/directory/orgs")
 def org_directory(q: str = "", type: str = "", sort: str = "people",
                         offset: int = 0, limit: int = 50):
