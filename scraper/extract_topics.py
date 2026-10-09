@@ -43,6 +43,7 @@ from psycopg2.extras import execute_values
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'backend'))
 from description_cleaner import clean_description  # noqa: E402
 from topic_names import CATEGORIES, normalize_topic, topic_slug, topic_words, pick_parent  # noqa: E402
+import topic_suggestions  # noqa: E402
 from extract_affiliations import (  # noqa: E402
     MODELS, BATCH_DISCOUNT, MAX_ATTEMPTS, CHARS_PER_TOKEN,
     _normalise_for_match, message_text, usage_cost,
@@ -548,6 +549,7 @@ def cmd_collect():
     cur = conn.cursor()
     cur.execute("""SELECT DISTINCT batch_id FROM topic_extractions
                    WHERE status = 'pending' AND batch_id IS NOT NULL AND batch_id NOT LIKE 'manual-%%'""")
+    collected = 0
     for (batch_id,) in cur.fetchall():
         batch = client.messages.batches.retrieve(batch_id)
         if batch.processing_status != 'ended':
@@ -574,10 +576,23 @@ def cmd_collect():
             answers.update(parse_response_text(text, expected))
         done, added, retry, dropped = record_results(cur, pending, answers)
         conn.commit()
+        collected += 1
         logger.info(f"Batch {batch_id}: {done} episodes, {added} tags, {retry} to retry, "
                     f"{dropped} dropped; ${usage_cost(tin, tout, True, model):.4f}")
     cur.close()
+    if collected:
+        _refresh_suggestions(conn)
     conn.close()
+
+
+def _refresh_suggestions(conn):
+    """New tags may duplicate old ones: rebuild Topic Admin's merge queue.
+    Never fails the run (the table may not exist on an older database)."""
+    try:
+        logger.info(f"Topic merge suggestions: {topic_suggestions.refresh_suggestions(conn)}")
+    except Exception as e:
+        conn.rollback()
+        logger.warning(f"Topic merge suggestions not refreshed: {e}")
 
 
 def cmd_export(out_dir: str, limit=None, batch_id=None):
@@ -622,6 +637,7 @@ def cmd_import(batch_id: str, paths: list):
     answered = [row for row in pending if item_id(row[0]) in answers]
     done, added, _, dropped = record_results(cur, answered, answers)
     conn.commit()
+    _refresh_suggestions(conn)
     conn.close()
     logger.info(f"{batch_id}: {done} episodes, {added} tags, {dropped} dropped; "
                 f"{len(pending) - len(answered)} still pending")

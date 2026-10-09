@@ -337,3 +337,38 @@ def test_broad_areas_on_profiles_and_stats(db_conn, monkeypatch):
     assert [(i['year'], i['counts']) for i in y['items']] == [(2025, {str(energy): 4})]
     r = _run(db_conn, monkeypatch, 'stats_rising_topics', level='broad')
     assert r['level'] == 'broad' and r['rising'] == []
+
+
+def test_topic_merge_suggestions_queue(db_conn, monkeypatch):
+    import main
+    import topic_suggestions
+    _, _, eps, tags = _setup(db_conn)
+    # 'geothermal' and 'geothermal energy' are one key; make a spelling pair instead.
+    cur = db_conn.cursor()
+    cur.execute("INSERT INTO tags (name, slug, category) VALUES ('oil price', 'oil-price-x', 'Fuels'), "
+                "('permitting reforms', 'permitting-reforms-x', 'Policy and politics') RETURNING tag_id")
+    extra = [r[0] for r in cur.fetchall()]
+    cur.execute("UPDATE tags SET name = 'oil pricing' WHERE tag_id = %s", (extra[0],))
+    cur.execute("INSERT INTO episode_tag (episode_id, tag_id, data_source) VALUES (%s, %s, 'manual'), (%s, %s, 'manual')",
+                (eps[0], extra[0], eps[1], extra[1]))
+    db_conn.commit()
+    conn = psycopg2.connect(db_conn.dsn, cursor_factory=RealDictCursor)
+    assert topic_suggestions.refresh_suggestions(conn) >= 1
+    conn.close()
+    q = _run(db_conn, monkeypatch, 'topic_merge_suggestions')
+    pair = {(i['a']['name'], i['b']['name']) for i in q['items']} | {(i['b']['name'], i['a']['name']) for i in q['items']}
+    assert ('oil prices', 'oil pricing') in pair
+    item = next(i for i in q['items'] if {i['a']['name'], i['b']['name']} == {'oil prices', 'oil pricing'})
+    assert item['reason'] == 'spelling'
+
+    # The topic panel lists it too.
+    panel = _run(db_conn, monkeypatch, 'get_topic_admin', tags['oil prices'])
+    assert [s['name'] for s in panel['suggestions']] == ['oil pricing']
+
+    # "Different" removes it for good; putting one under the other hides a pair.
+    _run(db_conn, monkeypatch, 'mark_topics_not_same', main.NotSameTopicRequest(tag_a=item['tag_a'], tag_b=item['tag_b']))
+    conn = psycopg2.connect(db_conn.dsn, cursor_factory=RealDictCursor)
+    topic_suggestions.refresh_suggestions(conn)
+    conn.close()
+    q = _run(db_conn, monkeypatch, 'topic_merge_suggestions')
+    assert 'oil pricing' not in {i['a']['name'] for i in q['items']} | {i['b']['name'] for i in q['items']}

@@ -35,6 +35,7 @@ from role_selection import pick_current_role, format_for_display, display_title
 from org_names import normalize_org_name, ambiguous_spelling
 import org_stats
 from org_suggestions import refresh_suggestions
+import topic_suggestions
 from similar_people import find_possible_matches, index_people
 import profiles
 import topics
@@ -4853,8 +4854,14 @@ def get_topic_admin(tag_id: int):
         episodes = cur.fetchall()
         cur.execute("""SELECT tag_id, name, (SELECT COUNT(*) FROM episode_tag et WHERE et.tag_id = t.tag_id) AS episodes
                        FROM tags t WHERE parent_tag_id = %s ORDER BY episodes DESC, name LIMIT 200""", (tag_id,))
-        return {**tag, 'aliases': aliases, 'episodes': episodes, 'children': cur.fetchall(),
-                'categories': list(CATEGORIES)}
+        children = cur.fetchall()
+        cur.execute(f"""SELECT s.tag_a, s.tag_b, s.reason {_LIVE_TOPIC_SUGGESTIONS} AND %s IN (s.tag_a, s.tag_b)
+                        ORDER BY s.episodes DESC LIMIT 20""", (tag_id,))
+        sugg = cur.fetchall()
+        others = _topic_cards(cur, {r['tag_b'] if r['tag_a'] == tag_id else r['tag_a'] for r in sugg})
+        suggestions = [{**others[r['tag_b'] if r['tag_a'] == tag_id else r['tag_a']], 'reason': r['reason']} for r in sugg]
+        return {**tag, 'aliases': aliases, 'episodes': episodes, 'children': children,
+                'suggestions': suggestions, 'categories': list(CATEGORIES)}
     finally:
         cur.close()
         conn.close()
@@ -4922,6 +4929,102 @@ def update_topic(tag_id: int, body: TopicUpdateRequest):
     finally:
         cur.close()
         conn.close()
+
+
+class NotSameTopicRequest(BaseModel):
+    tag_a: int
+    tag_b: int
+
+
+@app.post("/api/admin/topics/not-same", dependencies=[Depends(verify_admin)])
+def mark_topics_not_same(body: NotSameTopicRequest):
+    """Record that two topics are different, so they stop being suggested."""
+    a, b = sorted((body.tag_a, body.tag_b))
+    if a == b:
+        raise HTTPException(status_code=400, detail="Pick two different topics")
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("INSERT INTO not_same_topic_pairs (tag_a, tag_b) VALUES (%s, %s) ON CONFLICT DO NOTHING", (a, b))
+        cur.execute("DELETE FROM topic_merge_suggestions WHERE tag_a = %s AND tag_b = %s", (a, b))
+        conn.commit()
+        return {"success": True}
+    finally:
+        cur.close()
+        conn.close()
+
+
+# A stored topic suggestion still needing a decision: both sides still
+# topics, and neither now directly under the other.
+_LIVE_TOPIC_SUGGESTIONS = """
+    FROM topic_merge_suggestions s
+    JOIN tags a ON a.tag_id = s.tag_a
+    JOIN tags b ON b.tag_id = s.tag_b
+    WHERE NOT a.not_a_topic AND NOT a.is_company AND NOT a.is_person
+      AND NOT b.not_a_topic AND NOT b.is_company AND NOT b.is_person
+      AND a.parent_tag_id IS DISTINCT FROM b.tag_id
+      AND b.parent_tag_id IS DISTINCT FROM a.tag_id
+"""
+
+
+def _topic_cards(cur, ids) -> dict:
+    """{tag_id: name, category, episodes, parent name, other spellings} for suggestion cards."""
+    if not ids:
+        return {}
+    cur.execute("""
+        SELECT t.tag_id, t.name, t.category, t.is_broad, pt.name AS parent_name,
+               (SELECT COUNT(*) FROM episode_tag et WHERE et.tag_id = t.tag_id) AS episodes,
+               ARRAY(SELECT a.alias_name FROM tag_aliases a WHERE a.tag_id = t.tag_id AND a.alias_name <> t.name
+                     ORDER BY a.alias_name) AS aliases,
+               ARRAY(SELECT e.title FROM episode_tag et JOIN episodes e ON e.episode_id = et.episode_id
+                     WHERE et.tag_id = t.tag_id ORDER BY e.published_date DESC NULLS LAST LIMIT 2) AS sample_episodes
+        FROM tags t LEFT JOIN tags pt ON pt.tag_id = t.parent_tag_id
+        WHERE t.tag_id = ANY(%s)
+    """, (list(ids),))
+    return {r['tag_id']: r for r in cur.fetchall()}
+
+
+@app.get("/api/admin/topics-suggestions", dependencies=[Depends(verify_admin)])
+def topic_merge_suggestions(limit: int = 40, offset: int = 0):
+    """The stored topic merge-suggestion queue (topic_suggestions.py), most
+    episodes first; pairs decided since it was computed are skipped."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(f"""
+            SELECT s.tag_a, s.tag_b, s.reason, s.score, s.episodes {_LIVE_TOPIC_SUGGESTIONS}
+            ORDER BY s.episodes DESC,
+                     CASE s.reason WHEN 'acronym' THEN 0 WHEN 'same_words' THEN 1 ELSE 2 END,
+                     s.tag_a, s.tag_b
+            LIMIT %s OFFSET %s
+        """, (max(1, min(limit, 200)), max(0, offset)))
+        rows = cur.fetchall()
+        cur.execute(f"SELECT COUNT(*) AS total, MAX(s.computed_at) AS computed_at {_LIVE_TOPIC_SUGGESTIONS}")
+        meta = cur.fetchone()
+        cards = _topic_cards(cur, {r['tag_a'] for r in rows} | {r['tag_b'] for r in rows})
+        return {"total": meta['total'], "computed_at": meta['computed_at'],
+                "items": [{**r, 'a': cards[r['tag_a']], 'b': cards[r['tag_b']]} for r in rows]}
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _refresh_topic_suggestions_job():
+    conn = get_db_connection()
+    try:
+        topic_suggestions.refresh_suggestions(conn)
+    except Exception:
+        import traceback
+        traceback.print_exc()
+    finally:
+        conn.close()
+
+
+@app.post("/api/admin/topics-suggestions/refresh", dependencies=[Depends(verify_admin)])
+def refresh_topic_merge_suggestions(background_tasks: BackgroundTasks):
+    """Rebuild the topic suggestion queue after the response is sent (seconds)."""
+    background_tasks.add_task(_refresh_topic_suggestions_job)
+    return {"started": True}
 
 
 @app.post("/api/admin/topics/{keep_id}/merge/{drop_id}", dependencies=[Depends(verify_admin)])
