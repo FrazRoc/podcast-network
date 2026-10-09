@@ -6,9 +6,10 @@ import { TalksAbout, DiscussedIn } from './Topics';
 import { ORG_TYPE_LABELS, ORG_TYPE_COLORS } from '../chartUtils';
 import { useProfile, personHref, orgHref, showHref, avatarUrl, fmtDate, fmtMonthYear, plural, imageUrl, imageFallback } from '../profileUtils';
 
-const describe = (o) => [o.name,
-  `Who from ${o.name} has been on clean-energy podcasts: ${plural(o.totals.people, 'person', 'people')}, `
-  + `${plural(o.totals.appearances, 'appearance')} across ${plural(o.totals.shows, 'show')}.`];
+const describe = (o) => [o.name, o.totals.people === 0 && o.discussed_in?.episodes
+  ? `${o.name} on clean-energy podcasts: discussed on ${plural(o.discussed_in.episodes, 'episode')}.`
+  : `Who from ${o.name} has been on clean-energy podcasts: ${plural(o.totals.people, 'person', 'people')}, `
+    + `${plural(o.totals.appearances, 'appearance')} across ${plural(o.totals.shows, 'show')}.`];
 
 export default function OrgPage() {
   const state = useProfile('orgs', '/orgs/', describe);
@@ -79,14 +80,21 @@ export default function OrgPage() {
               </div>
             </section>
 
-            <div className="grid grid-cols-3 gap-2">
-              <Stat label="People" value={o.totals.people} />
-              <Stat label="Appearances" value={o.totals.appearances} />
-              <Stat label="Shows" value={o.totals.shows} />
-            </div>
+            {/* Only discussed (no guest has worked there): lead with that, not three zeros. */}
+            {o.totals.people === 0 && o.discussed_in?.episodes > 0 ? (
+              <div className="grid grid-cols-1 gap-2">
+                <Stat label="Discussed on" value={plural(o.discussed_in.episodes, 'episode')} />
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-2">
+                <Stat label="People" value={o.totals.people} />
+                <Stat label="Appearances" value={o.totals.appearances} />
+                <Stat label="Shows" value={o.totals.shows} />
+              </div>
+            )}
 
             {o.people.length === 0 && (
-              <p className="text-sm text-gray-500 text-center">No guest appearances recorded for this organisation yet.</p>
+              <p className="text-sm text-gray-500 text-center">No guests from {o.name} recorded yet.</p>
             )}
 
             {current.length > 0 && (

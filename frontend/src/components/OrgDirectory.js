@@ -5,7 +5,7 @@ import { useUrlParams, useDirectory, SearchBox, SortSelect, FilterChips, Directo
 import { ORG_TYPE_LABELS, ORG_TYPE_COLORS } from '../chartUtils';
 import { orgHref, fmtMonthYear, plural, setMeta } from '../profileUtils';
 
-const SORTS = [['people', 'Most people'], ['recent', 'Most recent'], ['name', 'A–Z']];
+const SORTS = [['people', 'Most people'], ['discussed', 'Most discussed'], ['recent', 'Most recent'], ['name', 'A–Z']];
 
 export default function OrgDirectory() {
   useEffect(() => setMeta('Organisations · Podcast Network',
@@ -24,7 +24,9 @@ export default function OrgDirectory() {
         </p>
       </div>
       <div className="text-right text-xs flex-shrink-0">
-        <p className="text-gray-600">{plural(o.people, 'person', 'people')}<span className="hidden sm:inline"> · {plural(o.appearances, 'appearance')}</span></p>
+        {o.people > 0
+          ? <p className="text-gray-600">{plural(o.people, 'person', 'people')}<span className="hidden sm:inline"> · {plural(o.appearances, 'appearance')}</span></p>
+          : <p className="text-gray-600">discussed on {plural(o.discussed, 'episode')}</p>}
         {o.last_date && <p className="text-gray-400">{fmtMonthYear(o.last_date)}</p>}
       </div>
     </li>
@@ -33,7 +35,7 @@ export default function OrgDirectory() {
   return (
     <SiteShell>
       <DirectoryHeading title="Organisations"
-        blurb="Where guests work, by how many of their people have been on. Counts are guests only, so a show's own hosts don't inflate them." />
+        blurb="Where guests work, by how many of their people have been on, and the companies episodes discuss. Counts are guests only, so a show's own hosts don't inflate them." />
       <div className="flex gap-2">
         <SearchBox value={params.q} onChange={q => set({ q })} placeholder="Filter by name…" />
         <SortSelect value={params.sort} options={SORTS} onChange={sort => set({ sort })} />

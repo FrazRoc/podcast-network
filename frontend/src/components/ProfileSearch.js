@@ -54,7 +54,7 @@ export default function ProfileSearch({ className = '' }) {
             <a key={`o${o.org_id}`} href={orgHref(o.org_id, o.slug)} className={row}>
               <OrgLogo orgId={o.org_id} name={o.name} size={24} />
               <span className="flex-1 truncate">{o.name}</span>
-              <span className="text-xs text-gray-400">{plural(o.people, 'person', 'people')}</span>
+              <span className="text-xs text-gray-400">{o.people > 0 ? plural(o.people, 'person', 'people') : `discussed on ${plural(o.discussed || 0, 'episode')}`}</span>
             </a>
           ))}
           {results.shows.length > 0 && <p className={heading}>Shows</p>}
