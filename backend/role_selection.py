@@ -326,11 +326,29 @@ def singular_role(title: str | None) -> str | None:
     return _PLURAL_ROLE_RE.sub(lambda m: m.group(1), title) if title else title
 
 
+# A title that is only a verb from the text ("he founded Sunnova", "Tom leads
+# the Critical Materials Initiative") names a role in other words; ~100 such
+# rows came out of extraction (site review, Oct 2026). Whole-title matches only.
+_VERB_TITLES = {
+    'founded': 'founder', 'founding': 'founder', 'co-founded': 'co-founder', 'cofounded': 'co-founder',
+    'co-founding': 'co-founder', 'led': 'lead', 'leads': 'lead', 'leading': 'lead',
+    'directed': 'director', 'directs': 'director', 'directing': 'director',
+}
+
+
+def noun_title(title: str | None) -> str | None:
+    """A verb-only title as its role ("founded" -> "founder")."""
+    if not title:
+        return title
+    return _VERB_TITLES.get(title.strip().lower(), title)
+
+
 def tidy_title(title: str | None) -> str | None:
-    """The spelling fixes every stored title gets: co- roles hyphenated,
-    common chief titles and vice presidents abbreviated, a plural role made
-    singular, and the other standardisations in standardise_title_words()."""
-    return singular_role(standardise_title_words(abbreviate_chiefs(hyphenate_co(title))))
+    """The spelling fixes every stored title gets: a verb-only title made a
+    role, co- roles hyphenated, common chief titles and vice presidents
+    abbreviated, a plural role made singular, and the other standardisations
+    in standardise_title_words()."""
+    return singular_role(standardise_title_words(abbreviate_chiefs(hyphenate_co(noun_title(title)))))
 
 
 def display_title(title: str | None, title_kind: str | None = None) -> str | None:

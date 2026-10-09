@@ -12,7 +12,7 @@ from psycopg2.extras import RealDictCursor
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '..', 'backend'))
 
-from role_selection import pick_current_role, display_title, format_for_display  # noqa: E402
+from role_selection import pick_current_role, display_title, format_for_display, tidy_title  # noqa: E402
 
 
 def row(episode_id, published, title=None, company=None, kind=None, former=False, other=False,
@@ -405,3 +405,22 @@ class TestPeopleListRoles:
         dict_cur = role_db.cursor(cursor_factory=RealDictCursor)
         panel = format_for_display(pick_current_role(_role_rows(dict_cur, host_id), _role_pin(dict_cur, host_id)))
         assert _all_current_roles(dict_cur)[host_id][:2] == (panel['title'], panel['company'])
+
+
+class TestVerbTitles:
+    """A title that is only a verb from the text ("he founded Sunnova",
+    "Tom leads the …") is shown, and stored at extraction, as the role."""
+
+    def test_verbs_become_roles(self):
+        assert display_title('founded') == 'Founder'
+        assert display_title('founding') == 'Founder'
+        assert display_title('co-founded') == 'Co-Founder'
+        assert display_title('leads') == 'Lead'
+        assert display_title('Leading') == 'Lead'
+        assert display_title('directed') == 'Director'
+        assert tidy_title('founded') == 'founder'
+
+    def test_only_whole_titles(self):
+        assert display_title('head') == 'Head'
+        assert display_title('Founding Partner') == 'Founding Partner'
+        assert display_title('Director of Research') == 'Director of Research'
