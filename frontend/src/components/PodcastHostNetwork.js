@@ -523,7 +523,40 @@ const ConnectionDetails = ({ connection, onClose }) => (
 const CONNECTIONS_CAP = 40;
 const PODCASTS_CAP = 10;
 
-const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuery, onSearchChange, loading, isAdmin, viewMode, onViewModeChange, showGraphError }) => (
+// The broad topics, grouped by category, for the Topic filter.
+const TopicSelect = ({ broadTopics, value, onChange, viewMode, loadingMembers }) => {
+  const groups = [];
+  broadTopics.forEach(t => {
+    const g = groups.find(x => x.category === t.category);
+    if (g) g.items.push(t); else groups.push({ category: t.category, items: [t] });
+  });
+  return (
+    <div className="space-y-1">
+      <label className="block text-sm font-medium text-gray-700">Topic</label>
+      <select
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm shadow-sm focus:border-teal-500 focus:outline-none"
+      >
+        <option value="">All topics</option>
+        {groups.map(g => (
+          <optgroup key={g.category} label={g.category}>
+            {g.items.map(t => <option key={t.tag_id} value={t.tag_id}>{t.name}</option>)}
+          </optgroup>
+        ))}
+      </select>
+      {value && (
+        <p className="text-xs text-gray-400">
+          {loadingMembers ? 'Loading…' : viewMode === 'shows'
+            ? 'Shows with at least 2 episodes on it, or on anything under it.'
+            : 'People on at least 2 episodes about it, or about anything under it.'}
+        </p>
+      )}
+    </div>
+  );
+};
+
+const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuery, onSearchChange, loading, isAdmin, viewMode, onViewModeChange, showGraphError, broadTopics, loadingMembers }) => (
   <div className="space-y-4">
     <div className="flex rounded-lg bg-gray-100 p-0.5 text-sm">
       {[['people', 'People'], ['shows', 'Shows']].map(([mode, label]) => (
@@ -540,6 +573,11 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
 
     {showGraphError && viewMode === 'shows' && (
       <p className="text-sm text-red-500">Couldn't load the show network: {showGraphError}</p>
+    )}
+
+    {broadTopics?.length > 0 && (
+      <TopicSelect broadTopics={broadTopics} value={currentFilters.topic} viewMode={viewMode}
+        loadingMembers={loadingMembers} onChange={topic => onFiltersChange({ topic })} />
     )}
 
     <div className={`grid gap-2 ${viewMode === 'shows' ? 'grid-cols-2' : 'grid-cols-3'}`}>
@@ -688,7 +726,7 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
         minClusterSize: 8, repulsion: 60, centering: 8, spacing: 1,
         drawMinEpisodes: 1,
         selectedRoles: ['Host', 'Guest'],
-        selectedChannel: 'all', selectedGenre: 'all',
+        selectedChannel: 'all', selectedGenre: 'all', topic: '',
       })}
       className="w-full py-2 px-4 bg-gray-100 hover:bg-gray-200 rounded-md text-sm font-medium text-gray-600"
     >
@@ -963,7 +1001,16 @@ const PodcastHostNetwork = () => {
     selectedRoles: ['Host', 'Guest'],
     selectedChannel: 'all',
     selectedGenre: 'all',
+    // A broad topic's tag_id ('' for all). ?topic= survives a refresh.
+    topic: (() => {
+      try { return new URLSearchParams(window.location.search).get('topic') || ''; } catch { return ''; }
+    })(),
   });
+  // The broad topics for the Topic filter, and who belongs to the chosen one:
+  // {people: Set, shows: Set}, fetched only when a topic is picked.
+  const [broadTopics, setBroadTopics] = useState([]);
+  const [topicMembers, setTopicMembers] = useState(null);
+  const [loadingMembers, setLoadingMembers] = useState(false);
   const [networkStats, setNetworkStats] = useState({
     maxConnections: 0, maxPodcasts: 0,
     channels: [], genres: [],
@@ -1055,6 +1102,26 @@ const PodcastHostNetwork = () => {
   }, [loadData]);
 
   useEffect(() => {
+    fetch(`${API_BASE_URL}/api/topics?limit=1`)
+      .then(r => (r.ok ? r.json() : Promise.reject(r)))
+      .then(d => setBroadTopics(d.broad || []))
+      .catch(() => setBroadTopics([]));   // the filter just doesn't appear
+  }, []);
+
+  useEffect(() => {
+    const topic = currentFilters.topic;
+    if (!topic) { setTopicMembers(null); return undefined; }
+    let cancelled = false;
+    setLoadingMembers(true);
+    fetch(`${API_BASE_URL}/api/topics/${topic}/members`)
+      .then(r => (r.ok ? r.json() : Promise.reject(r)))
+      .then(d => { if (!cancelled) setTopicMembers({ people: new Set(d.people), shows: new Set(d.shows) }); })
+      .catch(() => { if (!cancelled) setTopicMembers(null); })
+      .finally(() => { if (!cancelled) setLoadingMembers(false); });
+    return () => { cancelled = true; };
+  }, [currentFilters.topic]);
+
+  useEffect(() => {
     if (viewMode !== 'shows' || showGraph) return;
     fetch(SHOW_API_URL)
       .then(r => { if (!r.ok) throw new Error(`API error ${r.status}`); return r.json(); })
@@ -1140,6 +1207,7 @@ const PodcastHostNetwork = () => {
       if (currentFilters.selectedRoles.length && !currentFilters.selectedRoles.includes(node.role)) return false;
       if (currentFilters.selectedGenre !== 'all' && node.genre !== currentFilters.selectedGenre) return false;
       if (currentFilters.selectedChannel !== 'all' && node.channel !== currentFilters.selectedChannel) return false;
+      if (currentFilters.topic && topicMembers && !topicMembers.people.has(Number(node.id))) return false;
       return true;
     });
 
@@ -1156,7 +1224,7 @@ const PodcastHostNetwork = () => {
     });
 
     return filterSmallClusters({ nodes: filteredNodes, links: filteredLinks }, currentFilters.minClusterSize);
-  }, [graphData, currentFilters, searchQuery]);
+  }, [graphData, currentFilters, searchQuery, topicMembers]);
 
   // The shows view. Far smaller — 91 nodes against 1,952 — so it needs no
   // cluster pruning or degree floor, just a threshold on how much two shows
@@ -1166,7 +1234,9 @@ const PodcastHostNetwork = () => {
     // Deliberately ignores searchQuery: the box is hidden in this view, so a
     // term left over from the people graph would filter shows invisibly with
     // no control on screen to clear it.
-    const nodes = showGraph.nodes;
+    const nodes = currentFilters.topic && topicMembers
+      ? showGraph.nodes.filter(n => topicMembers.shows.has(Number(n.id)))
+      : showGraph.nodes;
     const ids = new Set(nodes.map(n => n.id));
 
     // The threshold is always on the raw count, even when the width is drawn
@@ -1196,7 +1266,8 @@ const PodcastHostNetwork = () => {
     // "this show shares almost nobody" is a finding, not an absence of one.
     // With no edges holding them they drift to the edge of their own accord.
     return { nodes, links };
-  }, [showGraph, currentFilters.minShared, currentFilters.minOverlap, currentFilters.weighting]);
+  }, [showGraph, currentFilters.minShared, currentFilters.minOverlap, currentFilters.weighting,
+      currentFilters.topic, topicMembers]);
 
   const showingShows = viewMode === 'shows';
   const showNameById = useMemo(
@@ -1287,11 +1358,13 @@ const PodcastHostNetwork = () => {
       const url = new URL(window.location.href);
       if (viewMode === 'shows') url.searchParams.set('view', 'shows');
       else url.searchParams.delete('view');
+      if (currentFilters.topic) url.searchParams.set('topic', currentFilters.topic);
+      else url.searchParams.delete('topic');
       window.history.replaceState(null, '', url.toString());
     } catch {
       /* history is unavailable in some sandboxed frames; the view still works */
     }
-  }, [viewMode]);
+  }, [viewMode, currentFilters.topic]);
 
   const handleNodeClick = useCallback(node => {
     if (selectedNode?.id === node.id) {
@@ -1512,6 +1585,8 @@ const PodcastHostNetwork = () => {
             viewMode={viewMode}
             onViewModeChange={setViewMode}
             showGraphError={showGraphError}
+            broadTopics={broadTopics}
+            loadingMembers={loadingMembers}
           />
         )}
 
