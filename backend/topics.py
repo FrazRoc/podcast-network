@@ -61,7 +61,11 @@ def broad_areas(rows: list, min_episodes: int = MIN_EPISODES, limit: int = 8) ->
     broad_rows = [{'episode_id': r['episode_id'], 'is_primary': r.get('is_primary'), 'tag_id': r['broad_id'],
                    'name': r['broad_name'], 'category': r['broad_category']}
                   for r in rows if r.get('broad_id')]
-    return rank_topics(broad_rows, min_episodes, limit)
+    # Shown with their share of episodes, so ordered by it (not by the
+    # main-topic-weighted score topics use).
+    ranked = sorted(rank_topics(broad_rows, min_episodes),
+                    key=lambda t: (-t['episodes'], -t['as_main_topic'], t['slug']))
+    return ranked[:limit]
 
 
 def summary(rows: list, tagged_episodes: int, limit: int = 12, min_episodes: int = MIN_EPISODES) -> dict:
