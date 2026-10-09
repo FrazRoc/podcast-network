@@ -934,10 +934,13 @@ Commands: `scrape`, `add`, `status`, `reset`, `backfill`, `backfill-rss`,
 `refresh-descriptions`. Useful flags: `--new-only`, `--podcast <exact title>`,
 `--max`, `--dry-run`, `--limit`, `--since`, `--force`.
 
-This is the **live production database**. There is no staging copy. The
-read-only checks are free; anything that writes falls under the
-quantify-and-approve rule above, and the `lock_timeout` rule applies to every
-migration.
+This is the **live production database**. There is no staging copy.
+It is Render's paid Basic Postgres ($6/month, PostgreSQL 18), upgraded in
+place from the free instance on Oct 9 2026 before the free one expired —
+same instance, same connection string, same region as the backend (178 MB
+at the time). The read-only checks are free; anything that writes falls
+under the quantify-and-approve rule above, and the `lock_timeout` rule
+applies to every migration.
 
 ### Triggering the remote jobs
 
@@ -986,7 +989,6 @@ one repo. Git keeps the branches apart; nothing keeps the database apart.
 
 ## Open threads
 
-- Free Postgres expires around 2026-10-11 — migration decision needed
 - ~3,300 suggestions pending review
 - 3 shows skipped in the RSS backfill (~560 episodes); The Hydrogen Podcast
   feed 404s; 7 shows capped at 50 episodes were never re-measured
