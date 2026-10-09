@@ -694,6 +694,23 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   parent/child are skipped; "Different" goes in `not_same_topic_pairs` for
   good. Stored queue, rebuilt after `extract_topics.py import`/`collect` and
   by Recompute (~6 s). 278 pairs when first built.
+- **Topic descriptions** (`tags.description`, `migrate_add_topic_descriptions.sql`,
+  Oct 2026): one or two sentences under the topic page's heading, edited in
+  Topic Admin's panel. Written for the 55 broad topics; others are empty.
+- **Network graph Topic filter** (`PodcastHostNetwork.js`, `?topic=` deep
+  link): pick a broad topic, and the graph keeps people credited on 2+ of its
+  episodes (anything under it counts) and, in Shows view, shows with 2+.
+  Ids come from `GET /api/topics/{id}/members`, so the graph payload is
+  unchanged.
+- **"Talks about similar things"** (`backend/topic_similarity.py`,
+  `GET /api/people|shows/{id}/similar`, `SimilarByTopic` in `Topics.js`, on
+  person and show pages): a topic fingerprint per person/show — each
+  topic's episodes plus its ancestors', main topic counted twice,
+  log-dampened, IDF-weighted — compared by cosine. People need 2+ tagged
+  episodes, and anyone sharing over half the smaller episode list (co-hosts)
+  is left out. The reason chips are the most specific shared topics (a topic
+  above another shared one is dropped). The index (~1 s, ~3,500 people and
+  ~150 shows) is cached with the directory lists.
 - Not yet:
   a scheduled tagging step.
 
