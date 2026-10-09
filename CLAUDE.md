@@ -674,8 +674,20 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   merged, 55 not a topic; 805 one-offs with no sensible home (jiu jitsu,
   "bureaucracy") stay orphaned. 14,117 of 14,936 visible topics now have a
   parent. Files and undo: `orphans_draft*.{csv,md}`, `orphans_undo_*.json`.
+- **Topic merge suggestions** (Oct 2026, `backend/topic_suggestions.py`,
+  `migrate_add_topic_merge_suggestions.sql`): Topic Admin's "Merge
+  suggestions" tab (`/admin/topics/suggestions`, `AdminTopicSuggestions.js`)
+  and a "Possible duplicates" section in the topic panel. Only likely
+  synonyms: `same_words` (reordered), `spelling` (the same words in another
+  form — stems compared, so investing = investment, China = Chinese, but not
+  electrician = electricity), `acronym` (initials, confirmed by an episode
+  text using both). Trigram similarity is deliberately not a signal: on
+  topics it finds narrower topics (parents) and coincidences. Pairs already
+  parent/child are skipped; "Different" goes in `not_same_topic_pairs` for
+  good. Stored queue, rebuilt after `extract_topics.py import`/`collect` and
+  by Recompute (~6 s). 278 pairs when first built.
 - Not yet:
-  topic merge suggestions; a scheduled tagging step.
+  a scheduled tagging step.
 
 ## Tests
 
