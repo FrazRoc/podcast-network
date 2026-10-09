@@ -3,6 +3,8 @@ import { API_BASE_URL } from '../config';
 import { adminFetch } from '../adminAuth';
 import AdminHeader from './AdminHeader';
 import AdminListCount from './AdminListCount';
+import AdminSubTabs from './AdminSubTabs';
+import TopicSuggestions, { REASONS, mergeTopics, markDifferent } from './AdminTopicSuggestions';
 import { formatDateOnly } from '../adminUtils';
 import { Swatch, CATEGORIES } from './Topics';
 import { topicHref, orgHref, personHref, slugify } from '../profileUtils';
@@ -158,6 +160,41 @@ function ParentBox({ topic, saving, onSave }) {
   );
 }
 
+// Open merge suggestions naming this topic, decided from the panel.
+function PossibleDuplicates({ topic, onDone }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const act = async (fn) => {
+    setBusy(true); setError('');
+    try { await fn(); onDone(); } catch (e) { setError(e.message); }
+    setBusy(false);
+  };
+  const btn = 'text-xs px-2 py-0.5 rounded border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50';
+  return (
+    <div>
+      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Possible duplicates</p>
+      <ul className="space-y-1.5">
+        {topic.suggestions.map(o => (
+          <li key={o.tag_id} className="text-sm">
+            <div className="flex items-center gap-2">
+              <a href={`/admin/topics?tag_id=${o.tag_id}`} className="flex-1 truncate text-blue-700 hover:underline">{o.name}</a>
+              <span className="text-xs text-gray-400">{o.episodes}</span>
+              <span className={`text-[10px] px-1 py-0.5 rounded ${(REASONS[o.reason] || REASONS.spelling).bg}`}>
+                {(REASONS[o.reason] || REASONS.spelling).label}</span>
+            </div>
+            <div className="mt-0.5 flex flex-wrap gap-1">
+              <button disabled={busy} className={btn} onClick={() => act(() => mergeTopics(topic.tag_id, o.tag_id))}>Merge it into this</button>
+              <button disabled={busy} className={btn} onClick={() => act(() => mergeTopics(o.tag_id, topic.tag_id))}>Merge this into it</button>
+              <button disabled={busy} className={btn} onClick={() => act(() => markDifferent(topic.tag_id, o.tag_id))}>Different</button>
+            </div>
+          </li>
+        ))}
+      </ul>
+      {error && <p className="mt-1 text-xs text-red-500">{error}</p>}
+    </div>
+  );
+}
+
 function TopicPanel({ tagId, onChanged, onClose }) {
   const [t, setT] = useState(null);
   const [name, setName] = useState('');
@@ -227,6 +264,9 @@ function TopicPanel({ tagId, onChanged, onClose }) {
       </div>
       {!t.is_company && !t.is_person && !t.not_a_topic && (
         <ParentBox topic={t} saving={saving} onSave={save} />
+      )}
+      {t.suggestions?.length > 0 && (
+        <PossibleDuplicates topic={t} onDone={() => { load(); onChanged(); }} />
       )}
       {t.children?.length > 0 && (
         <div>
@@ -307,7 +347,21 @@ function TopicPanel({ tagId, onChanged, onClose }) {
   );
 }
 
+// Each tab has its own address, so a refresh or a shared link lands on it.
+const TAB_PATHS = { topics: '/admin/topics', suggestions: '/admin/topics/suggestions' };
+const tabFromPath = () => (window.location.pathname.startsWith(TAB_PATHS.suggestions) ? 'suggestions' : 'topics');
+
 export default function AdminTopics() {
+  const [tab, setTabState] = useState(tabFromPath);
+  const setTab = (t) => {
+    setTabState(t);
+    if (window.location.pathname !== TAB_PATHS[t]) window.history.pushState(null, '', TAB_PATHS[t]);
+  };
+  useEffect(() => {
+    const onPop = () => setTabState(tabFromPath());
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
   const [q, setQ] = useState('');
   const [view, setView] = useState('active');
   const [category, setCategory] = useState('');
@@ -345,6 +399,13 @@ export default function AdminTopics() {
     <div className="min-h-screen bg-gray-100 text-left">
       <AdminHeader active="Topics" />
       <div className="p-4 sm:p-6">
+        <AdminSubTabs active={tab} tabs={[
+          { id: 'topics', label: 'Topics', onClick: () => setTab('topics') },
+          { id: 'suggestions', label: 'Merge suggestions', onClick: () => setTab('suggestions') },
+        ]} />
+        {tab === 'suggestions' ? (
+          <div className="max-w-3xl"><TopicSuggestions onChanged={load} /></div>
+        ) : (
         <div className="flex flex-col md:flex-row gap-6">
           <div className="flex-1 min-w-0">
             <div className="bg-white rounded-2xl border border-gray-200 p-4 mb-3 space-y-3">
@@ -414,6 +475,7 @@ export default function AdminTopics() {
             )}
           </div>
         </div>
+        )}
       </div>
     </div>
   );
