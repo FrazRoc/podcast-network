@@ -419,3 +419,30 @@ def test_topic_description(db_conn, monkeypatch):
     assert _run(db_conn, monkeypatch, 'get_topic', tags['geothermal energy'])['description'] == 'Heat from the ground.'
     _run(db_conn, monkeypatch, 'update_topic', tags['geothermal energy'], main.TopicUpdateRequest(description=''))
     assert _run(db_conn, monkeypatch, 'get_topic_admin', tags['geothermal energy'])['description'] is None
+
+
+def test_similar_people_and_shows(db_conn, monkeypatch):
+    pid, people, eps, tags = _setup(db_conn)
+    cur = db_conn.cursor()
+    cur.execute("INSERT INTO podcasts (apple_podcast_id, title) VALUES ('2', 'Heat Hour') RETURNING podcast_id")
+    pid2 = cur.fetchone()[0]
+    cur.execute("INSERT INTO hosts (first_name, last_name) VALUES ('Cy', 'Wu') RETURNING host_id")
+    cy = cur.fetchone()[0]
+    for i in range(2):
+        cur.execute("INSERT INTO episodes (podcast_id, title, published_date) VALUES (%s, %s, '2025-06-01') RETURNING episode_id",
+                    (pid2, f'Heat {i}'))
+        ep = cur.fetchone()[0]
+        cur.execute("INSERT INTO episode_host (episode_id, host_id, is_guest) VALUES (%s, %s, true)", (ep, cy))
+        cur.execute("INSERT INTO episode_tag (episode_id, tag_id, is_primary, data_source) VALUES (%s, %s, true, 'manual')",
+                    (ep, tags['geothermal energy']))
+    db_conn.commit()
+
+    s = _run(db_conn, monkeypatch, 'person_similar', people['Ann'])
+    # Hal is on all of Ann's episodes (her host): left out. Bo has one episode.
+    assert [p['name'] for p in s['similar']] == ['Cy Wu']
+    assert [t['name'] for t in s['similar'][0]['shared']] == ['geothermal energy']
+    assert _run(db_conn, monkeypatch, 'person_similar', people['Bo'])['similar'] == []
+
+    shows = _run(db_conn, monkeypatch, 'show_similar', pid)
+    assert [x['title'] for x in shows['similar']] == ['Heat Hour']
+    assert shows['similar'][0]['shared'][0]['name'] == 'geothermal energy'

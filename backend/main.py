@@ -40,6 +40,7 @@ from similar_people import find_possible_matches, index_people
 import profiles
 import topics
 import topic_stats
+import topic_similarity
 from topic_names import CATEGORIES, normalize_topic
 from topic_merge import merge_tags, rename_conflict, rename_tag, would_cycle
 import x_avatars
@@ -379,7 +380,7 @@ extra_origins = [o.strip() for o in os.getenv("ADDITIONAL_ALLOWED_ORIGINS", "").
 # forth between pages is then instant). Admins' pages fetch with no-cache, so
 # an edit shows up on the next load.
 _PUBLIC_CACHEABLE_RE = re.compile(
-    r'^/api/(?:(?:people|orgs|shows)/\d+/profile|directory/[a-z]+|search|show-orgs|topics(?:/\d+(?:/members)?)?|stats/[a-z-]+)$')
+    r'^/api/(?:(?:people|orgs|shows)/\d+/profile|(?:people|shows)/\d+/similar|directory/[a-z]+|search|show-orgs|topics(?:/\d+(?:/members)?)?|stats/[a-z-]+)$')
 
 
 @app.middleware("http")
@@ -4791,6 +4792,78 @@ def topic_members(tag_id: int, min_episodes: int = topics.MIN_EPISODES):
     finally:
         cur.close()
         conn.close()
+
+
+# "Talks about similar things" on person and show pages (topic_similarity.py).
+# The index is built once from every credited episode's topics (~1 s) and
+# kept with the directory lists.
+_REAL_TOPIC = "NOT t.not_a_topic AND NOT t.is_company AND NOT t.is_person"
+
+
+def _topic_parents(cur) -> dict:
+    cur.execute(f"SELECT tag_id, parent_tag_id FROM tags t WHERE {_REAL_TOPIC}")
+    return {r['tag_id']: r['parent_tag_id'] for r in cur.fetchall()}
+
+
+def _build_similar_people(cur):
+    parents = _topic_parents(cur)
+    cur.execute(f"""
+        SELECT eh.host_id, et.episode_id, et.tag_id, et.is_primary
+        FROM episode_host eh JOIN episode_tag et ON et.episode_id = eh.episode_id
+        JOIN tags t ON t.tag_id = et.tag_id WHERE {_REAL_TOPIC}
+    """)
+    return topic_similarity.build_index(
+        [(r['host_id'], r['episode_id'], r['tag_id'], r['is_primary']) for r in cur.fetchall()], parents)
+
+
+def _build_similar_shows(cur):
+    parents = _topic_parents(cur)
+    cur.execute(f"""
+        SELECT e.podcast_id, et.episode_id, et.tag_id, et.is_primary
+        FROM episodes e JOIN episode_tag et ON et.episode_id = e.episode_id
+        JOIN tags t ON t.tag_id = et.tag_id WHERE {_REAL_TOPIC}
+    """)
+    return topic_similarity.build_index(
+        [(r['podcast_id'], r['episode_id'], r['tag_id'], r['is_primary']) for r in cur.fetchall()], parents)
+
+
+def _shared_topic_fields(tag_ids: list) -> list:
+    by_id = {r['tag_id']: r for r in _directory_index('topics', _build_topic_directory)}
+    return [{'tag_id': t, 'name': by_id[t]['name'], 'slug': by_id[t]['slug'], 'category': by_id[t]['category']}
+            for t in tag_ids if t in by_id]
+
+
+@app.get("/api/people/{host_id}/similar")
+def person_similar(host_id: int, limit: int = 8):
+    """People whose episodes cover the same topics, with the topics they
+    share. Co-hosts and regular pairings are left out (see topic_similarity)."""
+    index = _directory_index('similar-people', _build_similar_people)
+    people = {r['host_id']: r for r in _directory_index('people', _build_people_directory)}
+    out = []
+    for other, score, shared in topic_similarity.similar(index, host_id, limit=max(1, min(limit, 20))):
+        p = people.get(other)
+        if p:
+            out.append({'host_id': other, 'name': p['name'], 'slug': p['slug'],
+                        'profile_image_url': p['profile_image_url'], 'title': p['title'],
+                        'company': p['company'], 'org_id': p['org_id'],
+                        'score': score, 'shared': _shared_topic_fields(shared)})
+    return {'host_id': host_id, 'similar': out}
+
+
+@app.get("/api/shows/{podcast_id}/similar")
+def show_similar(podcast_id: int, limit: int = 8):
+    """Shows whose episodes cover the same topics, with the topics they share."""
+    index = _directory_index('similar-shows', _build_similar_shows)
+    shows = {r['podcast_id']: r for r in _directory_index('shows', _build_show_directory)}
+    out = []
+    for other, score, shared in topic_similarity.similar(index, podcast_id, limit=max(1, min(limit, 20)),
+                                                         max_shared=None):
+        s = shows.get(other)
+        if s:
+            out.append({'podcast_id': other, 'title': s['title'], 'slug': s['slug'],
+                        'cover_art_url': s['cover_art_url'],
+                        'score': score, 'shared': _shared_topic_fields(shared)})
+    return {'podcast_id': podcast_id, 'similar': out}
 
 
 class TopicUpdateRequest(BaseModel):
