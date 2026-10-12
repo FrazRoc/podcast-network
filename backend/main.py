@@ -44,6 +44,7 @@ import topic_similarity
 from topic_names import CATEGORIES, normalize_topic
 from topic_merge import merge_tags, rename_conflict, rename_tag, would_cycle
 import x_avatars
+import host_photos
 
 load_dotenv()
 
@@ -2330,6 +2331,35 @@ def _shrink_image(content: bytes, width: int):
         return None
 
 
+def _load_host_photo(host_id: int):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT image, content_type FROM host_photos WHERE host_id = %s", (host_id,))
+        row = cur.fetchone()
+        return (bytes(row['image']), row['content_type']) if row else None
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.get("/api/people/{host_id}/photo")
+async def host_photo(host_id: int, w: Optional[int] = None):
+    """A profile photo we keep ourselves (host_photos.py). The URL carries
+    ?v=, which changes when the photo is replaced, so it can be cached long."""
+    from fastapi.responses import Response
+    hit = await asyncio.to_thread(_load_host_photo, host_id)
+    if not hit:
+        raise HTTPException(status_code=404, detail="No stored photo")
+    content, media_type = hit
+    if w:
+        small = await asyncio.to_thread(_shrink_image, content, max(16, min(w, 512)))
+        if small:
+            content, media_type = small, 'image/webp'
+    return Response(content=content, media_type=media_type,
+                    headers={'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=604800'})
+
+
 @app.get("/api/proxy/image")
 async def proxy_image(url: str, w: Optional[int] = None):
     """
@@ -2337,6 +2367,11 @@ async def proxy_image(url: str, w: Optional[int] = None):
     Usage: /api/proxy/image?url=https://unavatar.io/twitter/drvolts
     """
     from fastapi.responses import Response
+
+    # Our own stored photos come straight from the database.
+    own = host_photos.stored_photo_id(url)
+    if own is not None:
+        return await host_photo(own, w)
 
     if not is_allowed_image_url(url):
         raise HTTPException(status_code=400, detail="URL host is not an allowed image source")
@@ -3557,6 +3592,18 @@ def merge_people(keep_id: int, drop_id: int):
             alias_added = cur.rowcount > 0
 
         cur.execute("UPDATE tags SET host_id = %s WHERE host_id = %s", (keep_id, drop_id))
+        # A stored photo follows the person if the survivor has none (the
+        # survivor's profile_image_url is set from it below if empty).
+        cur.execute("""
+            UPDATE host_photos SET host_id = %s
+            WHERE host_id = %s AND NOT EXISTS (SELECT 1 FROM host_photos WHERE host_id = %s)
+        """, (keep_id, drop_id, keep_id))
+        photo_moved = cur.rowcount > 0
+        # The dropped record's URL names its own id: point it at the survivor
+        # if the photo moved, or drop it (its photo row goes with the record).
+        if host_photos.stored_photo_id(drop_profile['profile_image_url'] or '') == drop_id:
+            drop_profile = {**drop_profile, 'profile_image_url':
+                            host_photos.photo_url(keep_id) if photo_moved else None}
         cur.execute("DELETE FROM hosts WHERE host_id = %s", (drop_id,))
 
         # Keep every piece of profile detail across both records: the survivor

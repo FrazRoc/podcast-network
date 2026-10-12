@@ -1,3 +1,4 @@
 -r requirements.txt
 -r ../backend/requirements.txt
 pytest
+Pillow  # backend/host_photos.py, test_host_photos.py
