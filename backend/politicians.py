@@ -199,13 +199,15 @@ def normalize_political_role(title: str | None, company: str | None, context: st
         if re.search(r'\b(canada|australia|australian|philippines|france|italy|brazil|(?<!new )mexico)\b',
                      f'{company or ""} {" ".join(known_places)}', re.I):
             return None                         # another country's senate
-        if not (state() or re.search(r'\bu\.?s\.?\b|united states', f'{title} {company or ""}', re.I)):
+        # A bare "Sen." / "Rep." before a name is how U.S. members of Congress are
+        # written ("Sen. Jeff Merkley (D-Ore.)"), so it needs no state to place it.
+        if not (state() or low == 'sen.' or re.search(r'\bu\.?s\.?\b|united states', f'{title} {company or ""}', re.I)):
             return None
         return {'title': 'Senator', 'company': 'U.S. Senate', 'is_former': former}
     if re.search(r'\b(field|country|regional|account|sales|special|permanent|trade)\s+(senior\s+)?rep', low):
         return None
     if re.search(r'\b(representative|rep\.?|congress(man|woman|member|person)|member of congress)\b', low):
-        if not (state() or re.search(r'\bu\.?s\.?\b|united states|congress', f'{title} {company or ""}', re.I)):
+        if not (state() or low == 'rep.' or re.search(r'\bu\.?s\.?\b|united states|congress', f'{title} {company or ""}', re.I)):
             return None
         return {'title': 'Representative', 'company': 'U.S. House', 'is_former': former}
 

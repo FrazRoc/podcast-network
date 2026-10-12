@@ -135,6 +135,22 @@ it is not re-proposed.
   an alias), never create a person from one. `podcast:person` tags are a
   dead end: one show (Second Nature) tags guests, and it tags its own
   presenter as a guest.
+- **Named-speaker transcripts reviewed** (Oct 11 2026): 622 episodes on 15
+  shows (Clean Power Hour 305, Renewable Energy SmartPod 76, Cities 1.5 60,
+  Climate Now 57, Green Giants 49, Second Nature 39…). Speaking turns were
+  compared with credits and every mismatch read against the show notes:
+  39 mention-only credits removed and suppressed (14 of them Herman Daly on
+  Cities 1.5, from the line promoting his miniseries), 73 credits added for
+  existing people (regular co-hosts on Climate Now, Sanchali Seth Pal on
+  Second Nature, John Farrell on Local Energy Rules) and 121 people created
+  with 127 credits (34 of them named only in the transcript). Cities 1.5 is
+  built from clips, so a "featured guest" with one or two lines is a real
+  appearance. Local Energy Rules' show notes have been one-line teasers
+  since 2025, so transcripts are its only source of credits. Still to do:
+  1,794 transcripts with no speaker marks and 54 with "Speaker 2" only —
+  guests there come from the host's spoken introduction. Review list and
+  undo: `transcript_review_named_shows_2026-10-11.csv`,
+  `undo_transcript_named_2026-10-11.json` in `~/Backups/podcast-network/`.
 - **The ~40 strip patterns need auditing** — several show-specific fixes
   overreach.
 - **`run()` re-inserted every match on every full-archive scan, not just new

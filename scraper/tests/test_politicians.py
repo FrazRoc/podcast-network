@@ -19,6 +19,8 @@ def one(title, company=None, context=None, person=None, places=()):
     ('former Republican Senator', None, ('Nebraska',), ('Senator', 'U.S. Senate', True)),
     ('U.S. Senator', None, ('New Mexico',), ('Senator', 'U.S. Senate', False)),   # not Mexico
     ('Rep.', None, ('Florida',), ('Representative', 'U.S. House', False)),
+    ('Sen.', None, (), ('Senator', 'U.S. Senate', False)),          # "Sen. Jeff Merkley (D-Ore.)": no state needed
+    ('Rep.', None, (), ('Representative', 'U.S. House', False)),
     ('former six-term South Carolina Congressman', None, (), ('Representative', 'U.S. House', True)),
     ('Maine State Senator', None, (), ('State Senator', 'State of Maine', False)),
     ('Washington State House Rep.', None, (), ('State Representative', 'State of Washington', False)),
@@ -49,6 +51,7 @@ def test_normalised(title, company, places, expected):
     ('Environmental Justice Advisory Council Member', 'White House', ()),
     ('Secretary of State for Energy Security and Net Zero', None, ('UK',)),   # the UK's form
     ('Senator', None, ()),                                 # no idea which senate: left alone
+    ('Sales Rep.', None, ()),
 ])
 def test_left_alone(title, company, places):
     assert one(title, company, places=places) is None
