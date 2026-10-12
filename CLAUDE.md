@@ -743,6 +743,40 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
 - Not yet:
   a scheduled tagging step.
 
+## Site performance and SEO (Oct 2026 review)
+
+- **Cached responses.** `/api/host-connections` and `/api/show-connections`
+  (the graph, ~10 s and 3.3 MB to build) are kept with the directory lists
+  (`_cached_json` → `_directory_index`, rebuilt in the background, expired by
+  admin edits) and built at startup (`_warm_graph_cache`). Every
+  `/api/stats/*` response is cached by full URL for an hour by the
+  `_stats_cache` middleware, cleared on any admin write. A scrape doesn't
+  clear either, so new data shows within 15 min (graph) / 1 h (Stats).
+- **Code splitting.** App.js lazy-loads the admin pages, Stats and the graph
+  (`React.lazy`); the main bundle went 212 KB → 88 KB gzipped. A new admin
+  page should be added the same way, not as a static import.
+- **Not found.** Unknown paths render `NotFound.js` (the static host still
+  answers 200). New top-level routes must be added to App.js or they 404.
+- **Sitemap.** `npm run build` runs `prebuild` → `frontend/scripts/sitemap.js`,
+  which writes `public/sitemap.xml` (gitignored) from `GET /api/sitemap`
+  (people, orgs, shows, topics on 2+ episodes, with newest-episode dates);
+  if the API is unreachable it writes the six main pages rather than failing
+  the deploy. `robots.txt` points at it and disallows /admin. The site URL is
+  `SITE_URL` (default the onrender.com address) — change it, and robots.txt
+  and the og:image URL in index.html, if a custom domain is added.
+- **Link previews.** Static og:/twitter: tags and `og-image.png` in
+  index.html — previewers don't run JavaScript, so every page shares one
+  card. `setMeta()` sets title, description and a canonical link per page
+  for search engines. App icons (logo192/512, favicon.ico) were the CRA React
+  atom until Oct 2026; they're now rendered from favicon.svg.
+- **No logo** is a 1x1 transparent PNG (`X-No-Logo: 1`), not a 404;
+  OrgLogo shows the initial when the image is that small.
+- **Discussed-only organisations** (episodes discuss them, no guest worked
+  there — BYD) are in search and the Organisations directory with a
+  `discussed` count and "Most discussed" sort; their page leads with it.
+- **Verb-only role titles** ("founded", "leads", "directed") are shown and
+  extracted as the role (`role_selection.noun_title`, inside `tidy_title`).
+
 ## Tests
 
 **`scraper/tests/` has a real pytest suite** (~300 cases) covering
@@ -989,7 +1023,7 @@ one repo. Git keeps the branches apart; nothing keeps the database apart.
 
 ## Open threads
 
-- ~3,300 suggestions pending review
+- Name-suggestion queue was empty on Oct 9 2026 (it had been ~3,300)
 - 3 shows skipped in the RSS backfill (~560 episodes); The Hydrogen Podcast
   feed 404s; 7 shows capped at 50 episodes were never re-measured
 - Node `channel` / `genre` are podcast properties being shown on people, which
