@@ -41,6 +41,24 @@ function GuestMix({ mix }) {
   );
 }
 
+// Apple's "channel" for a show is often just its host ("David Roberts" on
+// Volts, "Dr. Chris Keefer" on Decouple), which "Hosted by" already says
+// underneath: show it only when it's someone else (a network, a publisher).
+const fold = (t) => (t || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+export function showChannel(s) {
+  if (!s.channel || fold(s.channel) === fold(s.title)) return false;
+  const channel = fold(s.channel);
+  const words = channel.split(/[^a-z0-9'-]+/).filter(Boolean);
+  return !(s.hosts || []).some(h => {
+    if (!h.name) return false;
+    if (channel.includes(fold(h.name))) return true;
+    // A short channel that is the host under another spelling: "Ben
+    // Eidelson" for Ben Shwab Eidelson, "Rob Stewart" for Robbie Stewart.
+    const surname = fold(h.name).split(/\s+/).pop();
+    return words.length <= 3 && surname.length > 2 && words.includes(surname);
+  });
+}
+
 export default function ShowPage() {
   const state = useProfile('shows', '/shows/', describe);
   return (
@@ -65,7 +83,7 @@ export default function ShowPage() {
                     From <OrgLogo orgId={s.publisher.org_id} name={s.publisher.name} size={16} />
                     <a href={orgHref(s.publisher.org_id, s.publisher.slug)} className="text-teal-700 hover:underline">{s.publisher.name}</a>
                   </p>
-                ) : (s.channel && s.channel !== s.title && <p className="text-sm text-gray-500 mt-0.5">{s.channel}</p>)}
+                ) : (showChannel(s) && <p className="text-sm text-gray-500 mt-0.5">{s.channel}</p>)}
                 {s.hosts.length > 0 && (
                   <p className="mt-2 text-sm text-gray-700">
                     Hosted by{' '}
