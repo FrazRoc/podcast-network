@@ -835,6 +835,27 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
 - **Verb-only role titles** ("founded", "leads", "directed") are shown and
   extracted as the role (`role_selection.noun_title`, inside `tidy_title`).
 
+- **Profile photos** (Oct 2026). Sources, in the order they were tried:
+  stored X/Bluesky handles (`x_avatars`), Wikidata/Commons, then three passes
+  on Oct 12: 47 hosts' own X/Bluesky accounts found by web search and
+  verified (display name + bio names show/org; Evan approved each), 72 from
+  handles already stored, and **1,378 guests cropped from single-guest
+  episode artwork** (per-episode `itunes:image` in RSS; YuNet face detector,
+  exactly one clear face; faces recurring across a show's guests are the
+  host and dropped — every Solarpreneur cover is Taylor Armstrong; New Wave
+  needs a tighter crop to cut the name lettering). Not used: LinkedIn,
+  general web image search, Bluesky name search (1 confident hit in 60).
+  Undo lists: `undo_host_photos_*`, `undo_x_photos_*`,
+  `undo_episode_art_photos_*` in the topic-pilots folder.
+- **Photo store** (`host_photos`, `migrate_add_host_photos.sql`,
+  `backend/host_photos.py`): approved photos from sources the proxy won't
+  fetch (podcast CDNs, team pages) are kept as ≤400px WebP in the database;
+  `profile_image_url` becomes `https://<backend>/api/people/{id}/photo?v=…`
+  (`PUBLIC_BACKEND_URL`). `/api/proxy/image` serves those from the database
+  (`stored_photo_id`), so no frontend change was needed. `store()` only fills
+  an empty photo; a person merge moves the photo and rewrites the URL.
+  15 MB for the first 1,378.
+
 ## Tests
 
 **`scraper/tests/` has a real pytest suite** (~300 cases) covering
