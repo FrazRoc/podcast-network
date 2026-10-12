@@ -88,6 +88,27 @@ class TestCleanDescription:
         result = clean_description(text)
         assert "Produced by" not in result
 
+    def test_strips_host_roster_footer(self):
+        # Real incident: Columbia Energy Exchange lists every host of the
+        # show in a footer on every episode, so both were credited as host
+        # whoever did the interview. The body sentence names the real one.
+        text = ("The question is how quickly we can adapt to extreme weather and what it "
+                "takes to build resilient energy systems. This week, Bill Loveless speaks "
+                "with Kate Guy about energy security. Credits: Hosted by Jason Bordoff and "
+                "Bill Loveless. Produced by Mary Catherine O'Connor.")
+        result = clean_description(text)
+        assert "Bill Loveless speaks with Kate Guy" in result
+        assert "Jason Bordoff" not in result
+        three = text.replace("Jason Bordoff and Bill Loveless", "Jason Bordoff, Bill Loveless, and Daniel Sternoff")
+        assert "Sternoff" not in clean_description(three)
+
+    def test_keeps_single_host_credits_footer(self):
+        # One name after "Hosted by" says who hosted this episode.
+        text = ("In this episode of the Iran Conflict Brief the conversation turns to what "
+                "a deal would mean for oil markets and for the wider region this year.\n"
+                "Credits: Hosted by Daniel Sternoff. Engineering by Gregory Vilfranc.")
+        assert "Hosted by Daniel Sternoff" in clean_description(text)
+
     def test_strips_past_episode_reference_with_extra_words_before_with(self):
         # Real incident: Reversing Climate Change's sponsor footer writes
         # "Listen to the RCC episode I made with David LaGreca ..." — the

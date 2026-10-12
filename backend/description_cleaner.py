@@ -41,6 +41,15 @@ STRIP_AFTER_PATTERNS = [
     # of the 193 blocks do; cutting there threw those away. Blocks that go
     # straight to crew are still cut, and the crew tail is removed below.
     r'\nCredits:(?![^\n]{0,60}Hosted by)',
+    # Columbia Energy Exchange ends every description with the show's whole
+    # roster — "Credits: Hosted by Jason Bordoff and Bill Loveless" (later
+    # "..., Bill Loveless, and Daniel Sternoff") — whoever did the interview.
+    # Kept, it credited both hosts on nearly every episode: 106 host credits
+    # for episodes the transcripts show that host never spoke on. The body
+    # names the real one ("This week, Bill Loveless speaks with ..."), and it
+    # agreed with the transcript on 69 of 70 episodes. A footer naming one
+    # host ("Hosted by Daniel Sternoff") says who hosted and is kept.
+    r'\bCredits:\s*Hosted by Jason Bordoff\s*(?:,|and\b)',
     # The same block as a bare heading on its own line: TILclimate (Ask MIT
     # Climate) writes "Credits\nLaur Hesse Fisher, Host and Senior Editor\n
     # Aaron Krol, Writer and Executive Producer\n..." and Second Nature
