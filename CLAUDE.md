@@ -151,6 +151,28 @@ it is not re-proposed.
   guests there come from the host's spoken introduction. Review list and
   undo: `transcript_review_named_shows_2026-10-11.csv`,
   `undo_transcript_named_2026-10-11.json` in `~/Backups/podcast-network/`.
+- **Unmarked transcripts, first pass** (Oct 11 2026): for the 648 episodes
+  with no guest credit, a guest was accepted only when the show notes name
+  them *and* the host introduces them in the transcript ("My guest today is
+  …") — the spelling always comes from the notes. 108 guest credits on 15
+  shows (The Most Important Question 31, Drilled 20, Climate CEOs 19, Zero
+  12). Switched On's 2019–21 host Mark Taylor was created from his own
+  "I'm Mark Taylor and you're listening to Switched On" (69 host credits;
+  a different Mark Taylor, of Sightline Climate, is on Currents — that
+  episode is suppressed, and the shared name needs watching). Local Energy
+  Rules' 33 uncredited episodes with a linked ilsr.org page were read from
+  the page (curl is blocked there; WebFetch works): John Farrell as host
+  plus 46 guests. Not done: second guests on already-credited episodes,
+  guests the notes never name (142 TMIQ episodes), Drilled's narrative
+  interviewees, 64 Switched On episodes with no host, 14 Local Energy Rules
+  episodes with no page link. **After creating people, preview where the
+  scanner will credit them** (full name in title or first 2,500 characters
+  of notes) and suppress the mentions first — past-episode links, book
+  recommendations, production credits; 119 such matches were read across
+  the two passes. Review lists and undo files:
+  `transcript_review_unmarked_shows_2026-10-11.csv`,
+  `undo_transcript_unmarked_2026-10-11.json`,
+  `undo_transcript_followup82_2026-10-11.json`.
 - **The ~40 strip patterns need auditing** — several show-specific fixes
   overreach.
 - **`run()` re-inserted every match on every full-archive scan, not just new
