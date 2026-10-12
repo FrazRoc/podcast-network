@@ -23,6 +23,8 @@ def one(title, company=None, context=None, person=None, places=()):
     ('Maine State Senator', None, (), ('State Senator', 'State of Maine', False)),
     ('Washington State House Rep.', None, (), ('State Representative', 'State of Washington', False)),
     ('Governor', 'the State of Washington', (), ('Governor', 'State of Washington', False)),
+    ('Gov.', 'New Jersey', (), ('Governor', 'State of New Jersey', False)),
+    ('Lt. Gov.', None, ('Minnesota',), ('Lieutenant Governor', 'State of Minnesota', False)),
     ('Arizona Attorney General', None, (), ('Attorney General', 'State of Arizona', False)),
     ('secretary of agriculture', 'the state of Kansas', (), ('Secretary of Agriculture', 'State of Kansas', False)),
     ('Mayor', 'Boise, Idaho', (), ('Mayor', 'City of Boise', False)),
@@ -76,6 +78,11 @@ def test_attache_is_left_alone():
 def test_state_read_from_the_text_around_the_person():
     assert one('Rep.', context='Rep. Kathy Castor (D-FL) joins us', person='Kathy Castor') == \
         ('Representative', 'U.S. House', False)
+
+
+def test_bare_gov_reads_the_state_from_the_text():
+    assert one('Gov.', context='Today, Democratic New Jersey Gov. Mikie Sherrill sits down for an interview') == \
+        ('Governor', 'State of New Jersey', False)
 
 
 # ------------------------------------------------------------------

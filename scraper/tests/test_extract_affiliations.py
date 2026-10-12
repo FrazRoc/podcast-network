@@ -238,6 +238,8 @@ class TestVerifiedAffiliations:
     @pytest.mark.parametrize('title, company, text, expected', [
         ('Senator', 'Massachusetts', 'Senator Ed Markey of Massachusetts', [('Senator', 'U.S. Senate')]),
         ('Rep.', None, 'Rep. Kathy Castor (D-FL) joins', [('Representative', 'U.S. House')]),
+        ('Gov.', 'New Jersey', 'Today, Democratic New Jersey Gov. Mikie Sherrill sits down', [('Governor', 'State of New Jersey')]),
+        ('Gov.', None, 'NJ Gov. Mikie Sherrill: We’re saving ratepayers $1B a year', [('Governor', 'State of New Jersey')]),
         ('California State Senator', None, 'California State Senator Scott Wiener',
          [('State Senator', 'State of California')]),
         ('Mayor', 'Boise, Idaho', 'Mayor Lauren McLean of Boise, Idaho', [('Mayor', 'City of Boise')]),

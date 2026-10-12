@@ -183,13 +183,13 @@ def normalize_political_role(title: str | None, company: str | None, context: st
         return at_state('Assemblymember')
     if re.search(r'\bstate legislator\b', low):
         return at_state('State Legislator')
-    if re.search(r'\blieutenant governor\b|\blt\.? governor\b', low):
+    if re.search(r'\b(?:lieutenant|lt\.?) gov(?:ernor\b|\.)', low):
         return at_state('Lieutenant Governor')
     if re.search(r'\battorney general\b', low):
         if re.search(r'\bu\.?s\.? attorney general|attorney general of the united states', low):
             return {'title': 'Attorney General', 'company': 'U.S. Department of Justice', 'is_former': former}
         return at_state('Attorney General')
-    if re.search(r'\bgovernor\b', low):
+    if re.search(r'\bgovernor\b|\bgov\.', low):               # "NJ Gov. Mikie Sherrill" gives a bare "Gov."
         if company and not state_from(company) and not re.search(r'\bstate\b', company, re.I):
             return None                         # a governor of a bank, institute or board
         return at_state('Governor')

@@ -214,7 +214,8 @@ class TestDisplayTitle:
         ('Secretary General', 'Secretary-General'), ('deputy director general', 'deputy director-general'),
         ('Editor in Chief', 'Editor-in-Chief'),
         # 5. political short forms
-        ('Rep. for Ohio', 'Representative for Ohio'), ('Sen. aide', 'Senator aide'), ('Senate aide', 'Senate aide'),
+        ('Rep. for Ohio', 'Representative for Ohio'), ('Sen. aide', 'Senator aide'), ('Gov.', 'Governor'), ('Sen.', 'Senator'), ('Rep.', 'Representative'),
+        ('Senate aide', 'Senate aide'),
     ])
     def test_title_words_standardised(self, stored, fixed):
         from role_selection import tidy_title

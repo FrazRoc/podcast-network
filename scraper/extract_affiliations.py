@@ -495,7 +495,7 @@ def verified_affiliations(affiliations: list, snippet: str) -> tuple:
     haystack = _normalise_for_match(snippet)
     kept, dropped, seen = [], [], set()
     for aff in affiliations:
-        clean = {}
+        clean, raw_title = {}, None
         for field in ('title', 'company'):
             value = aff.get(field)
             value = _collapse(value) if isinstance(value, str) else None
@@ -517,6 +517,8 @@ def verified_affiliations(affiliations: list, snippet: str) -> tuple:
                 # "co-founder", "Chief Executive Officer" -> "CEO"), so every
                 # title reads the same way.
                 clean[field] = tidy_title(value) if field == 'title' else value
+                if field == 'title':
+                    raw_title = value
             else:
                 clean[field] = None
                 if value:
@@ -536,7 +538,9 @@ def verified_affiliations(affiliations: list, snippet: str) -> tuple:
         # "Florida" -> Representative @ U.S. House), read with the raw company
         # even when it was a place and dropped above (backend/politicians.py).
         raw_company = _collapse(aff.get('company')) if isinstance(aff.get('company'), str) else None
-        political = normalize_any_government_role(clean["title"], raw_company, snippet) if clean["title"] else None
+        # The title as written, since the state is read from the text around it
+        # ("Rep. Kathy Castor (D-FL)") and the tidied "Representative" isn't there.
+        political = normalize_any_government_role(raw_title, raw_company, snippet) if clean["title"] else None
         if political:
             entries = [{'title': d['title'], 'company': d['company'],
                         'is_former': bool(d['is_former'] or clean['is_former']),

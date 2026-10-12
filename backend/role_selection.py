@@ -271,6 +271,7 @@ _VP_RES = [
 
 # Short forms written out. Each needs its dot or a following space, so a
 # word merely starting with the letters ("Direct", "Senate") is untouched.
+# Rep. / Sen. / Gov. also stand alone as a whole title ("NJ Gov. Mikie Sherrill").
 _SHORT_FORMS = [
     (re.compile(r'\bsr\b\.?(?=\s)', re.I), 'Senior'),
     (re.compile(r'\bprof\b\.?(?=\s|$)', re.I), 'Professor'),
@@ -280,9 +281,9 @@ _SHORT_FORMS = [
     (re.compile(r'\bdir\b\.?(?=\s|$)', re.I), 'Director'),
     (re.compile(r'\bmgr\b\.?(?=\s|$)', re.I), 'Manager'),
     (re.compile(r'\bdept\b\.?(?=\s|$)', re.I), 'Department'),
-    (re.compile(r'\bRep\.(?=\s)'), 'Representative'),
-    (re.compile(r'\bSen\.(?=\s)'), 'Senator'),
-    (re.compile(r'\bGov\.(?=\s)'), 'Governor'),
+    (re.compile(r'\bRep\.(?=\s|$)'), 'Representative'),
+    (re.compile(r'\bSen\.(?=\s|$)'), 'Senator'),
+    (re.compile(r'\bGov\.(?=\s|$)'), 'Governor'),
 ]
 _SENIOR_EXEC_VP_RE = re.compile(r'\b(senior|executive)\s+VP(s)?\b', re.I)
 _PHD_RE = re.compile(r'\bph\.\s?d\b\.?', re.I)
