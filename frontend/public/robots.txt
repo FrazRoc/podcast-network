@@ -1,3 +1,5 @@
 # https://www.robotstxt.org/robotstxt.html
 User-agent: *
-Disallow:
+Disallow: /admin
+
+Sitemap: https://podcast-network-frontend.onrender.com/sitemap.xml

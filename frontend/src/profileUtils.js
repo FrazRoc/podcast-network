@@ -115,15 +115,29 @@ export const idFromPath = (prefix) => {
 const isAdminBrowser = () => { try { return !!getAdminPassword(); } catch { return false; } };
 export const publicFetch = (url) => fetch(url, isAdminBrowser() ? { cache: 'no-cache' } : undefined);
 
-export function setMeta(title, description) {
-  document.title = title;
-  let tag = document.querySelector('meta[name="description"]');
+function headTag(selector, make) {
+  let tag = document.querySelector(selector);
   if (!tag) {
-    tag = document.createElement('meta');
-    tag.setAttribute('name', 'description');
+    tag = make();
     document.head.appendChild(tag);
   }
-  tag.setAttribute('content', description || '');
+  return tag;
+}
+
+// The page's title and description, for search engines (which run the app)
+// and the browser tab; og: tags follow along. Also a canonical link, so
+// /people/75 and /people/75-jigar-shah count as one page.
+export function setMeta(title, description) {
+  document.title = title;
+  const meta = (attr, key) => headTag(`meta[${attr}="${key}"]`, () => {
+    const m = document.createElement('meta'); m.setAttribute(attr, key); return m;
+  });
+  meta('name', 'description').setAttribute('content', description || '');
+  meta('property', 'og:title').setAttribute('content', title);
+  if (description) meta('property', 'og:description').setAttribute('content', description);
+  headTag('link[rel="canonical"]', () => {
+    const l = document.createElement('link'); l.setAttribute('rel', 'canonical'); return l;
+  }).setAttribute('href', window.location.origin + window.location.pathname);
 }
 
 // Loads /api/<kind>/<id>/profile (or `endpoint(id)`), fixes up the slug in
