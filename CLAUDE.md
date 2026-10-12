@@ -115,6 +115,26 @@ it is not re-proposed.
   Politico Energy stays off: it discusses politicians constantly but almost
   never has guests, so the false positives are unusable.
 - Panellists count as guests.
+- **A footer listing the show's whole host roster is not who hosted the
+  episode** (Oct 11 2026). Columbia Energy Exchange ends every description
+  with "Credits: Hosted by Jason Bordoff and Bill Loveless" (later also
+  Daniel Sternoff), so both were credited as host on nearly every episode.
+  Its transcripts name each speaker, and the body sentence ("This week, Bill
+  Loveless speaks with …") agreed with them on 69 of 70 episodes; 106 host
+  credits (65 Loveless, 41 Bordoff — 38 of his `manual`, 2 `apple_verified`,
+  removed with Evan's approval) were deleted and suppressed, and a
+  `STRIP_AFTER_PATTERNS` entry now cuts that roster footer. A host who only
+  reads the cold-open intro (under 3 speaking turns) is not that episode's
+  host. Undo: `~/Backups/podcast-network/undo_cee_hosts_2026-10-11.json`.
+- **Transcripts in feeds** (checked Oct 11 2026): 36 shows carry a
+  `podcast:transcript` link per episode (2,930 episodes; VTT, SRT, text,
+  JSON, HTML). In a random 50, 20 named their speakers, 8 had only
+  "Speaker 2", 22 had no speaker marks; 6 had a real guest we lacked (half
+  from the host's spoken "my guest today is …"). Machine-made transcripts
+  misspell names — match them to a known person (then store the spelling as
+  an alias), never create a person from one. `podcast:person` tags are a
+  dead end: one show (Second Nature) tags guests, and it tags its own
+  presenter as a guest.
 - **The ~40 strip patterns need auditing** — several show-specific fixes
   overreach.
 - **`run()` re-inserted every match on every full-archive scan, not just new
