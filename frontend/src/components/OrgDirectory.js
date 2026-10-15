@@ -8,7 +8,7 @@ import { orgHref, fmtMonthYear, plural, setMeta } from '../profileUtils';
 const SORTS = [['people', 'Most people'], ['discussed', 'Most discussed'], ['recent', 'Most recent'], ['name', 'A–Z']];
 
 export default function OrgDirectory() {
-  useEffect(() => setMeta('Organisations · Podcast Network',
+  useEffect(() => setMeta('Organizations · Podcast Network',
     'The companies, investors, universities and agencies whose people are guests on clean-energy podcasts.'), []);
   const [params, set] = useUrlParams({ q: '', type: '', sort: 'people' });
   const state = useDirectory('orgs', params);
@@ -34,7 +34,7 @@ export default function OrgDirectory() {
 
   return (
     <SiteShell>
-      <DirectoryHeading title="Organisations"
+      <DirectoryHeading title="Organizations"
         blurb="Where guests work, by how many of their people have been on, and the companies episodes discuss. Counts are guests only, so a show's own hosts don't inflate them." />
       <div className="flex gap-2">
         <SearchBox value={params.q} onChange={q => set({ q })} placeholder="Filter by name…" />
@@ -42,7 +42,7 @@ export default function OrgDirectory() {
       </div>
       <FilterChips chips={state.data?.types || []} value={params.type} onChange={type => set({ type })}
         labels={{ ...ORG_TYPE_LABELS, other: 'Other' }} colors={ORG_TYPE_COLORS} />
-      <DirectoryList state={state} render={org} noun={state.total === 1 ? 'organisation' : 'organisations'} />
+      <DirectoryList state={state} render={org} noun={state.total === 1 ? 'organization' : 'organizations'} />
     </SiteShell>
   );
 }

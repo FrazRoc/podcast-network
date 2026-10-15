@@ -4,7 +4,7 @@ import OrgLogo from './OrgLogo';
 import { Swatch } from './Topics';
 import { personHref, orgHref, showHref, topicHref, avatarUrl, coverUrl, plural, imageUrl, imageFallback, publicFetch } from '../profileUtils';
 
-// Name search across people, organisations and shows (/api/search).
+// Name search across people, organizations and shows (/api/search).
 export default function ProfileSearch({ className = '' }) {
   const [q, setQ] = useState('');
   const [results, setResults] = useState(null);
@@ -49,7 +49,7 @@ export default function ProfileSearch({ className = '' }) {
               <span className="text-xs text-gray-400">{plural(p.appearances, 'episode')}</span>
             </a>
           ))}
-          {results.orgs.length > 0 && <p className={heading}>Organisations</p>}
+          {results.orgs.length > 0 && <p className={heading}>Organizations</p>}
           {results.orgs.map(o => (
             <a key={`o${o.org_id}`} href={orgHref(o.org_id, o.slug)} className={row}>
               <OrgLogo orgId={o.org_id} name={o.name} size={24} />

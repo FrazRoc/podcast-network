@@ -13,14 +13,14 @@ const describe = (o) => [o.name, o.totals.people === 0 && o.discussed_in?.episod
 
 export default function OrgPage() {
   const state = useProfile('orgs', '/orgs/', describe);
-  // "Drilled" the organisation is the show Drilled: its page is the show's.
+  // "Drilled" the organization is the show Drilled: its page is the show's.
   const show = state.data?.is_show;
   useEffect(() => {
     if (show) window.location.replace(showHref(show.podcast_id, show.slug));
   }, [show]);
   if (show) return null;
   return (
-    <ProfileLayout state={state} kindLabel="Organisation">
+    <ProfileLayout state={state} kindLabel="Organization">
       {(o) => {
         const where = [o.hq_city, o.country].filter(Boolean).join(', ');
         const current = o.people.filter(p => !p.former);
@@ -98,7 +98,7 @@ export default function OrgPage() {
             )}
 
             {current.length > 0 && (
-              <Section title={`People from ${o.name}`} aside={o.children.length ? 'including its sub-organisations' : undefined}>
+              <Section title={`People from ${o.name}`} aside={o.children.length ? 'including its sub-organizations' : undefined}>
                 <ul className="divide-y divide-gray-100"><ShowMore items={current} initial={12} render={person} /></ul>
               </Section>
             )}

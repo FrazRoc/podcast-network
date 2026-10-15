@@ -5,8 +5,8 @@ export const tealScale = (t) => {
   return `hsl(173, 65%, ${lightness}%)`;
 };
 
-// Categorical colours for organisation types and role kinds (identity, not
-// magnitude). Muted, distinguishable set; grey is reserved for "other".
+// Categorical colors for organization types and role kinds (identity, not
+// magnitude). Muted, distinguishable set; gray is reserved for "other".
 export const ORG_TYPE_COLORS = {
   company: '#4e79a7', investor: '#59a14f', nonprofit: '#edc948', research: '#76b7b2',
   academic: '#b07aa1', government: '#e15759', media: '#f28e2b', association: '#9c755f',

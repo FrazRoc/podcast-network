@@ -4,12 +4,12 @@ import { ORG_TYPE_COLORS, ORG_TYPE_LABELS } from '../chartUtils';
 import OrgLogo from './OrgLogo';
 import { orgHref, slugify, useShowOrgs } from '../profileUtils';
 
-// The organisations whose people are booked most, counted by distinct
-// guests or by distinct shows, with sub-organisations under their parent.
-// By default a guest on their own organisation's show (BNEF analysts on
+// The organizations whose people are booked most, counted by distinct
+// guests or by distinct shows, with sub-organizations under their parent.
+// By default a guest on their own organization's show (BNEF analysts on
 // Switched On) isn't counted — that's the house, not a booking.
 const PAGE = 15;
-// Filter chips, in the order the type colours are listed.
+// Filter chips, in the order the type colors are listed.
 const TYPE_ORDER = ['company', 'investor', 'nonprofit', 'research', 'academic', 'government', 'media', 'association'];
 
 export default function TopOrganizationsChart() {
@@ -65,7 +65,7 @@ export default function TopOrganizationsChart() {
         </div>
         <label className="flex items-center gap-1.5 text-gray-600">
           <input type="checkbox" checked={excludeHouse} onChange={e => setExcludeHouse(e.target.checked)} />
-          Leave out guests on their own organisation's show
+          Leave out guests on their own organization's show
         </label>
       </div>
       <div className="flex flex-wrap gap-1.5 mb-4 text-xs">
@@ -102,7 +102,7 @@ export default function TopOrganizationsChart() {
               </div>
             ))}
           </div>
-          {data.items.length === 0 && <p className="text-sm text-gray-400">No organisations of this type yet.</p>}
+          {data.items.length === 0 && <p className="text-sm text-gray-400">No organizations of this type yet.</p>}
           {data.items.length < data.total && (
             <button onClick={loadMore} disabled={loadingMore}
               className="mt-3 text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50">
@@ -119,7 +119,7 @@ export default function TopOrganizationsChart() {
           </div>
           <p className="text-xs text-gray-400 mt-3">
             Guests with a current role there; departments, labs and offices count under their parent
-            (DOE's offices under DOE, BNEF under Bloomberg). A show's own organisation is inferred from who it
+            (DOE's offices under DOE, BNEF under Bloomberg). A show's own organization is inferred from who it
             books most.
           </p>
         </>

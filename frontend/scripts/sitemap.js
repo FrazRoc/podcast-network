@@ -1,6 +1,6 @@
 // Writes public/sitemap.xml before each build (npm runs "prebuild" first),
 // from the backend's /api/sitemap. The site is a single-page app, so this is
-// how search engines find every person, organisation, show and topic page.
+// how search engines find every person, organization, show and topic page.
 // A backend that can't be reached leaves the main pages only: a stale or
 // short sitemap is better than a failed deploy.
 const fs = require('fs');

@@ -301,7 +301,7 @@ function TopicPanel({ tagId, onChanged, onClose }) {
         </div>
       )}
       {/* Companies aren't topics: a company tag leaves the topic pages and
-          is listed on its organisation's page instead. */}
+          is listed on its organization's page instead. */}
       <div className="space-y-2 text-sm">
         <label className="flex items-center gap-1.5 text-gray-500">
           <input type="checkbox" checked={t.is_company} disabled={saving}

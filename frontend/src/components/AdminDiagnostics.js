@@ -478,7 +478,7 @@ function Card({ title, children, description }) {
 // Episodes by the week they were published, which should be roughly flat: a
 // dip in recent weeks means the scanner is falling behind. The number under
 // each bar is how many episodes were added to the database that week, which
-// spikes on back-catalogue imports and is shown for context only.
+// spikes on back-catalog imports and is shown for context only.
 function ScannerHealth({ weeks, overdue, behind = [], error }) {
   const [showAll, setShowAll] = useState(false);
   if (error) return <Card title="Scanner health"><p className="text-sm text-red-500">Couldn't load: {error}</p></Card>;
@@ -720,7 +720,7 @@ function CompanyData({ data, error }) {
   const o = busy ? data.orgs.busy : data.orgs.all;
   return (
     <Card title="Company data"
-      description="How complete the organisation records are. A gap matters most where several people work, so that's the default view.">
+      description="How complete the organization records are. A gap matters most where several people work, so that's the default view.">
       <div className="flex text-xs border border-gray-300 rounded overflow-hidden w-fit mb-3">
         {[[true, `3+ people (${data.orgs.busy.orgs.toLocaleString()})`], [false, `All (${data.orgs.all.orgs.toLocaleString()})`]].map(([v, label]) => (
           <button key={label} onClick={() => setBusy(v)}
@@ -733,10 +733,10 @@ function CompanyData({ data, error }) {
         <HaveRow label="Type" have={o.typed} of={o.orgs} href="/admin/companies?view=untyped" />
         <HaveRow label="Website (and logo)" have={o.website} of={o.orgs} href="/admin/companies?view=no_website" />
         <HaveRow label="Wikidata match" have={o.wikidata} of={o.orgs} />
-        <HaveRow label="Parent organisation" have={o.parent} of={o.orgs} missingLabel="without" />
+        <HaveRow label="Parent organization" have={o.parent} of={o.orgs} missingLabel="without" />
       </ul>
       <p className="text-xs text-gray-400 mt-2">
-        Company Admin's lists cover all organisations, most people first. Most organisations have no parent,
+        Company Admin's lists cover all organizations, most people first. Most organizations have no parent,
         so that row is for reference, not a target.
       </p>
       <div className="flex flex-wrap gap-x-6 gap-y-1 mt-4 text-sm">
@@ -744,7 +744,7 @@ function CompanyData({ data, error }) {
           {data.merge_queue.toLocaleString()} open merge suggestions →
         </a>
         <a href="/admin/companies?view=not_org" className="text-gray-500 hover:underline">
-          {data.not_orgs.toLocaleString()} marked not an organisation
+          {data.not_orgs.toLocaleString()} marked not an organization
         </a>
       </div>
     </Card>
@@ -770,7 +770,7 @@ function PeopleData({ data, error }) {
       <p className="text-xs text-gray-400 mt-2">People Admin's filters cover everyone, hosts included, most appearances first.</p>
 
       <h3 className="text-sm font-semibold text-gray-900 mt-5 mb-1">
-        {odd.length} name{odd.length === 1 ? '' : 's'} that look like an organisation or show
+        {odd.length} name{odd.length === 1 ? '' : 's'} that look like an organization or show
       </h3>
       <p className="text-sm text-gray-500 mb-2">
         A credit line read as a person ("Planet Money"). Not proof: a real name can trip it, so check before deleting.
@@ -787,11 +787,11 @@ function PeopleData({ data, error }) {
       )}
 
       <h3 className="text-sm font-semibold text-gray-900 mt-5 mb-1">
-        {(data.name_matches_org || []).length} {(data.name_matches_org || []).length === 1 ? 'person has' : 'people have'} the same name as an organisation
+        {(data.name_matches_org || []).length} {(data.name_matches_org || []).length === 1 ? 'person has' : 'people have'} the same name as an organization
       </h3>
       <p className="text-sm text-gray-500 mb-2">
         Usually a company from an episode title read as a guest ("…with Tom Jensen, CEO of Freyr Battery"): delete
-        the person. Sometimes the other way round, a person filed as a company: mark the company "not an organisation".
+        the person. Sometimes the other way round, a person filed as a company: mark the company "not an organization".
       </p>
       {(data.name_matches_org || []).length > 0 && (
         <ul className="text-sm space-y-0.5">

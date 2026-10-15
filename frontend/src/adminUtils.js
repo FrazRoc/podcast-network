@@ -76,7 +76,7 @@ export const highlightNames = (text, highlights) => {
 // where it was found and which specific heuristic found it there, for
 // display in the suggestions list/review UI.
 const PATTERN_LABELS = {
-  labelled:     'Labelled credit',
+  labelled:     'Labeled credit',
   intro:        'Trigger phrase',
   joins:        '"joins us"',
   possessive:   "Org's Name",

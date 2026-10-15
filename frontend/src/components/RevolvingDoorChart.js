@@ -8,7 +8,7 @@ const NODE_W = 12;
 const GAP = 10;
 const PAD = { top: 26, bottom: 8, left: 132, right: 132 };
 
-// Career moves between kinds of organisation: each band is guests whose
+// Career moves between kinds of organization: each band is guests whose
 // former role was at the left-hand type and whose current role is at the
 // right-hand one. Click a band to see who.
 export default function RevolvingDoorChart() {
@@ -121,7 +121,7 @@ export default function RevolvingDoorChart() {
       )}
       <p className="text-xs text-gray-400 mt-3">
         {data.people} guests whose episode text names a former role, and whose current role is at a
-        different kind of organisation. Click a band to see who moved.
+        different kind of organization. Click a band to see who moved.
       </p>
     </div>
   );

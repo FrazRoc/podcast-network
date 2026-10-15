@@ -2,13 +2,13 @@ import { useState, useEffect } from 'react';
 import { API_BASE_URL } from './config';
 import { getAdminPassword } from './adminAuth';
 
-// Shared by the public person, organisation and show pages
+// Shared by the public person, organization and show pages
 // (/people/<id>-<slug>, /orgs/<id>-<slug>, /shows/<id>-<slug>). The id is
 // authoritative; the slug is only there to make URLs readable, so a page
 // loaded with an old one rewrites it to the current one.
 
 export const personHref = (id, slug) => `/people/${id}${slug ? `-${slug}` : ''}`;
-// Organisations that are really a show ("host of Drilled"): links and logos
+// Organizations that are really a show ("host of Drilled"): links and logos
 // for them go to the show. Loaded once per page view; anything rendered
 // before it arrives still gets there, via the org page's redirect.
 let showOrgs = {};
@@ -147,11 +147,11 @@ export function useProfile(kind, prefix, describe, endpoint = (id) => `/api/${ki
   useEffect(() => {
     const id = idFromPath(prefix);
     if (!id) { setState({ data: null, error: 'not_found' }); return; }
-    let cancelled = false;
+    let canceled = false;
     publicFetch(`${API_BASE_URL}${endpoint(id)}`)
       .then(r => (r.status === 404 ? Promise.reject(new Error('not_found')) : r.ok ? r.json() : Promise.reject(new Error('error'))))
       .then(data => {
-        if (cancelled) return;
+        if (canceled) return;
         const want = `${prefix}${id}-${data.slug}`;
         if (window.location.pathname !== want) {
           try { window.history.replaceState(null, '', want + window.location.search); } catch { /* sandboxed */ }
@@ -160,8 +160,8 @@ export function useProfile(kind, prefix, describe, endpoint = (id) => `/api/${ki
         setMeta(`${title} · Podcast Network`, description);
         setState({ data, error: null });
       })
-      .catch(e => { if (!cancelled) setState({ data: null, error: e.message === 'not_found' ? 'not_found' : 'error' }); });
-    return () => { cancelled = true; };
+      .catch(e => { if (!canceled) setState({ data: null, error: e.message === 'not_found' ? 'not_found' : 'error' }); });
+    return () => { canceled = true; };
   // describe is a fresh closure each render; the page only loads once.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind, prefix]);

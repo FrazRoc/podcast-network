@@ -20,7 +20,7 @@ const byYear = (history) => {
 function GuestMix({ mix }) {
   const entries = mix.types.map(t => [t, mix.counts[t] || 0]).filter(([, n]) => n > 0);
   const total = entries.reduce((s, [, n]) => s + n, 0);
-  if (!total) return <p className="text-sm text-gray-500">Not enough guests with a known organisation yet.</p>;
+  if (!total) return <p className="text-sm text-gray-500">Not enough guests with a known organization yet.</p>;
   return (
     <div>
       <div className="flex h-4 rounded overflow-hidden">
@@ -36,7 +36,7 @@ function GuestMix({ mix }) {
           </span>
         ))}
       </div>
-      <p className="mt-1 text-[11px] text-gray-400">{plural(total, 'guest')} with a known organisation, by the kind of organisation they work for.</p>
+      <p className="mt-1 text-[11px] text-gray-400">{plural(total, 'guest')} with a known organization, by the kind of organization they work for.</p>
     </div>
   );
 }
@@ -139,7 +139,7 @@ export default function ShowPage() {
                 </Section>
               )}
               {s.top_orgs.length > 0 && (
-                <Section title="Organisations they book most" aside="distinct guests">
+                <Section title="Organizations they book most" aside="distinct guests">
                   <ul className="space-y-2">
                     {s.top_orgs.map(o => (
                       <li key={o.org_id} className="flex items-center gap-2 text-sm">

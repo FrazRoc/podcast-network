@@ -68,7 +68,7 @@ export function ShowMore({ items, initial = 10, render, more = 'Show all' }) {
 
 export default function ProfileLayout({ state, kindLabel, children }) {
   const { data, error } = state;
-  useShowOrgs();   // links to show-organisations point at their show
+  useShowOrgs();   // links to show-organizations point at their show
   return (
     <SiteShell>
       {error === 'not_found' && (

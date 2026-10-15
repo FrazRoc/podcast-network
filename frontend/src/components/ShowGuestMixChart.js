@@ -4,8 +4,8 @@ import { ORG_TYPE_COLORS, ORG_TYPE_LABELS } from '../chartUtils';
 import { showHref, slugify } from '../profileUtils';
 import StackedShareBars from './StackedShareBars';
 
-// Who each show books: its guests split by the kind of organisation they
-// work for. Only guests whose organisation has a type are counted.
+// Who each show books: its guests split by the kind of organization they
+// work for. Only guests whose organization has a type are counted.
 export default function ShowGuestMixChart() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
@@ -26,8 +26,8 @@ export default function ShowGuestMixChart() {
     <>
       <StackedShareBars rows={rows} keys={data.types} colors={ORG_TYPE_COLORS} labels={ORG_TYPE_LABELS} />
       <p className="text-xs text-gray-400 mt-3">
-        Shows with at least 30 guests whose organisation has a known type. The number is those guests;
-        guests at small, unclassified organisations aren't counted.
+        Shows with at least 30 guests whose organization has a known type. The number is those guests;
+        guests at small, unclassified organizations aren't counted.
       </p>
     </>
   );

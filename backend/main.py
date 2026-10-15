@@ -4079,7 +4079,7 @@ def get_org_profile(org_id: int):
         """, (org_id,))
         org = cur.fetchone()
         if not org or org['not_an_org']:
-            raise HTTPException(status_code=404, detail="Organisation not found")
+            raise HTTPException(status_code=404, detail="Organization not found")
 
         # This organisation and everything under it, the same way the Stats
         # page rolls sub-organisations up into their parent.
@@ -5195,7 +5195,7 @@ def update_topic(tag_id: int, body: TopicUpdateRequest):
             if body.org_id:
                 cur.execute("SELECT 1 FROM organizations WHERE org_id = %s", (body.org_id,))
                 if not cur.fetchone():
-                    raise HTTPException(status_code=400, detail=f"No organisation #{body.org_id}")
+                    raise HTTPException(status_code=400, detail=f"No organization #{body.org_id}")
             cur.execute("UPDATE tags SET org_id = %s WHERE tag_id = %s", (body.org_id or None, tag_id))
         if body.is_person is not None:
             cur.execute("UPDATE tags SET is_person = %s WHERE tag_id = %s", (body.is_person, tag_id))
@@ -5657,7 +5657,7 @@ def update_company(org_id: int, body: CompanyUpdateRequest):
                     raise HTTPException(status_code=404, detail="Parent company not found")
                 if row['not_an_org']:
                     raise HTTPException(status_code=400,
-                                        detail="That company is marked not an organisation, so it can't be a parent")
+                                        detail="That company is marked not an organization, so it can't be a parent")
             sets.append("parent_org_id = %(parent)s"); params['parent'] = parent
         if not sets:
             raise HTTPException(status_code=400, detail="Nothing to update")

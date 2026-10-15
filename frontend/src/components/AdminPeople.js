@@ -46,8 +46,8 @@ const FILTERS = [
   { id: 'role_company_only',  label: 'Has company only' },
   { id: 'role_none',          label: 'No role or company' },
   { id: 'no_linkedin',        label: 'No LinkedIn' },
-  // A name that reads like an organisation or show ("Planet Money").
-  { id: 'org_like_name',      label: 'Name looks like an organisation' },
+  // A name that reads like an organization or show ("Planet Money").
+  { id: 'org_like_name',      label: 'Name looks like an organization' },
 ];
 
 const SORTS = [
@@ -150,13 +150,13 @@ function AliasEditor({ hostId }) {
   );
 }
 
-// Job title and organisation. "Current role" is what the public profile shows:
+// Job title and organization. "Current role" is what the public profile shows:
 // derived from the newest appearance (backend/role_selection.py) unless pinned
 // here. History is every role read from episode text, newest first — raw, as
 // each show worded it.
 const formatRole = (r) => [r?.title, r?.company].filter(Boolean).join(' @ ');
-// A history row keeps the show's own wording; `company` is the organisation's
-// name (blank when it is not an organisation).
+// A history row keeps the show's own wording; `company` is the organization's
+// name (blank when it is not an organization).
 const formatHistoryRole = (r) => formatRole({ ...r, company: r.company && (r.company_as_written || r.company) });
 
 function RoleEditor({ hostId }) {

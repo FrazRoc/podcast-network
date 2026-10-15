@@ -5,7 +5,7 @@ import { getAdminPassword } from '../adminAuth';
 const NAV = [
   ['/', 'Network'],
   ['/people', 'People'],
-  ['/orgs', 'Organisations', 'Orgs'],
+  ['/orgs', 'Organizations', 'Orgs'],
   ['/shows', 'Shows'],
   ['/topics', 'Topics'],
   ['/stats', 'Stats'],

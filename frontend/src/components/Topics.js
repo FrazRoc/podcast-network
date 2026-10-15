@@ -4,7 +4,7 @@ import { API_BASE_URL } from '../config';
 import { topicHref, orgHref, personHref, showHref, fmtDate, plural, publicFetch,
          avatarUrl, imageUrl, imageFallback } from '../profileUtils';
 
-// Shared topic pieces: the colour for each of the 12 fixed categories
+// Shared topic pieces: the color for each of the 12 fixed categories
 // (backend/topic_names.py CATEGORIES), a topic chip, the "Talks about" block
 // on profiles, and the small topic line under an episode.
 
@@ -43,8 +43,8 @@ export function TopicChip({ topic, count, size = 'sm' }) {
 }
 
 // The topics under one episode, main topic first.
-// Companies and people the episode discusses follow, in grey: they aren't
-// topics, and link to the organisation's or person's page where there is one.
+// Companies and people the episode discusses follow, in gray: they aren't
+// topics, and link to the organization's or person's page where there is one.
 const MENTION = 'inline-flex items-center whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-600';
 const Mention = ({ href, label, name }) => (href
   ? <a href={href} title={label} className={`${MENTION} hover:bg-gray-200 hover:text-gray-900`}>{name}</a>
@@ -63,7 +63,7 @@ export function EpisodeTopics({ topics, companies, people }) {
   );
 }
 
-// "Episodes that discuss X" on an organisation's or person's page: episodes
+// "Episodes that discuss X" on an organization's or person's page: episodes
 // tagged with them as a subject, whether or not they were on.
 export function DiscussedIn({ discussed, name }) {
   if (!discussed?.episodes) return null;
@@ -90,7 +90,7 @@ export function DiscussedIn({ discussed, name }) {
   );
 }
 
-// "Talks about" on a person or organisation page, "What it covers" on a
+// "Talks about" on a person or organization page, "What it covers" on a
 // show: the topics on 2+ of their tagged episodes, and the category mix.
 // Topics cover only part of the archive so far, so it says what the counts
 // are out of; with too little tagged it says so instead of guessing.

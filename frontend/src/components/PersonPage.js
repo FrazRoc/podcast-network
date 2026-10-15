@@ -20,11 +20,11 @@ const Badge = ({ kind }) => (kind === 'current'
   ? <span className="ml-2 text-[11px] px-1.5 py-0.5 rounded bg-teal-100 text-teal-800 align-middle">current</span>
   : <span className="ml-2 text-[11px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 align-middle">former</span>);
 
-// One entry per organisation, with the positions they were introduced with
-// there (or, for someone with no organisation on record, one per title).
+// One entry per organization, with the positions they were introduced with
+// there (or, for someone with no organization on record, one per title).
 function Career({ items }) {
   // Titles alone ("Consulting", "Expert") add nothing to the line under the
-  // name, so the card is for people with an organisation on record.
+  // name, so the card is for people with an organization on record.
   if (!items.some(c => c.company)) return null;
   return (
     <Section title="Career on the record" aside="as introduced on episodes">

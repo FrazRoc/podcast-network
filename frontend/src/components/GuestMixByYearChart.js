@@ -3,7 +3,7 @@ import { API_BASE_URL } from '../config';
 import { ORG_TYPE_COLORS, ORG_TYPE_LABELS } from '../chartUtils';
 import ShareByYearChart from './ShareByYearChart';
 
-// Share of guest appearances from each kind of organisation, per year. All
+// Share of guest appearances from each kind of organization, per year. All
 // kinds together by default; pick one to see it on its own scale (government
 // is the one that moves).
 export default function GuestMixByYearChart() {
@@ -24,7 +24,7 @@ export default function GuestMixByYearChart() {
     <ShareByYearChart items={data.items} keys={data.types} colors={ORG_TYPE_COLORS} labels={ORG_TYPE_LABELS}
       partialYear={data.partial_year}
       share={(it, t) => (100 * (it.counts[t] || 0)) / (it.total || 1)}
-      describeYear={(it, t) => `${it.year}: ${it.counts[t] || 0} of ${it.total} guest appearances were from ${ORG_TYPE_LABELS[t].toLowerCase()} organisations.`}
-      footnote="Each guest appearance counted under the organisation the guest worked for at the time, among guests whose organisation has a known type. * part year." />
+      describeYear={(it, t) => `${it.year}: ${it.counts[t] || 0} of ${it.total} guest appearances were from ${ORG_TYPE_LABELS[t].toLowerCase()} organizations.`}
+      footnote="Each guest appearance counted under the organization the guest worked for at the time, among guests whose organization has a known type. * part year." />
   );
 }

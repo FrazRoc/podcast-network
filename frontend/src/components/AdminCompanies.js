@@ -6,10 +6,10 @@ import AdminSubTabs from './AdminSubTabs';
 import AdminListCount from './AdminListCount';
 import OrgLogo from './OrgLogo';
 
-// Company Admin. Organisations are created automatically from the company
+// Company Admin. Organizations are created automatically from the company
 // names extracted for guests (scraper/organizations.py sync); this page is
-// where they get reviewed: merged when two spellings are one organisation,
-// given a type and a parent, or marked as not an organisation at all.
+// where they get reviewed: merged when two spellings are one organization,
+// given a type and a parent, or marked as not an organization at all.
 
 const API = `${API_BASE_URL}/api/admin`;
 
@@ -20,7 +20,7 @@ const VIEWS = [
   { id: 'active',  label: 'All' },
   { id: 'untyped', label: 'No type yet' },
   { id: 'no_website', label: 'No website' },
-  { id: 'not_org', label: 'Not an organisation' },
+  { id: 'not_org', label: 'Not an organization' },
 ];
 
 const SORTS = [
@@ -52,7 +52,7 @@ const jsonBody = (method, body) => ({
   method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
 });
 
-// One colour per type so a scan of the list shows the mix at a glance.
+// One color per type so a scan of the list shows the mix at a glance.
 const TYPE_COLORS = {
   company:     'bg-blue-100 text-blue-800',
   nonprofit:   'bg-green-100 text-green-800',
@@ -115,8 +115,8 @@ export function CompanyPicker({ placeholder, excludeId, onPick }) {
 // move, and if any is ambiguous — one word that is only the start of a longer
 // name ("Aurora" joining Aurora Solar, when Aurora Energy Research is "Aurora"
 // too) — asks before carrying it across. An unticked spelling becomes its own
-// company instead. Resolves to the merge result, or CANCELLED.
-const CANCELLED = Symbol('cancelled');
+// company instead. Resolves to the merge result, or CANCELED.
+const CANCELED = Symbol('canceled');
 
 function useMergeCheck() {
   const [pending, setPending] = useState(null);   // { keepName, flagged, resolve }
@@ -126,7 +126,7 @@ function useMergeCheck() {
     let split = [];
     if (flagged.length) {
       split = await new Promise(resolve => setPending({ keepName: pre.keep.name, flagged, resolve }));
-      if (split === null) return CANCELLED;
+      if (split === null) return CANCELED;
     }
     return call(`${API}/companies/${keepId}/merge/${dropId}`, jsonBody('POST', { split_alias_ids: split }));
   };
@@ -144,7 +144,7 @@ function SpellingCheckDialog({ keepName, flagged, onDone }) {
       <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-5 space-y-3" onClick={e => e.stopPropagation()}>
         <h3 className="text-base font-semibold text-gray-900">Check these spellings</h3>
         <p className="text-sm text-gray-600">
-          These could mean another organisation too. Tick the ones that really are <strong>{keepName}</strong>;
+          These could mean another organization too. Tick the ones that really are <strong>{keepName}</strong>;
           the rest become companies of their own, so their roles don't join {keepName} by mistake.
         </p>
         <ul className="space-y-1.5">
@@ -208,7 +208,7 @@ function OrgFacts({ org }) {
   );
 }
 
-// Which show this organisation is ("Drilled" from "host of Drilled": its
+// Which show this organization is ("Drilled" from "host of Drilled": its
 // links then go to the show) or which shows it publishes (podcasts.org_id).
 function PodcastLinks({ orgId, podcasts, onChanged }) {
   const [shows, setShows] = useState(null);
@@ -250,7 +250,7 @@ function PodcastLinks({ orgId, podcasts, onChanged }) {
         </ul>
       ) : (
         <p className="text-xs text-gray-400 mb-2">
-          If this "organisation" is really a show (people introduced as "host of …"), link it: its page and
+          If this "organization" is really a show (people introduced as "host of …"), link it: its page and
           links then go to the show. A company that publishes a show can be linked too.
         </p>
       )}
@@ -325,13 +325,13 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
     try {
       if (mergeDir === 'into') {
         // This company is merged away, so show the one it became part of.
-        if (await mergeChecked(mergeTarget.org_id, orgId) === CANCELLED) return;
+        if (await mergeChecked(mergeTarget.org_id, orgId) === CANCELED) return;
         setMergeTarget(null);
         onChanged?.();
         onSelect?.(mergeTarget.org_id);
       } else {
         const r = await mergeChecked(orgId, mergeTarget.org_id);
-        if (r === CANCELLED) return;
+        if (r === CANCELED) return;
         setNotice(`Merged “${r.merged}” into this company`);
         setMergeTarget(null);
         load(); onChanged?.();
@@ -340,7 +340,7 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
   };
 
   // Give one spelling (and its roles) a company of its own — for a spelling
-  // that was merged in but means a different organisation.
+  // that was merged in but means a different organization.
   const splitOff = async (a) => {
     if (!window.confirm(`Split “${a.alias_name}” off into its own company? Its ${a.roles} role${a.roles !== 1 ? 's' : ''} go with it.`)) return;
     setBusy(true); setError(''); setNotice('');
@@ -356,13 +356,13 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
     setBusy(true); setError(''); setNotice('');
     try {
       if (action === 'into') {
-        if (await mergeChecked(other.org_id, orgId) === CANCELLED) return;
+        if (await mergeChecked(other.org_id, orgId) === CANCELED) return;
         onChanged?.(); onSelect?.(other.org_id);
         return;
       }
       if (action === 'in') {
         const r = await mergeChecked(orgId, other.org_id);
-        if (r === CANCELLED) return;
+        if (r === CANCELED) return;
         setNotice(`Merged “${r.merged}” into this company`);
       } else {
         await call(`${API}/companies/not-same`, jsonBody('POST', { org_a: orgId, org_b: other.org_id }));
@@ -391,7 +391,7 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
       </div>
       {org.not_an_org && (
         <p className="text-xs bg-amber-50 text-amber-700 rounded-lg px-3 py-2">
-          Marked as not an organisation — hidden from the list and never shown as anyone's company.
+          Marked as not an organization — hidden from the list and never shown as anyone's company.
         </p>
       )}
 
@@ -418,7 +418,7 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
           </div>
         </div>
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Parent organisation</label>
+          <label className="block text-xs font-medium text-gray-500 mb-1">Parent organization</label>
           {form.parent ? (
             <div className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2 text-sm">
               <button onClick={() => onSelect(form.parent.org_id)} title={form.parent.name} className="text-blue-600 hover:underline truncate">
@@ -439,7 +439,7 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
           </button>
           <button onClick={() => save({ not_an_org: !org.not_an_org })} disabled={busy}
             className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50">
-            {org.not_an_org ? 'It is an organisation' : 'Not an organisation'}
+            {org.not_an_org ? 'It is an organization' : 'Not an organization'}
           </button>
           {notice && <span className="text-xs text-green-600">{notice}</span>}
         </div>
@@ -480,7 +480,7 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
       <div>
         <p className="text-xs font-medium text-gray-500 mb-1">Spellings ({aliases.length})</p>
         <p className="text-xs text-gray-400 mb-2">
-          Every way this organisation was written in episode text.{aliases.length > 1 && ' ✕ splits one off into its own company.'}
+          Every way this organization was written in episode text.{aliases.length > 1 && ' ✕ splits one off into its own company.'}
         </p>
         <div className="flex flex-wrap gap-1.5">
           {aliases.map(a => (
@@ -534,7 +534,7 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
 
       {children.length > 0 && (
         <div>
-          <p className="text-xs font-medium text-gray-500 mb-1">Sub-organisations ({children.length})</p>
+          <p className="text-xs font-medium text-gray-500 mb-1">Sub-organizations ({children.length})</p>
           <ul className="space-y-1">
             {children.map(c => (
               <li key={c.org_id} className="text-sm flex items-center justify-between">
@@ -554,7 +554,7 @@ function CompanyPanel({ orgId, onChanged, onSelect, onClose }) {
           {children.length > 0 && (
             <label className="text-xs text-gray-500 flex items-center gap-1">
               <input type="checkbox" checked={includeSub} onChange={e => setIncludeSub(e.target.checked)} />
-              include sub-organisations
+              include sub-organizations
             </label>
           )}
         </div>
@@ -591,7 +591,7 @@ function SuggestionCard({ s, onAction, onSkip }) {
   const act = async (fn, droppedId = null) => {
     setBusy(true); setError('');
     try {
-      if (await fn() === CANCELLED) { setBusy(false); return; }
+      if (await fn() === CANCELED) { setBusy(false); return; }
       onAction(s, droppedId);
     } catch (e) {
       // Already merged away (by an earlier card or another tab): this card is

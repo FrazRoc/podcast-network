@@ -8,7 +8,7 @@ const BAR = 13;
 
 // Two steps of one hue, not two hues: the segments are parts of a single
 // total, not separate categories. Stepping by lightness also survives every
-// form of colour blindness, which two teals of equal lightness would not.
+// form of color blindness, which two teals of equal lightness would not.
 const OWN = '#0f766e';
 const VIA = '#7dd3c8';
 
@@ -26,7 +26,7 @@ export default function BridgeChart() {
 
   const { people, maxX, plotW, H } = useMemo(() => {
     if (!data) return { people: [], maxX: 1, plotW: 1, H: 120 };
-    // Already ordered by shows-of-their-own, descending: travellers at the top,
+    // Already ordered by shows-of-their-own, descending: travelers at the top,
     // single-show hosts at the bottom. Sorting by reach instead would produce a
     // near-flat list, since everyone here is within a dozen shows of each other.
     const people = data.people;
@@ -65,7 +65,7 @@ export default function BridgeChart() {
           const y = PAD.top + i * ROW + (ROW - BAR) / 2;
           const active = hover?.host_id === p.host_id;
           // 2px of surface between the segments so they read as two parts
-          // rather than one bar with a colour change.
+          // rather than one bar with a color change.
           const ownW = Math.max(0, x(p.own_shows) - 2);
           return (
             <g key={p.host_id}

@@ -10,7 +10,7 @@ const CELL_GAP = 0.6;
 
 // One hue, light to dark: the cells encode a magnitude — episodes that month —
 // not a category. Empty months are left as bare surface rather than given a
-// colour of their own, so a gap in publishing reads as a gap.
+// color of their own, so a gap in publishing reads as a gap.
 const SHADES = ['#ccfbf1', '#5eead4', '#14b8a6', '#0d9488', '#115e59'];
 const DORMANT = '#d4d4d8';
 

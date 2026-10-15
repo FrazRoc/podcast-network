@@ -7,7 +7,7 @@ const INSET = 18;   // keeps the first and last points clear of the axis
 
 // Shares per year for a set of categories. With nothing picked (the
 // default) every line is drawn on one shared scale; picking a category draws
-// just that line on its own scale with the values labelled, so a small one
+// just that line on its own scale with the values labeled, so a small one
 // like government guests (3–8%) isn't a flat line along the bottom. Clicking
 // it again goes back to every line. With nothing picked, hovering a legend
 // entry picks its line out and hovering a year lists every value.

@@ -43,7 +43,7 @@ export function TopicCategoriesByYearChart() {
   );
 }
 
-// Distinct line colours for the few broad topics in one category.
+// Distinct line colors for the few broad topics in one category.
 const AREA_PALETTE = ['#4e79a7', '#f28e2b', '#e15759', '#59a14f', '#b07aa1', '#76b7b2', '#edc948', '#ff9da7', '#9c755f'];
 
 // Share of tagged episodes touching each broad topic, per year — one
@@ -132,8 +132,8 @@ export function RisingTopicsChart() {
         </div>
       </div>
       <p className="text-xs text-gray-400 mt-3">
-        Share of tagged episodes from {data.first_year || 2019} to {data.cutoff_year - 1} (grey, {data.earlier_episodes} episodes) against
-        {' '}{data.cutoff_year} onward (colour, {data.recent_episodes} episodes). Topics on at least 8 episodes
+        Share of tagged episodes from {data.first_year || 2019} to {data.cutoff_year - 1} (gray, {data.earlier_episodes} episodes) against
+        {' '}{data.cutoff_year} onward (color, {data.recent_episodes} episodes). Topics on at least 8 episodes
         and 3 different shows{level === 'broad' && '; a broad topic counts every topic under it'}.
       </p>
     </div>
@@ -159,7 +159,7 @@ export function ShowTopicMixChart() {
 }
 
 // Who's on the episodes about each broad topic: its guests by the kind of
-// organisation they work for, with every guest appearance as the first row
+// organization they work for, with every guest appearance as the first row
 // to compare against.
 export function TopicGuestMixChart() {
   const { data, error } = useStat('/api/stats/topic-guest-mix');
@@ -185,7 +185,7 @@ export function TopicGuestMixChart() {
         noun="guest appearances" />
       <p className="text-xs text-gray-400 mt-3">
         Broad topics with at least 30 counted appearances, most first. Each guest counts once per episode, under
-        the role they had then; guests at small, unclassified organisations aren't counted. An episode counts
+        the role they had then; guests at small, unclassified organizations aren't counted. An episode counts
         under every broad topic it touches.
       </p>
     </div>

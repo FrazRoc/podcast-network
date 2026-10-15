@@ -42,7 +42,7 @@ function initialView() {
 export default function Stats() {
   const [view, setView] = useState(initialView);
   useEffect(() => setMeta('Stats · Podcast Network',
-    'Who gets booked on clean-energy podcasts: the organisations, guests, shows and topics, in charts.'), []);
+    'Who gets booked on clean-energy podcasts: the organizations, guests, shows and topics, in charts.'), []);
 
   // replaceState, as on the Network page: switching tabs shouldn't stack up
   // back-button presses.
@@ -72,8 +72,8 @@ export default function Stats() {
 
       {view === 'people' ? (
         <>
-          <Section title="Most-Booked Organisations"
-            description="The organisations whose people turn up most, by how many of them have been guests or how many different shows they've been on.">
+          <Section title="Most-Booked Organizations"
+            description="The organizations whose people turn up most, by how many of them have been guests or how many different shows they've been on.">
             <TopOrganizationsChart />
           </Section>
 
@@ -83,12 +83,12 @@ export default function Stats() {
           </Section>
 
           <Section title="The Revolving Door"
-            description="Where guests used to work and where they work now, by kind of organisation.">
+            description="Where guests used to work and where they work now, by kind of organization.">
             <RevolvingDoorChart />
           </Section>
 
           <Section title="Guest Mix by Year"
-            description="The share of guest appearances from each kind of organisation, year by year. Most of it barely moves; pick government to see the exception.">
+            description="The share of guest appearances from each kind of organization, year by year. Most of it barely moves; pick government to see the exception.">
             <GuestMixByYearChart />
           </Section>
 
@@ -135,7 +135,7 @@ export default function Stats() {
           </Section>
 
           <Section title="Who's Talking About It"
-            description="The guests on each broad topic's episodes, by the kind of organisation they work for. Click a kind to sort topics by it.">
+            description="The guests on each broad topic's episodes, by the kind of organization they work for. Click a kind to sort topics by it.">
             <TopicGuestMixChart />
           </Section>
 
@@ -157,7 +157,7 @@ export default function Stats() {
       ) : (
         <>
           <Section title="Who Each Show Books"
-            description="Each show's guests by the kind of organisation they work for. Some shows are industry shows, some are policy or academic ones.">
+            description="Each show's guests by the kind of organization they work for. Some shows are industry shows, some are policy or academic ones.">
             <ShowGuestMixChart />
           </Section>
 

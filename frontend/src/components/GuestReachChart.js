@@ -22,8 +22,8 @@ export default function GuestReachChart() {
       .catch(e => setError(e.message));
   }, []);
 
-  const { points, maxShows, maxApp, labelled } = useMemo(() => {
-    if (!data) return { points: [], maxShows: 1, maxApp: 1, labelled: [] };
+  const { points, maxShows, maxApp, labeled } = useMemo(() => {
+    if (!data) return { points: [], maxShows: 1, maxApp: 1, labeled: [] };
     const guests = data.guests;
     const maxShows = Math.max(...guests.map(g => g.shows));
     const maxApp = Math.max(...guests.map(g => g.appearances));
@@ -37,20 +37,20 @@ export default function GuestReachChart() {
       perShow: g.appearances / g.shows,
     }));
 
-    // Label only the extremes of each behaviour: the widest reach, and the
-    // most concentrated. Labelling every point would be unreadable.
+    // Label only the extremes of each behavior: the widest reach, and the
+    // most concentrated. Labeling every point would be unreadable.
     const byShows = [...points].sort((a, b) => b.shows - a.shows).slice(0, 5);
     const byLoyalty = [...points]
       .filter(p => p.appearances >= 12)
       .sort((a, b) => b.perShow - a.perShow)
       .slice(0, 4);
     const seen = new Set();
-    const labelled = [...byShows, ...byLoyalty].filter(p => {
+    const labeled = [...byShows, ...byLoyalty].filter(p => {
       if (seen.has(p.host_id)) return false;
       seen.add(p.host_id);
       return true;
     });
-    return { points, maxShows, maxApp, labelled };
+    return { points, maxShows, maxApp, labeled };
   }, [data]);
 
   if (error) return <p className="text-sm text-red-500">Couldn't load this chart: {error}</p>;
@@ -105,13 +105,13 @@ export default function GuestReachChart() {
           );
         })}
 
-        {labelled.map((p, i) => {
+        {labeled.map((p, i) => {
           // Points near the right edge get their label on the other side, and
           // two guests with identical counts land on the same pixel — Bill
           // Meehan and Pat Hohl both sit at 16 appearances on 1 show — so the
           // second of a colliding pair is nudged clear.
           const flip = p.x > W * 0.7;
-          const collides = labelled
+          const collides = labeled
             .slice(0, i)
             .some(q => Math.abs(q.x - p.x) < 4 && Math.abs(q.y - p.y) < 4);
           return (

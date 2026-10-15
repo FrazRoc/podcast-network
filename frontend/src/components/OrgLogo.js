@@ -2,14 +2,14 @@ import { useState } from 'react';
 import { API_BASE_URL } from '../config';
 import { useShowOrgs, showForOrg, coverUrl } from '../profileUtils';
 
-// An organisation's logo (backend /api/logo/{org_id}: logo.dev by its
+// An organization's logo (backend /api/logo/{org_id}: logo.dev by its
 // website, else its Wikimedia Commons logo, else its parent's), or its
 // initial when there's none. `size` is in pixels.
 export default function OrgLogo({ orgId, name, size = 20, className = '' }) {
   const [failed, setFailed] = useState(false);
   useShowOrgs();
   const box = { width: size, height: size };
-  // An organisation that is a show wears the show's cover art.
+  // An organization that is a show wears the show's cover art.
   const show = showForOrg(orgId);
   if (show?.cover_art_url && !failed) {
     return (
@@ -30,7 +30,7 @@ export default function OrgLogo({ orgId, name, size = 20, className = '' }) {
     <img src={`${API_BASE_URL}/api/logo/${orgId}`} alt="" loading="lazy" style={box}
       onError={() => setFailed(true)}
       // No logo comes back as a 1x1 transparent image (a 404 put an error in
-      // the console for every organisation without one): show the initial.
+      // the console for every organization without one): show the initial.
       onLoad={e => { if (e.currentTarget.naturalWidth <= 1) setFailed(true); }}
       className={`flex-shrink-0 rounded bg-white object-contain ${className}`} />
   );

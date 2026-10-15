@@ -31,7 +31,7 @@ export default function GuestCohortChart() {
       const lower = below;
       const upper = c.counts.map((n, i) => lower[i] + n);
       below = upper;
-      return { cohort: c.cohort, counts: c.counts, lower, upper, colour: RAMP[ci % RAMP.length] };
+      return { cohort: c.cohort, counts: c.counts, lower, upper, color: RAMP[ci % RAMP.length] };
     });
     return { years: data.years, bands, peak: Math.max(1, ...data.totals) };
   }, [data]);
@@ -68,7 +68,7 @@ export default function GuestCohortChart() {
         ))}
 
         {bands.map(b => (
-          <path key={b.cohort} d={areaFor(b)} fill={b.colour}
+          <path key={b.cohort} d={areaFor(b)} fill={b.color}
                 stroke="#fff" strokeWidth={1}
                 opacity={hover && hover.cohort !== b.cohort ? 0.35 : 1}
                 onMouseEnter={() => setHover(h => ({ i: h?.i ?? years.length - 1, cohort: b.cohort }))} />
@@ -91,7 +91,7 @@ export default function GuestCohortChart() {
           part year
         </text>
 
-        {/* Each band labelled at the right edge where it is thickest enough */}
+        {/* Each band labeled at the right edge where it is thickest enough */}
         {bands.map(b => {
           const last = years.length - 1;
           const mid = (b.lower[last] + b.upper[last]) / 2;

@@ -36,7 +36,7 @@ const nodeRadius = (node) =>
   node.isShow
     // Shows scale by guest pool, not by edge count: a show's weight in this
     // view is how many people it has had on, and there are only 91 of them,
-    // so they can be drawn large enough for the cover art to be recognisable.
+    // so they can be drawn large enough for the cover art to be recognizable.
     ? Math.max(8, 5 + Math.sqrt(node.people || 1) * 1.6)
     : (node.val <= 1 ? 2.5 : 2.5 + Math.sqrt(node.val) * 2.2);
 
@@ -70,13 +70,13 @@ const podcastColor = (title) => `hsla(${podcastHue(title)}, 65%, 55%, 0.85)`;
 // Links take the show's hue too, but paler and more transparent: they sit
 // behind the nodes and there are 4,397 of them, so they read as tint rather
 // than as another set of saturated marks. 73 hashed hues is far more than
-// anyone can tell apart, so colour here says "these strands are the same show"
+// anyone can tell apart, so color here says "these strands are the same show"
 // at a glance — the legend and hover are what name it.
 const linkColor = (title, alpha) => `hsla(${podcastHue(title)}, 50%, 62%, ${alpha})`;
 
 // The API already merges duplicate people and resolves their role; this only
 // adds the per-node tallies the force graph needs.
-const processNormalised = ({ nodes: rawNodes, links: rawLinks }) => {
+const processNormalized = ({ nodes: rawNodes, links: rawLinks }) => {
   const nodes = new Map(
     rawNodes.map(n => [n.id, { ...n, val: 0, podcasts: new Set() }])
   );
@@ -105,7 +105,7 @@ const processNormalised = ({ nodes: rawNodes, links: rawLinks }) => {
 // them was drawn along the same straight line, so four working relationships
 // looked like one. Spreading them over a range of curvatures fans them into a
 // visible bundle. The sign is taken from the lower id so that a link stored
-// A->B and one stored B->A bow the same way instead of cancelling out.
+// A->B and one stored B->A bow the same way instead of canceling out.
 const MAX_CURVE = 0.32;
 const fanOutParallelLinks = (links) => {
   const byPair = new Map();
@@ -127,7 +127,7 @@ const fanOutParallelLinks = (links) => {
 
 const processData = (data) => {
   if (data && !Array.isArray(data) && Array.isArray(data.nodes)) {
-    return processNormalised(data);
+    return processNormalized(data);
   }
   // Anything else — an error body, a shape we don't know — yields an empty
   // graph rather than throwing in the fetch handler.
@@ -376,7 +376,7 @@ const ShowProfileCard = ({ show, connections, onClose, weighting, allLinks, name
   );
 };
 
-// The one current job title / organisation for a person — derived from
+// The one current job title / organization for a person — derived from
 // episode text or pinned by hand (see backend/role_selection.py). Fetched per
 // card rather than carried in the graph payload, which stays unchanged.
 const useCurrentRole = (hostId) => {
@@ -384,12 +384,12 @@ const useCurrentRole = (hostId) => {
   useEffect(() => {
     setRole(null);
     if (hostId == null) return undefined;
-    let cancelled = false;
+    let canceled = false;
     fetch(`${API_BASE_URL}/api/people/${hostId}/current-role`)
       .then(r => (r.ok ? r.json() : null))
-      .then(d => { if (!cancelled) setRole(d?.current_role || null); })
+      .then(d => { if (!canceled) setRole(d?.current_role || null); })
       .catch(() => {});   // a missing role just means no line on the card
-    return () => { cancelled = true; };
+    return () => { canceled = true; };
   }, [hostId]);
   return role;
 };
@@ -655,7 +655,7 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
           <span>1</span><span>20</span>
         </div>
         <p className="text-xs text-gray-400">
-          How many people two shows must both have had on. Raw counts favour
+          How many people two shows must both have had on. Raw counts favor
           the biggest shows, which connect to everything — this stays a single
           mass at any threshold.
         </p>
@@ -743,7 +743,7 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
         <div className="space-y-1">
           <label className="block text-sm font-medium text-gray-700">Edge weight</label>
           <div className="flex rounded-md bg-gray-100 p-0.5 text-xs">
-            {[['raw', 'Shared people'], ['jaccard', 'Normalised']].map(([w, label]) => (
+            {[['raw', 'Shared people'], ['jaccard', 'Normalized']].map(([w, label]) => (
               <button
                 key={w}
                 onClick={() => onFiltersChange({ weighting: w })}
@@ -755,8 +755,8 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
             ))}
           </div>
           <p className="text-xs text-gray-400">
-            Raw counts favour big shows — Volts and Inevitable share 44 mostly
-            because both have had ~200 guests. Normalised divides by their
+            Raw counts favor big shows — Volts and Inevitable share 44 mostly
+            because both have had ~200 guests. Normalized divides by their
             combined pool, which surfaces Nuclear Barbarians and Titans Of
             Nuclear: 6 people, but 30% of everyone either has ever had on.
           </p>
@@ -862,7 +862,7 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
         </div>
         <p className="text-xs text-gray-400">
           How hard nodes push each other apart. Re-runs the layout. At 30 the
-          centre is 77% covered in circles; 60 halves that, 180 reaches 15% but
+          center is 77% covered in circles; 60 halves that, 180 reaches 15% but
           spreads the graph twice as wide.
         </p>
       </div>
@@ -883,7 +883,7 @@ const FilterPanel = ({ onFiltersChange, networkStats, currentFilters, searchQuer
         <p className="text-xs text-gray-400">
           How hard everything is pulled toward the middle. The only dial that
           improves two things at once: at 4 the shows separate better than at 8
-          and the centre is less crowded, in exchange for a wider graph.
+          and the center is less crowded, in exchange for a wider graph.
         </p>
       </div>
 
@@ -991,8 +991,8 @@ const PodcastHostNetwork = () => {
     minPodcasts: 1,
     minEpisodes: 1,
     minShared: 4,          // shows view, raw weighting: people two shows must have in common
-    minOverlap: 5,         // shows view, normalised: shared share of the combined pool, in %
-    // Normalised by default. Raw counts are the more intuitive number but they
+    minOverlap: 5,         // shows view, normalized: shared share of the combined pool, in %
+    // Normalized by default. Raw counts are the more intuitive number but they
     // produce a single mass at every threshold — the biggest shows connect to
     // everything, so a raw floor keeps exactly the edges carrying no
     // information. Dividing by the combined guest pool is what separates the
@@ -1034,14 +1034,14 @@ const PodcastHostNetwork = () => {
   const isAdmin = useMemo(() => !!getAdminPassword(), []);
 
   // Installed via the ref rather than on the first engine tick: a tick-1 install
-  // means tick 0 lays out under different forces and then visibly reorganises.
+  // means tick 0 lays out under different forces and then visibly reorganizes.
   // force-graph keeps one simulation across data changes, so this runs once.
   const installForces = useCallback(graph => {
     graphRef.current = graph;
     if (!graph || graph._forcesSet) return;
     // Repulsion. force-graph builds forceManyBody() unconfigured, so this ran
     // at d3's default of -30 — far too weak for 1,192 nodes, which is why the
-    // centre packed into an unreadable mass: circles covered 77% of the central
+    // center packed into an unreadable mass: circles covered 77% of the central
     // disc, near-tiling it. The coverage figure is zoom-independent, so
     // lowering it thins the middle out rather than just drawing it larger.
     //
@@ -1116,14 +1116,14 @@ const PodcastHostNetwork = () => {
   useEffect(() => {
     const topic = currentFilters.topic;
     if (!topic) { setTopicMembers(null); return undefined; }
-    let cancelled = false;
+    let canceled = false;
     setLoadingMembers(true);
     fetch(`${API_BASE_URL}/api/topics/${topic}/members`)
       .then(r => (r.ok ? r.json() : Promise.reject(r)))
-      .then(d => { if (!cancelled) setTopicMembers({ people: new Set(d.people), shows: new Set(d.shows) }); })
-      .catch(() => { if (!cancelled) setTopicMembers(null); })
-      .finally(() => { if (!cancelled) setLoadingMembers(false); });
-    return () => { cancelled = true; };
+      .then(d => { if (!canceled) setTopicMembers({ people: new Set(d.people), shows: new Set(d.shows) }); })
+      .catch(() => { if (!canceled) setTopicMembers(null); })
+      .finally(() => { if (!canceled) setLoadingMembers(false); });
+    return () => { canceled = true; };
   }, [currentFilters.topic]);
 
   useEffect(() => {
@@ -1248,13 +1248,13 @@ const PodcastHostNetwork = () => {
     // from jaccard: a pair sharing one person out of two tiny pools scores
     // 0.17 and would otherwise outrank real relationships.
     // The threshold follows the weighting. Cutting on the raw count while
-    // drawing normalised widths is what left the graph a blob: big shows
+    // drawing normalized widths is what left the graph a blob: big shows
     // connect to everything, so a raw floor keeps exactly the edges that carry
     // no information. Cutting on overlap instead separates it into the solar
     // trade, the policy press, the international circuit and the nuclear pair.
-    const normalised = currentFilters.weighting === 'jaccard';
+    const normalized = currentFilters.weighting === 'jaccard';
     const links = showGraph.links.filter(l => {
-      if (normalised) {
+      if (normalized) {
         // A raw floor still applies: one shared person between two small shows
         // scores 17% and would otherwise outrank real relationships.
         if (l.value < 3 || l.jaccard * 100 < currentFilters.minOverlap) return false;
@@ -1306,10 +1306,10 @@ const PodcastHostNetwork = () => {
   }, [filteredGraphData, filteredShowData, showingShows]);
 
   // All podcasts for legend
-  // The legend colours the links on screen, so it lists the shows those links
+  // The legend colors the links on screen, so it lists the shows those links
   // belong to. Taking them from the unfiltered data made it disagree with the
   // Podcasts stat — 78 against 73 — and name shows with nothing drawn for them.
-  // In the shows view the nodes are the podcasts, so a colour key listing them
+  // In the shows view the nodes are the podcasts, so a color key listing them
   // would restate the labels already on screen.
   const visiblePodcastList = useMemo(() =>
     showingShows ? [] : [...new Set(
@@ -1458,7 +1458,7 @@ const PodcastHostNetwork = () => {
     ctx.restore();
 
     // Shows carry no drawn label at all: the cover art identifies them, and 91
-    // titles at once buried the artwork they were labelling. Hovering still
+    // titles at once buried the artwork they were labeling. Hovering still
     // gives the full name through nodeLabel.
     // People keep the high-zoom label — initials are not an identity.
     if (!node.isShow && globalScale >= 2.5) {
@@ -1720,8 +1720,8 @@ const PodcastHostNetwork = () => {
         )}
       </div>
 
-      {/* Legend — a colour key for podcasts, which in the shows view are the
-          nodes themselves, labelled by their own artwork. */}
+      {/* Legend — a color key for podcasts, which in the shows view are the
+          nodes themselves, labeled by their own artwork. */}
       {!loading && !error && !showingShows && (
         <PodcastLegend
           podcasts={visiblePodcastList}

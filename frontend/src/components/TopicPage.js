@@ -6,7 +6,7 @@ import { useProfile, personHref, orgHref, showHref, topicHref, slugify, avatarUr
 
 const describe = (t) => [t.name,
   `Who talks about ${t.name} on clean-energy podcasts: ${plural(t.totals.guests, 'guest')} across `
-  + `${plural(t.totals.episodes, 'episode')} on ${plural(t.totals.shows, 'show')}, with the organisations they come from.`];
+  + `${plural(t.totals.episodes, 'episode')} on ${plural(t.totals.shows, 'show')}, with the organizations they come from.`];
 
 function People({ title, people, aside }) {
   if (!people?.length) return null;

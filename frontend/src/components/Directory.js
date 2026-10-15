@@ -77,7 +77,7 @@ export function SortSelect({ value, options, onChange }) {
   );
 }
 
-// "All" plus one chip per group, each with a colour swatch and its count.
+// "All" plus one chip per group, each with a color swatch and its count.
 export function FilterChips({ chips, value, onChange, labels = {}, colors = {} }) {
   const chip = (active) => `inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs ${
     active ? 'border-teal-600 bg-teal-50 text-teal-800' : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'}`;

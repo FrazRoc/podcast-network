@@ -126,7 +126,7 @@ export default function AdminDuplicates() {
         <p className="text-sm text-gray-500">
           People who may be the same person written two ways. Nothing is merged automatically —
           a shortened first name isn't proof, so each pair needs your call. Merging keeps the
-          discarded spelling as an alias, so future scans still recognise it.
+          discarded spelling as an alias, so future scans still recognize it.
         </p>
 
         {results.map(r => (
