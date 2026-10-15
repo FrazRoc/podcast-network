@@ -52,6 +52,17 @@ flag (see `GRAPH_PAYLOAD_NORMALISED`).
 Frontend builds failed silently for some time while a stale bundle kept
 serving. Always verify with `CI=true npm run build`, not `npm start`.
 
+**American spelling in everything visitors see** (Evan, Oct 15 2026; the
+site's traffic is American): UI text, meta tags, API error messages, topic
+names and descriptions — organization, color, center, gray, modeling,
+optimization, license. The site was switched over that day, along with 10
+topics (undo: `undo_american_spelling_2026-10-15.json` in the topic-pilots
+folder). Proper nouns ("Centre for Net Zero", "Labour") and titles quoted
+verbatim from show notes keep their own spelling. Older Python names and DB
+values (`looks_like_organisation`, `GRAPH_PAYLOAD_NORMALISED`, the stored
+`labelled` pattern key) were deliberately left; British spellings elsewhere
+in this file describe that existing code.
+
 ## Data model
 
 `podcasts`, `episodes`, `hosts`, `episode_host` (PK episode_id+host_id, with
