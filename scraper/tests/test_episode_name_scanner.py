@@ -102,6 +102,22 @@ class TestCleanDescription:
         three = text.replace("Jason Bordoff and Bill Loveless", "Jason Bordoff, Bill Loveless, and Daniel Sternoff")
         assert "Sternoff" not in clean_description(three)
 
+    def test_strips_cleantecher_of_the_week(self):
+        # Real incident: Factor This's roundup honours a "Cleantecher of the
+        # Week" who is not on the episode; 32 were credited as guests. The
+        # special guest named before it is kept.
+        text = ("Tell us what you think of the show! This Week in Cleantech is a weekly "
+                "podcast featuring Paul Gerke of Factor This and Tigercomm's Mike Casey. "
+                "This week's episode features special guest Mark Chediak from Bloomberg, "
+                "who breaks down new solar tariffs. This week’s “Cleantecher of the Week” "
+                "is Kumo Sharma, founder of Arkaya Energy.")
+        result = clean_description(text)
+        assert "Mark Chediak" in result
+        assert "Kumo Sharma" not in result
+        multiple = text.replace("This week’s “Cleantecher of the Week” is",
+                                'This week we have multiple "Cleantechers of the Week." Thanks to')
+        assert "Kumo Sharma" not in clean_description(multiple)
+
     def test_keeps_single_host_credits_footer(self):
         # One name after "Hosted by" says who hosted this episode.
         text = ("In this episode of the Iran Conflict Brief the conversation turns to what "

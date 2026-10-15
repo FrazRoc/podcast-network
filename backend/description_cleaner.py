@@ -133,6 +133,12 @@ STRIP_AFTER_PATTERNS = [
     # Rob Dietz / Peter Victor / Nate Hagens (a clip from his show) as guests.
     r'\nThank(?:s| you) also to\b',
     r'\nCities 1\.5 is produced by',
+    # Factor This's weekly "This Week in Cleantech" roundup names its real
+    # guest first ("This week's episode features special guest X from Y"),
+    # then honours a "Cleantecher of the Week" who is not on the episode, then
+    # runs the week's news. Everyone after that line is talked about, not
+    # heard: 32 honourees and newsmakers had been credited as guests.
+    r'This week(?:\'s|’s| we have multiple) ["“”]?Cleantechers? of the Week',
 ]
 
 
