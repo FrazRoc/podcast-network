@@ -40,6 +40,7 @@ from similar_people import find_possible_matches, index_people
 import profiles
 import topics
 import topic_stats
+import rounds
 import topic_similarity
 from topic_names import CATEGORIES, normalize_topic
 from topic_merge import merge_tags, rename_conflict, rename_tag, would_cycle
@@ -1122,6 +1123,14 @@ def get_guest_momentum():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/stats/making-the-rounds")
+def stats_making_the_rounds(year: int = 0, min_shows: int = rounds.MIN_SHOWS):
+    """Guests on several different shows within a month — book tours, new
+    jobs, summits. See rounds.py."""
+    return _org_stat(rounds.making_the_rounds, year=year or None,
+                     min_shows=max(2, min(min_shows, 10)))
 
 
 @app.get("/api/stats/bridges")
