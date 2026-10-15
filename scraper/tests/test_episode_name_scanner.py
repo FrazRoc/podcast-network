@@ -432,6 +432,16 @@ class TestLabelledCredits:
         assert ("Kulsoom Khan", True) in result
         assert ("Kate Peterson", True) in result
 
+    def test_connect_with_drops_glued_social_link(self):
+        # Real incident: Invested In Climate glues the link text onto the
+        # name, queueing "Jason RissmanOn LinkedIn"; Smart Energy Voices'
+        # "Connect with Matthew\nOn Linkedin" created "Matthew On Linkedin".
+        text = ("Connect with Alex Wright-GladsteinOn LinkedIn\n"
+                "Connect with Jason Rissman On Twitter\n"
+                "Connect with Matthew \nOn Linkedin\n")
+        names = [n for n, _ in extract_labelled_credits(text)]
+        assert names == ["Alex Wright-Gladstein", "Jason Rissman"]
+
     def test_connect_with_rejects_org_footer(self):
         # "Connect With Smart Energy Decisions" is the show's own publisher
         # name in the same footer style — not a person.

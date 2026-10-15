@@ -434,9 +434,19 @@ _TIMESTAMP_RE = re.compile(r'^\s*\d{1,2}:\d{2}')
 # example, "Connect with Jason Rissman", is from a different one) list guests
 # one per line this way, often only in a "Resources & People Mentioned"
 # footer near the end of the description.
+# The name stays on one line ([ \t], not \s): "Connect with Matthew\nOn
+# Linkedin" had created the person "Matthew On Linkedin".
 _CONNECT_WITH_RE = re.compile(
-    r'(?:^|\n)[ \t]*Connect [Ww]ith\s+([A-Z][a-zA-Z\x27’-]+(?:\s+[A-Z][a-zA-Z\x27’-]+){1,2})\s*$',
+    r'(?:^|\n)[ \t]*Connect [Ww]ith[ \t]+([A-Z][a-zA-Z\x27’-]+(?:[ \t]+[A-Z][a-zA-Z\x27’-]+){1,3})[ \t]*$',
     re.MULTILINE
+)
+# Invested In Climate's feed glues the link text onto the name — "Connect with
+# Jason RissmanOn LinkedIn" — which queued "Jason RissmanOn LinkedIn" as a
+# guest eight times and saved three such spellings as aliases.
+_ON_SOCIAL_RE = re.compile(
+    r'\s*\bOn[ \t]+(?:LinkedIn|Twitter|X|Instagram|Facebook|Bluesky|Threads|YouTube|TikTok)$'
+    r'|(?<=[a-z])On[ \t]+(?:LinkedIn|Twitter|X|Instagram|Facebook|Bluesky|Threads|YouTube|TikTok)$',
+    re.IGNORECASE
 )
 
 
@@ -511,7 +521,7 @@ def extract_labelled_credits(text: str) -> list[tuple[str, bool]]:
                 break
 
     for m in _CONNECT_WITH_RE.finditer(text):
-        name = strip_honorific(m.group(1).strip())
+        name = strip_honorific(_ON_SOCIAL_RE.sub('', m.group(1).strip()))
         if _valid_name(name):
             found.append((name, True))
 
