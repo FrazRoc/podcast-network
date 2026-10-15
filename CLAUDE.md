@@ -184,6 +184,33 @@ it is not re-proposed.
   `transcript_review_unmarked_shows_2026-10-11.csv`,
   `undo_transcript_unmarked_2026-10-11.json`,
   `undo_transcript_followup82_2026-10-11.json`.
+- **Factor This's "This Week in Cleantech" roundups** (Oct 15 2026, 144
+  episodes): the real guest is the "This week's episode features (special
+  guest) X from Outlet" sentence, nearly always a reporter. After it comes
+  a "Cleantecher of the Week" the hosts honour, then the week's news — all
+  talked about, not on the episode. 33 such credits were removed and
+  suppressed (32 honourees/newsmakers, plus Dave Kirkpatrick, missed by the
+  spelling check), and a `STRIP_AFTER_PATTERNS` entry now cuts at that
+  line (matches 102 of 104 descriptions). 61 missing guests were added as
+  `manual` credits (41 reporters created) with the outlet as a `manual`
+  company-only role; the notes misspell several names ("Dharna Norr",
+  "Casey Crowhart", "Robison Meyer"), so those are aliases. New Factor This
+  reporters still only reach the suggestion queue — no introduced-name
+  rule reads that sentence yet. Matthew Zeitlin's 7 Feb 2025 credit stays
+  suppressed (removed by hand in Sep, Evan's call). Review list and undo:
+  `factor_this_guests_2026-10-15.csv`,
+  `undo_factor_this_cleantecher_2026-10-15.json`,
+  `undo_factor_this_guests_2026-10-15.json`.
+- **"Connect with NAME" footers glued to "On LinkedIn"** (Oct 15 2026):
+  Invested In Climate's feed writes "Connect with Jason RissmanOn
+  LinkedIn", and Smart Energy Voices breaks the line ("Connect with
+  Matthew⏎On Linkedin"), so `_CONNECT_WITH_RE` queued "Jason RissmanOn
+  LinkedIn" (approvals saved three such aliases) and created the person
+  "Matthew On Linkedin". The name now stays on one line and a trailing
+  "On LinkedIn/Twitter/X/…" is dropped (`_ON_SOCIAL_RE`). Cleaned up: the
+  aliases, that person (folded into Matthew Walters by hand — the People
+  merge would have saved the junk name as an alias), one pending
+  suggestion. Undo: `undo_linkedin_cleanup_2026-10-15.json`.
 - **The ~40 strip patterns need auditing** — several show-specific fixes
   overreach.
 - **`run()` re-inserted every match on every full-archive scan, not just new
