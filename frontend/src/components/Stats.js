@@ -5,6 +5,7 @@ import GuestAppearanceChart from './GuestAppearanceChart';
 import GuestReachChart from './GuestReachChart';
 import BridgeChart from './BridgeChart';
 import GuestMomentumGrid from './GuestMomentumGrid';
+import MakingTheRoundsChart from './MakingTheRoundsChart';
 import GuestCohortChart from './GuestCohortChart';
 import ShowTimelineGantt from './ShowTimelineGantt';
 import EpisodeCalendarHeatmap from './EpisodeCalendarHeatmap';
@@ -95,6 +96,11 @@ export default function Stats() {
           <Section title="Who's On Right Now"
             description="The sixteen guests with the most appearances in the last 18 months, by year. Guests who have appeared on at least four different shows.">
             <GuestMomentumGrid />
+          </Section>
+
+          <Section title="Making the Rounds"
+            description="Guests who turned up on several different shows within a month: book tours, new jobs, summits, and the occasional tribute.">
+            <MakingTheRoundsChart />
           </Section>
 
           <Section title="Where Each Year's Guests Came From"

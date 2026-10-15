@@ -537,6 +537,15 @@ association / other — `parent_org_id`, `website_domain`, `not_an_org`),
   publisher column; Most-Booked leaves those guests out by default.
   Role kinds come from title wording (`org_stats.ROLE_KINDS`, first match
   wins) — approximate by design.
+- **"Making the Rounds"** (Stats, People tab, Oct 2026; `backend/rounds.py`,
+  `/api/stats/making-the-rounds?year&min_shows`, `MakingTheRoundsChart.js`):
+  a guest on 3+ different shows within 30 days — each person's best window
+  taken, then the next from what's left. Own shows (`host_podcast`) and
+  `appears_on_episode = false` credits are left out. Rare by nature: ~60
+  since 2019, six with 4+ (Grunwald's 2025 book tour, Jigar Shah after the
+  LPO). Recent weeks undercount until new episodes are credited. The
+  bursts with the most shows are also where false credits show up first —
+  the Factor This Cleantecher credits were found this way.
 - **Politicians are one title at one organisation** (Evan, Sep 2026,
   `backend/politicians.py`): Representative @ U.S. House, Senator @ U.S.
   Senate, state roles @ "State of X", city roles @ "City of X" (London's
