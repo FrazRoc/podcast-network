@@ -40,7 +40,7 @@ function Browse({ broad, category }) {
 }
 
 export default function TopicDirectory() {
-  useEffect(() => setMeta('Topics · Podcast Network',
+  useEffect(() => setMeta('Topics · Climate Crosscurrents',
     'What clean-energy and climate podcasts talk about: topics from geothermal to permitting, with the people and shows behind each.'), []);
   const [params, set] = useUrlParams({ q: '', category: '', sort: 'episodes' });
   const state = useDirectory('/api/topics', params, 100);

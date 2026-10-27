@@ -9,7 +9,7 @@ const COLORS = { ...ROLE_COLORS, host: '#0d9488' };
 
 export default function PeopleDirectory() {
   useShowOrgs();
-  useEffect(() => setMeta('People · Podcast Network',
+  useEffect(() => setMeta('People · Climate Crosscurrents',
     'Everyone who has hosted or been a guest on a clean-energy podcast, with their current role and appearances.'), []);
   const [params, set] = useUrlParams({ q: '', kind: '', sort: 'appearances', topic: '' });
   const state = useDirectory('people', params);

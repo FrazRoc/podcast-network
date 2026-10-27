@@ -14,7 +14,7 @@ const COMPARE = {
 };
 
 export default function ShowDirectory() {
-  useEffect(() => setMeta('Shows · Podcast Network',
+  useEffect(() => setMeta('Shows · Climate Crosscurrents',
     'Every clean-energy and climate podcast we track: who hosts it, how often it publishes, and how many guests it has had.'), []);
   const [params, set] = useUrlParams({ q: '', sort: 'guests' });
   const [state, setState] = useState({ rows: null, error: false });

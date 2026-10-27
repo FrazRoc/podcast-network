@@ -978,8 +978,8 @@ const PodcastHostNetwork = () => {
     try { return !window.matchMedia('(max-width: 639px)').matches; } catch { return true; }
   });
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  useEffect(() => setMeta('Podcast Network · who appears on clean-energy podcasts',
-    'An interactive map of the hosts and guests of clean-energy and climate podcasts, and the shows that connect them.'), []);
+  useEffect(() => setMeta('Climate Crosscurrents · Follow the conversations shaping the energy transition',
+    'Every guest, every show, every connection in clean-energy podcasting.'), []);
   const [searchQuery, setSearchQuery] = useState('');
   const [lastUpdated, setLastUpdated] = useState(null);
   const [dimensions, setDimensions] = useState({
@@ -1579,6 +1579,10 @@ const PodcastHostNetwork = () => {
             }}
           />
         ) : (
+          <>
+          <p className="text-sm text-gray-600 mb-3">
+            Every guest, every show, every connection in clean-energy podcasting.
+          </p>
           <FilterPanel
             onFiltersChange={handleFiltersChange}
             networkStats={networkStats}
@@ -1593,6 +1597,7 @@ const PodcastHostNetwork = () => {
             broadTopics={broadTopics}
             loadingMembers={loadingMembers}
           />
+          </>
         )}
 
         <div className="mt-auto pt-3 text-center space-y-1">

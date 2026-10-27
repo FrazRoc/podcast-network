@@ -42,7 +42,7 @@ function initialView() {
 
 export default function Stats() {
   const [view, setView] = useState(initialView);
-  useEffect(() => setMeta('Stats · Podcast Network',
+  useEffect(() => setMeta('Stats · Climate Crosscurrents',
     'Who gets booked on clean-energy podcasts: the organizations, guests, shows and topics, in charts.'), []);
 
   // replaceState, as on the Network page: switching tabs shouldn't stack up

@@ -8,7 +8,7 @@ import { orgHref, fmtMonthYear, plural, setMeta } from '../profileUtils';
 const SORTS = [['people', 'Most people'], ['discussed', 'Most discussed'], ['recent', 'Most recent'], ['name', 'A–Z']];
 
 export default function OrgDirectory() {
-  useEffect(() => setMeta('Organizations · Podcast Network',
+  useEffect(() => setMeta('Organizations · Climate Crosscurrents',
     'The companies, investors, universities and agencies whose people are guests on clean-energy podcasts.'), []);
   const [params, set] = useUrlParams({ q: '', type: '', sort: 'people' });
   const state = useDirectory('orgs', params);

@@ -5,7 +5,7 @@ import { setMeta } from '../profileUtils';
 // Any address the app doesn't know. (The static host still answers 200 —
 // every path serves index.html — so this is for people, not crawlers.)
 export default function NotFound() {
-  useEffect(() => setMeta('Page not found · Podcast Network', ''), []);
+  useEffect(() => setMeta('Page not found · Climate Crosscurrents', ''), []);
   return (
     <SiteShell>
       <section className="bg-white rounded-2xl border border-gray-200 p-8 text-center space-y-3">

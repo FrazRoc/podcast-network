@@ -157,7 +157,7 @@ export function useProfile(kind, prefix, describe, endpoint = (id) => `/api/${ki
           try { window.history.replaceState(null, '', want + window.location.search); } catch { /* sandboxed */ }
         }
         const [title, description] = describe(data);
-        setMeta(`${title} · Podcast Network`, description);
+        setMeta(`${title} · Climate Crosscurrents`, description);
         setState({ data, error: null });
       })
       .catch(e => { if (!canceled) setState({ data: null, error: e.message === 'not_found' ? 'not_found' : 'error' }); });
